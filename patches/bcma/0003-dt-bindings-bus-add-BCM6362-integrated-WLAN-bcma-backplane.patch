@@ -1,0 +1,126 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] dt-bindings: bus: add BCM6362 integrated WLAN bcma backplane
+
+Document the "brcm,bcm6362-wlan-bus-axi" node consumed by the bcma host
+driver added in the previous patch.
+
+The node describes two register windows: the ChipCommon block of the WLAN
+backplane, from which bcma scans the EROM, and the SoC-level control
+window through which the host driver gates the macro and synthesizes the
+BCMA_IOCTL / BCMA_RESET_CTL accesses for the wrapper-less cores. Clock,
+resets and power domain are the SoC-level gating the boot loader leaves
+untouched.
+
+The node is a bus with a "ranges" translation for the enumerated cores
+and an interrupt nexus mapping the 802.11 core window to the peripheral
+interrupt controller.
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+ .../bus/brcm,bcm6362-wlan-bus-axi.yaml        | 97 +++++++++++++++++++
+ 1 file changed, 97 insertions(+)
+
+--- /dev/null
++++ b/Documentation/devicetree/bindings/bus/brcm,bcm6362-wlan-bus-axi.yaml
+@@ -0,0 +1,97 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/bus/brcm,bcm6362-wlan-bus-axi.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Broadcom BCM6362 integrated WLAN bcma backplane
++
++maintainers:
++  - Alessio Ferri <alessio.ferri@mythread.it>
++
++description:
++  The BCM6362 SoC integrates a 2.4 GHz Broadcom WLAN macro on a dedicated
++  AXI/OCP backplane enumerated by bcma. The backplane registers are
++  big-endian peripherals and the cores bcma has to gate publish no DMP
++  wrapper, so gating goes through a SoC-level control window instead. The
++  boot loader leaves the macro clock-gated and in reset.
++
++properties:
++  compatible:
++    const: brcm,bcm6362-wlan-bus-axi
++
++  reg:
++    items:
++      - description: ChipCommon block of the WLAN backplane
++      - description: SoC-level WLAN control window
++
++  reg-names:
++    items:
++      - const: ccb
++      - const: wlan-ctrl
++
++  clocks:
++    maxItems: 1
++
++  resets:
++    items:
++      - description: WLAN SHIM reset
++      - description: WLAN UBUS reset
++
++  reset-names:
++    items:
++      - const: wlan
++      - const: wlan-ubus
++
++  power-domains:
++    maxItems: 1
++
++  ranges: true
++
++  '#address-cells':
++    const: 1
++
++  '#size-cells':
++    const: 1
++
++  '#interrupt-cells':
++    const: 1
++
++  interrupt-map: true
++
++  interrupt-map-mask: true
++
++required:
++  - compatible
++  - reg
++  - reg-names
++  - clocks
++  - resets
++  - reset-names
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/bcm6362-clock.h>
++    #include <dt-bindings/reset/bcm6362-reset.h>
++    #include <dt-bindings/soc/bcm6362-pm.h>
++
++    wlan: bus@10004000 {
++        compatible = "brcm,bcm6362-wlan-bus-axi";
++        reg = <0x10004000 0x1000>, <0x10007000 0x100>;
++        reg-names = "ccb", "wlan-ctrl";
++
++        clocks = <&periph_clk BCM6362_CLK_WLAN_OCP>;
++
++        resets = <&periph_rst BCM6362_RST_WLAN_SHIM>,
++                 <&periph_rst BCM6362_RST_WLAN_UBUS>;
++        reset-names = "wlan", "wlan-ubus";
++
++        power-domains = <&periph_pwr BCM6362_POWER_DOMAIN_WLAN_PADS>;
++
++        ranges = <0x00000000 0x10004000 0x00002000>;
++        #address-cells = <1>;
++        #size-cells = <1>;
++        #interrupt-cells = <1>;
++
++        interrupt-map-mask = <0x000fffff 0xffff>;
++        interrupt-map = <0x00005000 0 &periph_intc 0 7>;
++    };

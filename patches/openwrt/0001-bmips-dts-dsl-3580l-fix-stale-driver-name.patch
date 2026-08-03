@@ -1,0 +1,31 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Subject: [PATCH] bmips: dts: dsl-3580l: fix stale driver name in wlan comments
+
+The comments still call the bcma host driver "bcm6362-wlan-shim", a name
+that no longer exists: the driver is host_soc_brcm6362_wlan.c and the DT
+compatible is "brcm,bcm6362-wlan-bus-axi".
+
+Comment-only change.
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/target/linux/bmips/dts/bcm6362-dlink-dsl-3580l.dts
++++ b/target/linux/bmips/dts/bcm6362-dlink-dsl-3580l.dts
+@@ -134,7 +134,7 @@
+ 	 * applicano i fixup board-specific via brcm,sprom-fixups.
+ 	 *
+ 	 * Il radio integrato non e' su PCIe — sta sul backplane bcma
+-	 * AXI/OCP del SoC, esposto dal driver bcm6362-wlan-shim
++	 * AXI/OCP del SoC, esposto dal driver bcma host_soc_brcm6362_wlan
+ 	 * (vedi nodo &wlan in bcm6362.dtsi). Il match della SPROM
+ 	 * avviene per phandle (bcma-bus = <&wlan>), non per
+ 	 * pci-bus/pci-dev. Vedi l'estensione SoC in
+@@ -581,7 +581,7 @@
+ /*
+  * Radio 2.4 GHz integrato del BCM6362 (14e4:435f).
+  *
+- * Esposto via bcm6362-wlan-shim sul SoC backplane bcma, NON via
++ * Esposto via host_soc_brcm6362_wlan sul backplane bcma del SoC, NON via
+  * PCI. La SPROM viene servita da bcm6362-sprom sopra, matchato
+  * per phandle (bcma-bus = <&wlan>). Vedi commenti dettagliati
+  * sulla bring-up sequence e topologia in bcm6362.dtsi.

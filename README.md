@@ -1,0 +1,63 @@
+# b43-6362-wip
+
+Lavoro in corso per completare in **upstream** il supporto al radio 2.4 GHz
+integrato nel SoC **Broadcom BCM6362** (d11 core rev 22, N-PHY rev 8, radio
+2057 rev 8), con obiettivo finale **HT20 2x2 MIMO**.
+
+HT40 è fuori scope per scelta: i client disponibili sono 2.4 GHz e su questa
+banda HT40 non porta nulla di utile. Anche il 5 GHz è fuori scope, con una
+conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
+`dev_id 0x435f`).
+
+## Stato in una tabella
+
+| pezzo | stato | dove |
+|---|---|---|
+| radio 2057 rev 8: init table, chantab, IPA tx gain, rf pwr offset | **merged upstream** (7 patch, 10 giu 2026) | `docs/upstream-status.md` |
+| firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; disponibilità blob da verificare | `docs/firmware-rev22.md` |
+| enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/bcma/`, `docs/soc-glue.md` |
+| SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
+| gain control N-PHY rev 7+ | **stub vuoto in mainline** | `docs/gap-inventory.md` |
+| RFPLL loopfilter radio rev 5/7/8 | mancante in mainline | `docs/gap-inventory.md` |
+| HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
+
+## Come è organizzato
+
+- `docs/` — stato, inventario dei buchi, piano HT20 2x2, questioni di
+  upstreaming, protocollo di cattura, reportistica.
+- `patches/bcma/` — la serie per l'enumerazione (core wrapperless big-endian,
+  host driver, binding DT).
+- `patches/openwrt/` — fix minori sul target bmips.
+- `reverse-tools/` — tracer `wl-diag` (due varianti, **tarate su N-PHY**),
+  pipeline di decodifica, estrattore/verificatore delle tabelle dal blob OEM,
+  analisi di copertura sul tree kernel.
+- `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board.
+  Vuoti: si riempiono con catture reali, non con numeri plausibili.
+
+## Riproducibilità dello stato
+
+Tutto ciò che questo repo afferma sul kernel è verificato sull'albero, non sulla
+documentazione (che invecchia). Riferimento: `torvalds/linux` @ `848acc8ffe1b`,
+3 ago 2026. Per rifare la verifica:
+
+```sh
+./scripts/fetch-upstream-state.sh ~/src/linux      # sparse checkout
+./reverse-tools/check_gaps.py --tree ~/src/linux --format md
+./reverse-tools/brcmsmac_xref.py --tree ~/src/linux --format md
+```
+
+Per riverificare le tabelle merged contro il blob OEM:
+
+```sh
+./reverse-tools/blob_tables.py wlDSL-3580_EU.o_save \
+    --verify regs_2057_rev8 \
+    --against ~/src/linux/drivers/net/wireless/broadcom/b43/radio_2057.c:r2057_rev8_init
+```
+
+## Convenzioni
+
+- **SALAME** in grassetto marca un'ipotesi non verificata su hardware o su
+  codice. Se leggi una conclusione senza SALAME, deve esserci un riferimento
+  file:riga, uno sha, o l'output di uno strumento di questo repo.
+- I commenti nel codice descrivono cosa fa il codice adesso, non com'era prima:
+  la storia sta nei messaggi di commit.
