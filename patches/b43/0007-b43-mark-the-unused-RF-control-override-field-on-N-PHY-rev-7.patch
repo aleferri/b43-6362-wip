@@ -1,0 +1,39 @@
+From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: mark the unused RF control override field on N-PHY rev 7+
+
+The rev 7+ RF control override table has an entry for field 0x0800, which
+drives PHY registers 0x07B and 0x07E, the RX gain 1 and 2 controls. No
+code path in the driver ever passes that field.
+
+An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362 shows
+it writing both registers during calibration, twelve times each. What b43
+should do with them is not clear from the capture alone, since the driver
+has no equivalent calibration to hang them off. Leave a marker so the next
+person does not have to rediscover that the entry is dead.
+
+Comment only.
+
+Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+---
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+@@ -3206,6 +3206,7 @@
+ 	{ 0x0040, 0x07A, 0x07D, 0x0040, 6 },
+ 	{ 0x0080, 0x07A, 0x07D, 0x0080, 7 },
+ 	{ 0x0400, 0x0F8, 0x0FA, 0x0070, 4 },
++	/* TODO: unused field, the vendor writes 0x07B/0x07E during cal */
+ 	{ 0x0800, 0x07B, 0x07E, 0xFFFF, 0 },
+ 	{ 0x1000, 0x07C, 0x07F, 0xFFFF, 0 },
+ 	{ 0x6000, 0x348, 0x349, 0x00FF, 0 },
+
+Note per il repo, non per la mailing list:
+
+  - Registri: 0x07B = B43_NPHY_RFCTL_RXG1, 0x07E = RFCTL_RXG2.
+  - Nella cattura: 12 scritture ciascuno, valori 0x0000 e 0x003c, prima
+    occorrenza a #11769 e #12819, cioe' dentro la regione della calibrazione,
+    intercalate a 0x343, 0x0e7, 0x342 che sono gli enable dell'override rev7.
+  - Perche' solo un commento: la voce della tabella c'e' ed e' giusta, manca
+    chi la usa, e chi la usa nel vendore e' una calibrazione che b43 non ha.
+    Aggiungere una chiamata senza sapere in che fase e con che valori sarebbe
+    inventare.

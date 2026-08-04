@@ -38,8 +38,30 @@ TEST_LINE = re.compile(r'^cpu\d+\s+(.+?)\s*$')
 #   the (set X) group gives the OR-in bits directly → val=X mask=0.
 # PHY.AND line "PHY.AND ... val=<masked> (clr X)": clr X gives the
 # bits to clear → val=~X (the kmask) mask=0.
-PHY_OR  = re.compile(r'^PHY\.OR\s+addr=(0x[0-9a-f]+)\s+val=0x[0-9a-f]+\s*\(set\s+(0x[0-9a-f]+)\)')
-PHY_AND = re.compile(r'^PHY\.AND\s+addr=(0x[0-9a-f]+)\s+val=0x[0-9a-f]+\s*\(clr\s+(0x[0-9a-f]+)\)')
+# Riposizionamento su N-PHY. Nelle catture AC era il VENDORE a emettere
+# PHY.OR/PHY.AND e l'harness a emettere PHY.MOD; qui e' il contrario: il ramo
+# N-PHY del blob usa phy_reg_mod, mentre b43 usa b43_phy_set e b43_phy_mask. La
+# normalizzazione va quindi nell'altro verso, e vale per entrambi i lati perche'
+# normalize_op e' applicata a tutti e due.
+#
+# Convenzione della forma canonica, quella del vendore: val = valore del campo,
+# mask = campo modificato.
+#   b43_phy_set(A, V)   -> PHY.OR  addr=A val=V      == mod(A, campo V, val V)
+#   b43_phy_mask(A, K)  -> PHY.AND addr=A val=K      == mod(A, campo ~K, val 0)
+# b43_phy_maskset gia' emette la forma canonica (wrap.c stampa mask=~mask).
+# Due forme, perche' i due lati stampano la stessa op in modo diverso:
+#   vendore: PHY.OR  addr=A val=<valore> (set S)
+#   harness: PHY.OR  addr=A val=S
+# Nel primo caso i bit li da' l'annotazione, nel secondo il campo val.
+SET_OP = re.compile(r'^(PHY|RAD)\.OR\s+addr=(0x[0-9a-fA-F]+)\s+val=(0x[0-9a-fA-F]+)'
+                    r'(?:\s*\(set\s+(0x[0-9a-fA-F]+)\))?\s*$')
+CLR_OP = re.compile(r'^(PHY|RAD)\.AND\s+addr=(0x[0-9a-fA-F]+)\s+val=(0x[0-9a-fA-F]+)'
+                    r'(?:\s*\(clr\s+(0x[0-9a-fA-F]+)\))?\s*$')
+
+# Il marcatore degli array di initvals del vendore non e' un'op hardware: e'
+# contabilita' del suo driver. Le op che ne discendono sono nel trace per conto
+# loro (vedi docs/blob-inventory.md), quindi il marcatore si scarta.
+VENDOR_BOOKKEEPING = re.compile(r'^PHY\.ARRW\b')
 
 # Op di alto livello e loro "ombra" a livello di core register: il tracer
 # vendor logga entrambe, l'harness (come il driver) solo la prima. Le ombre sono
@@ -124,16 +146,20 @@ def canon_values(op: str) -> str:
     return HEXNUM.sub(lambda m: '0x%x' % int(m.group(1), 16), op)
 
 def normalize_op(op: str) -> str:
-    m = PHY_OR.match(op)
+    m = SET_OP.match(op)
     if m:
-        addr, setbits = m.groups()
+        kind, addr, val, annotated = m.groups()
+        setbits = annotated or val      # l'annotazione, se c'e', e' la verita'
         return canon_ws(canon_values(
-            f"PHY.MOD  addr={addr} val={setbits} mask=0x0000"))
-    m = PHY_AND.match(op)
+            f"{kind}.MOD  addr={addr} val={setbits} mask={setbits}"))
+    m = CLR_OP.match(op)
     if m:
-        addr, clrbits = m.groups()
+        kind, addr, val, annotated = m.groups()
+        # Vendore: (clr X) da' i bit azzerati. Harness: val e' cio' che resta,
+        # quindi i bit azzerati sono il complemento.
+        cleared = int(annotated, 16) if annotated else (~int(val, 16)) & 0xffff
         return canon_ws(canon_values(
-            f"PHY.MOD  addr={addr} val=0x{(~int(clrbits, 16)) & 0xffff:04x} mask=0x0000"))
+            f"{kind}.MOD  addr={addr} val=0x0000 mask=0x{cleared:04x}"))
     # L'harness nomina l'abilitazione GPIO come il simbolo bcma
     # (bcma_chipco_gpio_outen), il tracer vendor come il registro (OE).
     op = re.sub(r'^GPIO\.OUTEN\b', 'GPIO.OE', op)
@@ -165,6 +191,45 @@ def extract_episode(raw: str) -> int:
     m = re.search(r'#(\d+)', raw)
     return int(m.group(1)) if m else -1
 
+RD_OP = re.compile(r'^(PHY|RAD|MAC)\.RD\s+addr=(0x[0-9a-fA-F]+)')
+WR_OP = re.compile(r'^(PHY|RAD|MAC)\.WR\s+addr=(0x[0-9a-fA-F]+)')
+MOD_OP = re.compile(r'^(PHY|RAD|MAC)\.MOD\s+addr=(0x[0-9a-fA-F]+)')
+
+
+def drop_rmw_shadows(ops):
+    """Scarta la read e la write che implementano una MOD del vendore.
+
+    Il tracer aggancia sia gli accessor di alto livello (phy_reg_mod,
+    mod_radio_reg) sia quelli bassi che loro chiamano, quindi una sola
+    read-modify-write finisce nel trace come tre op:
+
+        RAD.MOD addr=0x2b val=0x0 mask=0x1     <- l'intenzione
+        RAD.RD  addr=0x2b val=0x9              <- la sua lettura interna
+        RAD.WR  addr=0x2b val=0x8              <- la sua scrittura interna
+
+    b43 fa la stessa cosa con b43_radio_mask e ne registra una sola. Le due
+    ombre sono artefatto di strumentazione e vanno via, come gia' si fa per le
+    SI.COREREG di PMU e GPIO. Si scartano SOLO se seguono immediatamente una MOD
+    sullo stesso indirizzo e famiglia: una RD o una WR isolata resta, perche'
+    la' e' l'op vera.
+    """
+    out = []
+    pending = None          # (famiglia, indirizzo) della MOD appena vista
+    for op in ops:
+        m = MOD_OP.match(op)
+        if m:
+            pending = (m.group(1), m.group(2))
+            out.append(op)
+            continue
+        if pending:
+            r = RD_OP.match(op) or WR_OP.match(op)
+            if r and (r.group(1), r.group(2)) == pending:
+                continue    # ombra della MOD precedente
+        pending = None
+        out.append(op)
+    return out
+
+
 def load_vendor(path, ep_range):
     lo, hi = ep_range or (0, 10**9)
     out = []
@@ -175,8 +240,10 @@ def load_vendor(path, ep_range):
         ep = extract_episode(line)
         if not (lo <= ep <= hi):
             continue
+        if VENDOR_BOOKKEEPING.match(m.group(1).strip()):
+            continue
         out.append(normalize_op(m.group(1)))
-    return drop_shadow_ops(out)
+    return drop_rmw_shadows(drop_shadow_ops(out))
 
 def load_test(path):
     out = []

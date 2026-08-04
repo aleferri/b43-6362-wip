@@ -24,6 +24,29 @@ sono confronti veri; le altre sono ancora lettura a mano del codice.
 
 Totale cattura: 70796 op su 39.8 s, due sequenze di init complete.
 
+## Confronto posizionale, per finestra
+
+`test/phase_compare.py`, che è il metodo di `b43-ac-wip`: diff op-per-op dentro
+una finestra allineata, sulla cattura passata per `merge_retvals.py`.
+
+| finestra | op | run più lunga | esito |
+|---|---|---|---|
+| gain-control | 87 | 87/87 | **ok** |
+| papd-comp | 16 | 16/16 | **ok** |
+| papd-tables | 5 | 5/5 | **ok** |
+| ipa-bias | 3 | 3/3 | **ok** |
+| chanswitch-ch6 | 39 | 11/39 | mancano esattamente 10, i campi 5 GHz |
+| tssi-setup | 19 | 5/19 | mancano 4, in più 15 |
+| rssi-cal | 16 | 1/16 | mancano 15, valori dalla cal |
+
+Run più lunga globale sul primo init, senza scegliere una fase: **1540 op
+consecutive**, e 3342 op in comune su 23126 in 332 blocchi.
+
+Le quattro finestre delle patch passano op per op, valori inclusi. È la garanzia
+che la copertura per insiemi non dà.
+
+## Copertura per insiemi
+
 Copertura misurata con `test/coverage.py` contro il primo init (132-26100), con
 `patches/b43/0001` applicata al tree. Su mainline pulito il flow `full` fa
 175/218 registri PHY e 122/533 celle: la differenza è quella patch.

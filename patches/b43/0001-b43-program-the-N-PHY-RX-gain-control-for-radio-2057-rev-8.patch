@@ -33,7 +33,7 @@ diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/br
 index 22359bd..9cfeef9 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c
-@@ -2479,7 +2479,46 @@ static void b43_nphy_gain_ctl_workarounds_rev19(struct b43_wldev *dev)
+@@ -2479,7 +2479,46 @@
  
  static void b43_nphy_gain_ctl_workarounds_rev7(struct b43_wldev *dev)
  {
@@ -50,7 +50,7 @@ index 22359bd..9cfeef9 100644
 +
 +	/* Values are only known for radio rev 8 in 2 GHz, 20 MHz. */
 +	if (phy->radio_rev != 8 || b43_is_40mhz(dev) ||
-+	    b43_phy_read(dev, B43_NPHY_BANDCTL) & B43_NPHY_BANDCTL_5GHZ)
++	    b43_current_band(dev->wl) != NL80211_BAND_2GHZ)
 +		return;
 +
 +	/* Set Clip 2 detect */
@@ -88,6 +88,10 @@ Note per il repo, non per la mailing list:
     e in testa c'e' l'early return su radio_rev != 8, 40 MHz e 5 GHz. Gli altri
     N-PHY escono prima di scrivere qualunque cosa. Controllato anche con
     reverse-tools/check_patch_gating.py.
+  - La guardia usa b43_current_band(), non una lettura di BANDCTL. La prima
+    versione leggeva il registro come fa brcmsmac, e il confronto posizionale
+    l'ha vista subito: una PHY.RD in piu' che il vendore non fa, e che b43
+    altrove non fa nemmeno.
   - Verificata con l'harness in test/: applicata al tree, il flow `init`
     riproduce il blocco della cattura op per op, 21 op nello stesso ordine, con
     i payload delle otto table-op identici. Senza la patch quei registri non
