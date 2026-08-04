@@ -17,8 +17,10 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; disponibilità blob da verificare | `docs/firmware-rev22.md` |
 | enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/bcma/`, `docs/soc-glue.md` |
 | SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
-| gain control N-PHY rev 7+ | **stub vuoto in mainline** | `docs/gap-inventory.md` |
-| RFPLL loopfilter radio rev 5/7/8 | mancante in mainline | `docs/gap-inventory.md` |
+| gain control N-PHY rev 7+ | stub vuoto in mainline, **patch in `patches/b43/0001`** dai valori catturati (non provata) | `docs/trace-init-2g.md` |
+| chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, b43 non li tocca | `docs/trace-init-2g.md` |
+| chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
+| RF power offset rev 8 | valori del rev 5 dove il vendore usa il rev 7, **questione aperta** | `docs/rf-pwr-offset-rev8.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato
@@ -31,8 +33,9 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 - `reverse-tools/` — tracer `wl-diag` (due varianti, **tarate su N-PHY**),
   pipeline di decodifica, estrattore/verificatore delle tabelle dal blob OEM,
   analisi di copertura sul tree kernel.
-- `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board.
-  Vuoti: si riempiono con catture reali, non con numeri plausibili.
+- `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board. La
+  prima cattura c'è (70796 record, due cicli down/up su canali operativi 1 e 6,
+  zero perdite) e ha già corretto una patch: `docs/trace-init-2g.md`.
 
 ## Riproducibilità dello stato
 

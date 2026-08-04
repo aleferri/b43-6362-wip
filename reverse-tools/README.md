@@ -57,10 +57,25 @@ loro README per l'elenco delle differenze rispetto alla copia AC-PHY di
 Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
 
 - **decode-wl-diag.py** — record binari (28 B BE) → righe testuali.
+- **verify_decode.py** — ricostruisce i campi dal testo decodificato e li
+  confronta col binario record per record. È la condizione per buttare il
+  binario: se dice "nessuna perdita", il testo lo sostituisce; se elenca campi,
+  il decoder va sistemato. Ha già trovato due buchi: il selettore di spazio
+  delle `OBJ.RD`/`OBJ.WR` e il puntatore al buffer delle `TPL.RAMW`, che la
+  branch generica del decoder non stampava.
 - **merge_retvals.py** — ripiega i `RETVAL` nella lettura che li precede.
 - **fold_mod_reads.py** — ripiega la read implicita di ogni `MOD`.
-- **collapse_trace.py** — compatta le table-op. Per il confronto op-per-op col
-  port usare il trace **grezzo**, non il collassato.
+- **collapse_trace.py** — compatta le table-op (porte N-PHY 0x72/0x73/0x74). Per
+  il confronto op-per-op col port usare il trace **grezzo**, non il collassato.
+- **trace_tables.py** — riassocia ogni `TBL.WR` alle `PHY.WR` su 0x72/0x73/0x74
+  che la implementano e stampa i valori, con controllo di coerenza fra
+  intestazione e dati (indirizzo = `(id << 10) | off`, conteggio = `len`). Con
+  `--c-array` li emette come array C. È così che sono stati ricavati i numeri di
+  `patches/b43/0001`.
+- **verify_chantab_trace.py** — per ogni `CHANSPEC` del trace confronta i 18
+  campi della chantab 2.4 GHz di b43 con le scritture radio che seguono, valore
+  e ordine. Verifica su tutti i canali che la cattura tocca invece che su uno
+  scelto a mano, ed elenca a parte i registri 5 GHz che il vendore azzera.
 - **diff_traces.py** — differenziale fra due catture, per isolare le dipendenze
   da board o da canale.
 - **mempeek.c** — lettore `/dev/mem` a 32 bit per ispezionare una finestra del

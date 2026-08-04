@@ -33,6 +33,17 @@ target sta su kernel 6.12. Diventano ridondanti al primo bump a >= 6.16.
 `patches/bcma/0001..0003`: enumerazione del backplane. Vedi `soc-glue.md` per il
 contenuto e `upstreaming.md` per gli ostacoli.
 
+## Non merged, scritte qui e non ancora provate
+
+| patch | cosa fa | stato |
+|---|---|---|
+| `patches/b43/0001` | programma il gain control RX per radio 2057 rev 8 in 2.4 GHz bw20, sui valori della cattura | applica pulito, **non compilata, non provata**; gate `reports/30-rx-sensitivity.md` |
+| `patches/b43/0002` | porta gli offset di potenza del rev 8 sui valori rev 7 del vendore | **bozza**, prove contrastanti, vedi `rf-pwr-offset-rev8.md`; oggi è codice morto |
+
+Nessuna delle due va spedita prima della misura corrispondente. La prima ha già
+cambiato forma una volta: era scritta su brcmsmac, la cattura ha mostrato valori
+diversi (`trace-init-2g.md`).
+
 ## Non esistente da nessuna parte
 
 Il supporto HT in b43. Nessuna occorrenza di `ht_cap` o `IEEE80211_HT` nel

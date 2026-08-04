@@ -18,10 +18,15 @@ header (`B43_TXH_PHY1_MODE_{SISO,CDD,STBC,SDM}`, CRATE, MODUL), e il firmware
 
 ### M0 — base legacy sana (prerequisito, nessuna riga di HT)
 
-Chiude i buchi 1-4 di `gap-inventory.md`: gain control rev7, RFPLL loopfilter,
-rcal, tx cal radio setup. Criterio di uscita: `reports/30-rx-sensitivity.md` e
-`60-regression-legacy.md` compilati, con il legacy 2.4 GHz non peggiore di
-prima su tutti i canali e sensibilità RX misurata invece che sperata.
+Delle sei voci iniziali di `gap-inventory.md` ne è rimasta una da chiudere: il
+gain control rev7, che è `patches/b43/0001`, scritta sui valori della cattura.
+Le altre si sono rivelate non-buchi leggendo brcmsmac e il trace (loopfilter,
+rcal, rccal) o mal attribuite (tx cal radio setup).
+
+Criterio di uscita: `reports/30-rx-sensitivity.md` e `60-regression-legacy.md`
+compilati, con il legacy 2.4 GHz non peggiore di prima su tutti i canali e
+sensibilità RX misurata invece che sperata. Prima serve compilare la patch:
+oggi non lo è.
 
 Motivo per cui viene prima: se l'AGC è tarato male, ogni misura MIMO successiva
 misura l'AGC, non il MIMO.

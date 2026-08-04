@@ -24,16 +24,18 @@ applicabile.
 | `wlc_phy_table_{read,write}_nphy` | pulito | wrapper sui registri 0x72/0x73/0x74 |
 | `si_pmu_spuravoid` | pulito | posizione dell'arg non verificata |
 
-Due cose che il trace mostra, e che hanno evitato codice inutile:
+Due cose che il trace ha chiarito, e che hanno evitato codice inutile:
 
 - `phy_reg_write_array(pi, tbl, n)` esegue le sue op **passando dagli accessor
   già agganciati**: dopo ogni marcatore `PHY.ARRW` nel trace compaiono le
   `PHY.MOD`/`PHY.WR` corrispondenti. Non c'era nessun buco di copertura da
-  colmare con un interprete in kernel, solo da etichettare.
-- le table-op passano per i registri 0x72 (indirizzo), 0x73 e 0x74 (dati), gli
-  stessi che usa `b43_ntab_write*`: nel trace ogni `TBL.WR` è seguita da quelle
-  `PHY.WR`. I record `TBL.*` sono quindi etichette, e per il confronto col port
-  vanno usate le `PHY.WR`.
+  colmare con un interprete in kernel, solo da etichettare. E `n` è il numero
+  di word, non di record.
+- le table-op passano per i registri 0x72 (indirizzo, `(id << 10) | off`), 0x73
+  e 0x74 (dati), gli stessi che usa `b43_ntab_write*`: nel trace ogni `TBL.WR`
+  è seguita da quelle `PHY.WR`. I record `TBL.*` sono quindi etichette, e per
+  il confronto col port vanno usate le `PHY.WR`. Verificato su 14 table-op su
+  14 con `trace_tables.py`.
 
 ## Dati per PHY r8 / radio 2057 r8
 
