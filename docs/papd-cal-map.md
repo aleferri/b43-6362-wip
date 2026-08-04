@@ -26,10 +26,10 @@ Regione del primo init: **#10962 - #14092**, ~3100 record.
 | #11741-11755 | `0x186`-`0x194`: i **coefficienti del filtro digitale TX**, riga 3 | `wlc_phy_ipa_restore_tx_digi_filts_nphy` |
 | #11756-11837 | override RF, save/mod AFE `0xa6 0x8f 0xa7 0xa5`, `TXRXCOUPLE_2G` del radio | `wlc_phy_papd_cal_setup_nphy`, core 0 |
 | #11838-12159 | `TBL.WR id=0x11` (SAMPLEPLAY), 160 word: il tono, 4000 kHz ampiezza 181 | `wlc_phy_tx_tone_nphy` chiamata da `papd_cal_setup` |
-| #12160-~12788 | **loop del core 0**: per ogni passo di gain, imposta, suona i campioni, rilegge 40+ volte, calcola, scrive epsilon | `wlc_phy_a3_nphy` |
+| #12160-~12788 | **loop del core 0**: per ogni passo di gain, imposta, suona i campioni, rilegge 40+ volte, calcola, scrive epsilon | `wlc_phy_a3_nphy` poi `wlc_phy_a2_nphy` |
 | #12789-12791 | ripristino di `0x17d`/`0x19d` a `0xaa` | `wlc_phy_papd_cal_cleanup_nphy`, core 0 |
 | ~#12800-13273 | setup del core 1: stessa sequenza col core scambiato, tono a #12952 | `wlc_phy_papd_cal_setup_nphy`, core 1 |
-| #13274-~13756 | **loop del core 1**, stessa forma | `wlc_phy_a3_nphy` |
+| #13274-~13756 | **loop del core 1**, stessa forma | idem |
 | #13757-13759 | ripristino, core 1 | `wlc_phy_papd_cal_cleanup_nphy` |
 | #13842-13857 | **offset epsilon**: `0x298`/`0x29c` = `0xf400`, poi `0x297`/`0x29b` e `0x2a3`/`0x2a4` | coda di `wlc_phy_a4` |
 | #13858 | `0x01` riscritto col valore salvato | idem |
@@ -74,12 +74,19 @@ divergenza nota, non come buco.
 Non è una coincidenza: erano la parte senza matematica, cioè l'unica che si
 poteva portare guardando solo i valori.
 
-**Il cuore sono due `wlc_phy_a3_nphy` guidate dalle letture.** Fra #12160 e
-#13756 il driver alterna "imposta il gain, suona i campioni, rileggi 40 volte,
-calcola, scrivi l'epsilon" per ogni passo di gain e per ogni core. Le decisioni
-dipendono da cosa misura, quindi il codice non si verifica confrontando
-scritture: si verifica solo se le letture gli arrivano giuste. I piani di lettura
-della cattura servono esattamente a questo, ed è il motivo per cui esistono.
+**Il cuore sono `a3_nphy` e `a2_nphy`, e sono due cose diverse.** Fra #12160 e
+#13756, per core, il driver alterna "imposta il gain, suona i campioni, rileggi 40
+volte, calcola, scrivi l'epsilon". Il lavoro è diviso: `wlc_phy_a3_nphy` (147
+righe) è la ricerca dell'indice di gain e **legge** la tabella epsilon in un loop
+di 20 passi; `wlc_phy_a2_nphy` (279 righe), chiamata subito dopo per lo stesso
+core, **scrive** la tabella epsilon via `set_bbmult`. `a2` non era nemmeno
+nominata qui, e non per distrazione: `cfuncs.py` non la vedeva, quindi non
+compariva né nell'xref né nei conteggi (vedi `docs/todo-nphy.md` punto 5).
+
+Le decisioni dipendono da cosa misura, quindi il codice non si verifica
+confrontando scritture: si verifica solo se le letture gli arrivano giuste. I
+piani di lettura della cattura servono esattamente a questo, ed è il motivo per
+cui esistono.
 
 **`0x186`-`0x194` non è il tono.** Sono `B43_NPHY_TXF_20CO_S*`, i coefficienti
 del filtro digitale TX a 20 MHz, e i 15 valori catturati sono la riga 3 di
@@ -105,8 +112,8 @@ la conseguenza.
    il filtro della cal è peggio che non toccarlo — quindi va insieme al punto 1.
 3. **un solo passo del loop del core 0**, con i piani di lettura attivi. Se un
    passo torna, il resto è iterazione.
-4. **la matematica di `a3_nphy`**, ed è l'ultima perché è l'unica parte che non
-   si può verificare a pezzi.
+4. **la matematica di `a3_nphy` e `a2_nphy`**, ed è l'ultima perché è l'unica
+   parte che non si può verificare a pezzi.
 
 ## Cosa è già portato, dopo aver letto la mappa
 
@@ -161,9 +168,12 @@ il risultato: 322/322 entrambe con la patch, 2/322 la seconda senza.
 
 ## Perché non ho portato il resto in questa sessione
 
-Il cuore resta `wlc_phy_a3_nphy` per due core: non si spezza in pezzi
+Il cuore resta `a3_nphy` più `a2_nphy` per due core: non si spezza in pezzi
 verificabili singolarmente, o c'è il passo di cal completo o non si verifica
-niente. L'offset epsilon e la tabella dei campioni invece erano calcoli isolati
+niente. E `papd_cal_setup`, che nella scaletta è il punto 1 perché è tutto
+scritture, sono 250 righe: verificabile non vuol dire piccolo, e finché la
+ricerca di gain non c'è non ha un chiamante, quindi come patch a sé sarebbe
+codice morto. L'offset epsilon e la tabella dei campioni invece erano calcoli isolati
 con valori catturati da confrontare, e per quelli si è potuto chiudere subito.
 
 La mappa qui sopra è il lavoro che serviva comunque prima di scrivere una riga —

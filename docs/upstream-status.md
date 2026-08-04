@@ -11,14 +11,30 @@ Serie "b43: complete N-PHY rev 8 + radio 2057 rev 8 support", 7 patch:
 |---|---|---|
 | `682edc28b91c` | b43: add firmware mappings and remove comments wondering about rev22 initvals | `main.c` |
 | `ee81dc7636fb` | b43: add d11 core revision 0x16 to id table | `main.c` |
-| `2691a1ae6bcc` | b43: route d11 corerev 22 to 24-bit indirect radio access | `phy_n.c`, `main.c` |
+| `2691a1ae6bcc` | b43: route d11 corerev 22 to 24-bit indirect radio access | `main.c` |
 | `454518d95d07` | b43: support radio 2057 rev 8 | `radio_2057.c`, `main.c` |
 | `894f1482b2f9` | b43: add IPA TX gain table for N-PHY r8 + radio 2057 r8 | `tables_nphy.c` |
 | `631c004e5f45` | b43: add channel info table for N-PHY r8 + radio 2057 r8 | `radio_2057.c` |
 | `21352612198c` | b43: add RF power offset for N-PHY r8 + radio 2057 r8 | `tables_nphy.c` |
 
 Le tre tabelle (IPA tx gain, chan info, rf pwr offset) **non** pre-esistevano in
-b43: sono di questa serie. Verificabile con:
+b43: sono di questa serie.
+
+**Nessuna delle sette tocca `phy_n.c`.** L'elenco dei file è `main.c`,
+`radio_2057.c`, `tables_nphy.c` e nient'altro; qui la riga di `2691a1ae6bcc`
+diceva anche `phy_n.c` e non è vero, quel commit cambia cinque righe di
+`b43_phy_versioning()` in `main.c`. Serve saperlo quando si trova un difetto in
+`phy_n.c`: non viene da questa serie. Verificato scaricando i sette commit:
+
+```sh
+for s in 682edc28b91c ee81dc7636fb 2691a1ae6bcc 454518d95d07 \
+         894f1482b2f9 631c004e5f45 21352612198c; do
+    curl -sL "https://github.com/torvalds/linux/commit/$s.patch" |
+        grep '^+++ b/'
+done
+```
+
+Verificabile anche con:
 
 ```sh
 curl -s "https://github.com/torvalds/linux/commits/master/drivers/net/wireless/broadcom/b43/tables_nphy.c.atom"

@@ -133,14 +133,38 @@ Lo strumento lo segnala perché il ramo "special" cita solo 3/4/6, ma per il rev
 v7 con `MASTER 0x61/0x69/0x73`, `TRC0 0xe9/0xd5/0x99`, `X1 0x6e`. Le costanti
 combaciano con quelle in b43: **verificato, niente da fare**.
 
-### 5b. La chantab non scrive i campi 5 GHz che il vendore azzera
+### 5b. La chantab non scriveva i campi 5 GHz che il vendore azzera — CHIUSA
 
-Sul cambio canale il vendore scrive dieci registri in più, tutti a zero: i campi
-5 GHz e PGA della entry dual band (`LOGEN_MX5G_TUNE`, `LOGEN_INDBUF5G_TUNE`,
-`PGA_BOOST_TUNE_CORE0/1`, `TXMIX5G_BOOST_TUNE_CORE0/1`,
-`PAD5G_TUNE_MISC_PUS_CORE0/1`, `LNA5G_TUNE_CORE0/1`). b43 usa la variante
-`chantabent_rev7_2g` e non li tocca. Impatto ignoto, e il percorso è condiviso
-con altri device: voce aperta, non patch. Vedi `docs/trace-init-2g.md`.
+b43 ha due forme di tabella di canale rev 7+: quella intera e una **solo 2 GHz**
+che lascia fuori dieci campi per risparmiare spazio. Lasciando fuori i campi ha
+lasciato fuori anche le loro scritture, quindi un cambio canale su una board che
+usa la tabella 2 GHz lascia `LOGEN_MX5G_TUNE`, `LOGEN_INDBUF5G_TUNE`,
+`PGA_BOOST_TUNE` e i `TXMIX5G`/`PAD5G`/`LNA5G` dei due core col valore del canale
+precedente.
+
+Tre fonti indipendenti dicono che vanno scritti, e a zero:
+
+- la **cattura**: ognuno dei dieci viene scritto con valore 0, a **tutti e 31** i
+  cambi canale, su cinque canali e due cicli di interfaccia;
+- **brcmsmac**, che tiene una tabella sola per le due bande: in
+  `chan_info_nphyrev8_2057_rev8` ogni riga a 2.4 GHz ha zero in quelle dieci
+  colonne, quindi scrive dieci zeri a ogni cambio;
+- **b43 stessa**, nel ramo della tabella intera, li scrive in posizione.
+
+E la posizione non è quella ovvia: i dieci sono **intercalati** con quelli a 2
+GHz, non in coda — `0x43` subito dopo `0x41`, `0x4a` dopo `0x47`, i tre del core 0
+fra `PAD2G` e `LNA2G`. È lo stesso ordine del ramo intero di b43.
+
+`patches/b43/0011` li scrive, gateata su radio 2057 rev 8, la sola combinazione
+che la cattura copre. Le altre due board che passano per la tabella 2 GHz (phy
+rev 8 con radio rev 5, phy rev 17 con radio rev 14) restano come sono: brcmsmac
+non ha righe a 2.4 GHz per quei radio, quindi non c'è niente contro cui
+confrontarle.
+
+Dopo la patch la finestra `chanswitch-ch6` non ha **nessuna op mancante**: le
+prime 33 su 39 combaciano posizionalmente, e il resto sono le stesse op con gli
+stessi valori sfasate di tre, perché l'harness registra tre accessi MMIO che il
+tracer vendor non registra. Prima combaciavano 11 su 39 e mancavano dieci op.
 
 ### 4d. Il motore PAPD gira su tabelle non inizializzate — CHIUSA
 

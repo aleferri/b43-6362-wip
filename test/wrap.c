@@ -373,10 +373,15 @@ void b43_dummy_transmission(struct b43_wldev *dev, bool ofdm, bool pa_on)
 		(u16)((ofdm ? 2 : 0) | (pa_on ? 1 : 0)));
 }
 
+/* Fedele a main.c: la parte che ci riguarda e' che chiama l'op del PHY. Con un
+ * return 0 secco mancavano dal trace l'upload della chantab e tutto cio' che il
+ * cambio canale fa, sia quello dentro software_rfkill sia quello in coda a
+ * b43_phy_init(). */
 int b43_switch_channel(struct b43_wldev *dev, unsigned int new_channel)
 {
 	fprintf(trace(), "cpu0 CHANSPEC ch=%u\n", new_channel);
-	return 0;
+	dev->phy.channel = new_channel;
+	return dev->phy.ops->switch_channel(dev, new_channel);
 }
 
 /* ---------------- helper di phy_common.c ---------------- */
@@ -397,8 +402,16 @@ bool b43_channel_type_is_40mhz(enum nl80211_channel_type channel_type)
 	       channel_type == NL80211_CHAN_HT40MINUS;
 }
 
+/* Fedele a phy_common.c meno mac_suspend/mac_enable, che non tracciamo.
+ *
+ * Era uno stub vuoto, e da qui passa l'init del radio:
+ * b43_nphy_op_software_rfkill() -> b43_radio_2057_init() -> la tabella di init
+ * del radio e il primo cambio canale. Con lo stub vuoto quelle op non erano nel
+ * trace, e sono le prime ~84 della cattura. */
 void b43_software_rfkill(struct b43_wldev *dev, bool blocked)
 {
+	dev->phy.ops->software_rfkill(dev, blocked);
+	dev->phy.radio_on = !blocked;
 }
 
 /* ---------------- tabelle: etichetta + esecuzione reale ---------------- */

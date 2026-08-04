@@ -47,6 +47,9 @@ RE_REV_GUARD = re.compile(r'\b(?:phy->)?(?:radio_)?rev\b')
 # revisioni di quel tipo, non solo la nostra. Va riconosciuto e detto.
 RE_TYPE_GUARD = re.compile(r'B43_PHYTYPE_\w+')
 RE_RETURN = re.compile(r'\breturn\b')
+# Assegnazione a una variabile locale: `bool tune_5g = dev->phy.rev == 8 && ...`
+# Esclude ==, !=, <=, >= per non prendere i confronti.
+RE_ASSIGN = re.compile(r'^\s*(?:\w[\w\s\*]*?\s)?(\w+)\s*=\s*([^=].*)$')
 
 
 def added_lines(patch_path):
@@ -87,10 +90,21 @@ def gate_for(lines, span, target):
     first, last = span
     depth = 0
     open_conditions = []          # (depth, testo della condizione)
+    # Nomi locali che valgono quanto un confronto su rev, perche' vengono da
+    # uno. Ripetere `dev->phy.rev == 8 && dev->phy.radio_rev == 8` dieci volte
+    # e' peggio del calcolarlo una volta, e uno strumento che non riconosce il
+    # flag spinge a scrivere il codice peggiore.
+    rev_flags = set()
     for n in range(first, min(target, last) + 1):
         code = strip(lines[n - 1])
         if depth and RE_REV_GUARD.search(code) and RE_RETURN.search(code):
             return 'early return su rev alla riga %d' % n
+        m = RE_ASSIGN.match(code)
+        if m:
+            if RE_REV_GUARD.search(m.group(2)):
+                rev_flags.add(m.group(1))
+            else:
+                rev_flags.discard(m.group(1))   # riassegnato da altro
         for ch in code:
             if ch == '{':
                 depth += 1
@@ -98,8 +112,15 @@ def gate_for(lines, span, target):
                 depth -= 1
                 open_conditions = [c for c in open_conditions if c[0] <= depth]
         m = re.search(r'\b(if|case|switch)\b(.*)$', code)
-        if m and RE_REV_GUARD.search(m.group(2)):
-            open_conditions.append((depth, code.strip()[:60]))
+        if m:
+            cond = m.group(2)
+            flag = next((f for f in rev_flags
+                         if re.search(r'\b%s\b' % re.escape(f), cond)), None)
+            if RE_REV_GUARD.search(cond):
+                open_conditions.append((depth, code.strip()[:60]))
+            elif flag:
+                open_conditions.append(
+                    (depth, '%s   [%s viene da rev]' % (code.strip()[:44], flag)))
     for _, cond in open_conditions:
         return 'dentro %s' % cond
     return None
@@ -167,6 +188,11 @@ def check(tree, patch_path):
                     if RE_TYPE_GUARD.search(code) and re.search(r'\b(if|return)\b', code):
                         own = ('gate sul TIPO di PHY alla riga %d: tocca tutte '
                                'le rev di quel tipo' % k)
+                        break
+                    ma = RE_ASSIGN.match(code)
+                    if ma and RE_REV_GUARD.search(ma.group(2)):
+                        own = ('gate aggiunto dalla patch alla riga %d: %s '
+                               'viene da rev' % (k, ma.group(1)))
                         break
                 gate = own or gate_for(lines, spans[fn], n)
                 if not gate:

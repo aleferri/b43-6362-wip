@@ -18,7 +18,7 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/bcma/`, `docs/soc-glue.md` |
 | SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
 | gain control N-PHY rev 7+ | stub vuoto in mainline, **patch in `patches/b43/0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/README.md` |
-| chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, b43 non li tocca | `docs/trace-init-2g.md` |
+| chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, la tabella 2 GHz di b43 non li aveva: **patch `0011`**, 31 cambi canale su 31 nella cattura | `docs/gap-inventory.md` |
 | chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
 | RF power offset rev 8 | valori sbagliati in mainline, **chiuso dalla cattura**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
 | compensazione PAPD rev 7+ | mai programmata per un early return, **patch `0003`**: 256 celle identiche alla cattura | `docs/gap-inventory.md` |
@@ -35,8 +35,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 
 ## Come è organizzato
 
-- `docs/` — stato, inventario dei buchi, piano HT20 2x2, questioni di
-  upstreaming, protocollo di cattura, reportistica.
+- `docs/` — stato, flusso di init dei due lati affiancato, inventario dei buchi,
+  piano HT20 2x2, questioni di upstreaming, protocollo di cattura, reportistica.
 - `patches/bcma/` — la serie per l'enumerazione (core wrapperless big-endian,
   host driver, binding DT).
 - `patches/openwrt/` — fix minori sul target bmips.

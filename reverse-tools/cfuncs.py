@@ -6,7 +6,17 @@ colonna 0, corpo aperto da una graffa a profondita' 0).
 
 import re
 
-_DEF = re.compile(r'^[A-Za-z_][\w\s\*\(\),]*\b(\w+)\s*\(')
+# Il nome e' l'ultimo identificatore prima della parentesi aperta. Il prefisso
+# (classe di memoria e tipo di ritorno) e' opzionale perche' lo stile kernel lo
+# manda a capo quando la firma non sta in ottanta colonne:
+#
+#     static void
+#     wlc_phy_papd_cal_setup_nphy(struct brcms_phy *pi,
+#
+# Senza l'opzionalita' la seconda riga non combacia -- il \b non ha dove
+# agganciarsi, perche' il nome comincia a colonna 0 -- la definizione passa
+# inosservata e tutte le sue righe restano attribuite alla funzione precedente.
+_DEF = re.compile(r'^(?:[A-Za-z_][\w\s\*\(\),]*\b)?(\w+)\s*\(')
 
 
 def index_functions(path):
@@ -45,11 +55,20 @@ def index_functions(path):
             m = _DEF.match(line)
             if m and not line.lstrip().startswith('#'):
                 candidate = m.group(1)
+            elif not line.strip() or ';' in line:
+                # Una firma non ha righe vuote in mezzo e non finisce con un
+                # punto e virgola: se ne vediamo uno il candidato non e' piu'
+                # valido. Senza questo, dopo un prototipo o dopo la fine di una
+                # funzione il primo blocco a graffe che passa -- una tabella,
+                # una struct -- eredita il nome sbagliato.
+                candidate = None
 
         opens = line.count('{')
         closes = line.count('}')
         if depth == 0 and opens:
-            current = candidate
+            # `nome(...)` seguito da `{` e' una funzione; `nome = {` e' un dato.
+            current = None if '=' in line.split('{', 1)[0] else candidate
+            candidate = None
         depth += opens - closes
         if depth < 0:
             depth = 0
