@@ -1,7 +1,13 @@
 # La tabella RF power offset per radio 2057 rev 8
 
-Questione aperta su dati già merged. Non è urgente e non va chiusa a intuito:
-qui ci sono le prove, da entrambi i lati, e il modo di decidere.
+**Chiusa dalla cattura: i valori in mainline sono sbagliati.** Ricalcolando dalla
+cattura le 128 celle che quella tabella alimenta, i valori rev 7 le predicono
+tutte e 128, quelli in tree ne predicono 5. La correzione è
+`patches/b43/0002`, e `patches/b43/0003` abilita il percorso che le scrive.
+
+Sotto resta la storia, perché il modo in cui si è chiusa è più istruttivo del
+risultato: non con una misura di potenza in laboratorio, ma ricalcolando dal
+codice del driver le celle che la cattura mostra scritte.
 
 ## Cosa dice il kernel oggi
 
@@ -50,16 +56,28 @@ rev 8 simile a quello del rev 7 pur usando codici di selezione diversi.
 Il peso maggiore va alla scelta del vendore, perché è il codice che gira su
 questo silicio. Ma è un argomento, non una misura.
 
-## Perché non è urgente
+## Come si è chiusa
 
-La tabella è codice morto: `b43_nphy_tx_pwr_ctl_init()` la recupera e poi
-ritorna subito per `phy->rev >= 7` (`/* TODO: Enable this once we have gains
-configured */`). Diventa viva quando quel ramo verrà abilitato, sulla strada
-verso M4.
+Il consumatore della tabella è `b43_nphy_tx_gain_table_upload()`: per ogni entry
+della TX gain table estrae `pad_gain = (table[i] >> 19) & 0x1f` e scrive
+`rf_pwr_offset_table[pad_gain]` nella cella PAPD corrispondente, tabelle 26 e 27
+a offset 576+i. Quel percorso in mainline ritorna prima del loop, ma il calcolo
+è tutto lì.
 
-## Come si decide
+La cattura mostra il vendore scrivere tutte e 256 quelle celle durante l'init, a
+32 bit, con i negativi estesi in segno. Rifacendo il conto con la TX gain table
+(che è verificata identica al blob) e le due candidate:
 
-Quando il ramo è attivo, si misura la potenza in uscita per indice di gain
-(`reports/40-tx-power.md`) e si guarda quale delle due serie di offset predice
-il misurato. Fino a quel momento `patches/b43/0002` resta una bozza: sostituire
-un valore non verificato con un altro valore non verificato non è un progresso.
+| tabella di offset | celle predette correttamente |
+|---|---|
+| valori in mainline, presi dal rev 5 | **5 su 128** |
+| valori rev 7 | **128 su 128** |
+
+Non serviva il laboratorio: bastava che il driver dicesse come si calcola e la
+cattura dicesse cosa ne esce. L'argomento della somiglianza fra le gain table
+(i 24 bit bassi identici fra rev 8 e rev 5) resta vero e resta irrilevante: la
+somiglianza sta nell'indice, non nell'offset in dB che quell'indice seleziona.
+
+Verificato anche al contrario con l'harness: abilitando il percorso senza
+correggere i valori, 246 celle su 256 escono diverse dalla cattura; con la
+correzione, zero.

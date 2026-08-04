@@ -17,6 +17,13 @@ decodifica delle tracce del driver `wl`.
 - **cfuncs.py** — localizzazione riga→funzione per sorgenti in stile kernel,
   usata dai due sopra. Non è un parser C: euristica a profondità di graffe.
 
+- **check_patch_gating.py** — per ogni riga aggiunta da una patch cerca un gate di
+  revisione che la domini. Serve perché nel PHY di b43 quasi tutto è condiviso fra
+  tutte le N-PHY, e una modifica non iffata cambia hardware che non possiamo
+  provare. Euristica, non parser: un `NON GATEATA` va guardato. Vedi
+  `docs/upstreaming.md` per l'elenco delle funzioni condivise e il gate che
+  ciascuna vuole.
+
 ## Estrazione dal blob OEM
 
 - **blob_tables.py** — lettore ELF32 big-endian senza dipendenze. `--list` per
@@ -57,6 +64,10 @@ loro README per l'elenco delle differenze rispetto alla copia AC-PHY di
 Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
 
 - **decode-wl-diag.py** — record binari (28 B BE) → righe testuali.
+- **gen_readplans.py** — appaia ogni read della cattura col suo `RETVAL` ed emette
+  i piani di lettura dell'harness come header C, per indirizzo. Esclude 0x72/0x73/
+  0x74, che sono la porta delle tabelle e non un registro di stato. Misurato: non
+  spostano la copertura, vedi `test/README.md`.
 - **verify_decode.py** — ricostruisce i campi dal testo decodificato e li
   confronta col binario record per record. È la condizione per buttare il
   binario: se dice "nessuna perdita", il testo lo sostituisce; se elenca campi,

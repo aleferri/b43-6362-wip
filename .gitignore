@@ -11,3 +11,5 @@ modules.order
 *.collapsed
 *.raw
 *.bin
+test/build/
+test/nphy_trace

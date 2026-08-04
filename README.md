@@ -17,10 +17,11 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; disponibilità blob da verificare | `docs/firmware-rev22.md` |
 | enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/bcma/`, `docs/soc-glue.md` |
 | SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
-| gain control N-PHY rev 7+ | stub vuoto in mainline, **patch in `patches/b43/0001`** dai valori catturati (non provata) | `docs/trace-init-2g.md` |
+| gain control N-PHY rev 7+ | stub vuoto in mainline, **patch in `patches/b43/0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/README.md` |
 | chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, b43 non li tocca | `docs/trace-init-2g.md` |
 | chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
-| RF power offset rev 8 | valori del rev 5 dove il vendore usa il rev 7, **questione aperta** | `docs/rf-pwr-offset-rev8.md` |
+| RF power offset rev 8 | valori sbagliati in mainline, **chiuso dalla cattura**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
+| compensazione PAPD rev 7+ | mai programmata per un early return, **patch `0003`**: 256 celle identiche alla cattura | `docs/gap-inventory.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato
@@ -30,6 +31,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 - `patches/bcma/` — la serie per l'enumerazione (core wrapperless big-endian,
   host driver, binding DT).
 - `patches/openwrt/` — fix minori sul target bmips.
+- `test/` — harness che compila i sorgenti N-PHY del tree in userspace e ne
+  emette il trace, per confrontarlo con la cattura vendor.
 - `reverse-tools/` — tracer `wl-diag` (due varianti, **tarate su N-PHY**),
   pipeline di decodifica, estrattore/verificatore delle tabelle dal blob OEM,
   analisi di copertura sul tree kernel.

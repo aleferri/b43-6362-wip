@@ -81,8 +81,19 @@ index 22359bd..9cfeef9 100644
 
 Note per il repo, non per la mailing list:
 
-  - NON compilata e NON provata su hardware. Gate: reports/30-rx-sensitivity.md
-    prima e dopo, stesso setup.
+  - Gate: la funzione e' rev-specifica per nome ed e' chiamata solo dai rev 7+,
+    e in testa c'e' l'early return su radio_rev != 8, 40 MHz e 5 GHz. Gli altri
+    N-PHY escono prima di scrivere qualunque cosa. Controllato anche con
+    reverse-tools/check_patch_gating.py.
+  - Verificata con l'harness in test/: applicata al tree, il flow `init`
+    riproduce il blocco della cattura op per op, 21 op nello stesso ordine, con
+    i payload delle otto table-op identici. Senza la patch quei registri non
+    vengono scritti affatto.
+  - Attenzione a cosa vuol dire: l'harness compila phy_n.c in userspace con
+    stub e warning spenti, NON e' un build del kernel, e il codice non ha mai
+    girato sul device. Restano da fare il build come modulo e la misura,
+    reports/30-rx-sensitivity.md prima e dopo sullo stesso setup: e' il gate
+    di M0 e l'unico modo di sapere se questa patch serviva.
   - Provenienza dei valori, dal trace decodificato
     (router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded), primo init a canale
     operativo 1; il secondo init a canale 6 ripete gli stessi valori a

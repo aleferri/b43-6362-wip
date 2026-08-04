@@ -18,7 +18,9 @@ Uso:
 import argparse
 import re
 
-RE_LINE = re.compile(r'^\s*(?:[\d.]+\s+)?#(\d+)\s+cpu\d+\s+(\S+)\s*(.*)$')
+# Il numero di record c'e' nel trace vendor e non nell'output dell'harness,
+# che deve restare mangiabile da compare.py: qui e' opzionale.
+RE_LINE = re.compile(r'^\s*(?:[\d.]+\s+)?(?:#(\d+)\s+)?cpu\d+\s+(\S+)\s*(.*)$')
 ADDR_REG, DATA_LO, DATA_HI = 0x72, 0x73, 0x74
 
 
@@ -29,7 +31,8 @@ def parse(path):
         if not m:
             continue
         kv = dict(re.findall(r'(\w+)=(\S+)', m.group(3)))
-        out.append(dict(seq=int(m.group(1)), op=m.group(2), kv=kv))
+        out.append(dict(seq=int(m.group(1)) if m.group(1) else len(out) + 1,
+                        op=m.group(2), kv=kv))
     return out
 
 
