@@ -8,5 +8,6 @@ __pycache__/
 Module.symvers
 modules.order
 *.trace
-*.decoded
 *.collapsed
+*.raw
+*.bin

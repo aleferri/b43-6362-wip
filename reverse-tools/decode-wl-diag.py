@@ -21,13 +21,15 @@
 # regione; il valore va in un puntatore, non nel ritorno, quindi qui interessa
 # QUANDO e QUALE, non il contenuto (che sta nei dump SROM).
 # TPL.* (27-31): template RAM, dove il PHY carica le forme d'onda dei toni.
-# Le PTRR/DATR hanno il valore nel RETVAL. Su 6.30 esiste solo TPL.RAMW.
+# Le PTRR/DATR hanno il valore nel RETVAL. Su 6.30 esiste solo TPL.RAMW, che
+# porta offset, lunghezza e puntatore al buffer sorgente.
 # CHANSPEC (26): cambio canale, addr = chanspec. Il decoder lo espande in
 # canale/banda/larghezza col formato 802.11ac standard (chan=bit 0-7,
 # bw=0x3800, band=0xc000) -- assunzione, non verificata su cattura. Serve a
 # tagliare a posteriori una run che copre piu' canali.
 # OBJ.RD (24) / OBJ.WR (25): object memory del MAC via read/write_objmem16.
-# addr=offset in byte, aux=selettore dello spazio (SHM, SCR, IHR...). La RD ha
+# addr=offset in byte, aux=selettore dello spazio (SHM, SCR, IHR...), emesso come
+# space= perche' la branch generica non stampa aux. La RD ha
 # il valore nel RETVAL come PHY.RD. Serve per il campione di potenza di rumore
 # che la crs_min_pwr cal legge: non passa da un registro PHY, quindi senza
 # questo hook non compare in nessuna cattura.
@@ -76,6 +78,8 @@ COREREG  = 21                             # core reg: off=addr(a2), core=aux(a1)
 #   RETVAL(23): valore restituito da una read/rmw -> parent=addr, val=val
 ARGX     = 22
 RETVAL   = 23
+OBJMEM   = {24, 25}                       # aux = selettore dello spazio
+TPLRAMW  = 31                             # addr=off, val=len, aux=buffer sorgente
 
 
 def h(v, wide):
@@ -137,6 +141,14 @@ def main():
                 print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "
                       f"addr={h(addr, False)} val={h(val, False)} "
                       f"(set {h(val, False)})")
+            elif op == TPLRAMW:                    # template RAM: off, len, buffer
+                print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "
+                      f"addr={h(addr, False)} len={val} buf={h(aux, True)}")
+            elif op in OBJMEM:                     # object memory: addr + spazio
+                valstr = "UNDEFINED" if op in READS else h(val, wide)
+                print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "
+                      f"addr={h(addr, False)} val={valstr} "
+                      f"space={h(aux, False)}")
             else:                                  # read/write semplice
                 valstr = "UNDEFINED" if op in READS else h(val, wide)
                 print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "

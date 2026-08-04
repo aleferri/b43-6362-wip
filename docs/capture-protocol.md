@@ -45,10 +45,21 @@ reload del modulo o `wl down; wl up`.
 ## Dopo la cattura
 
 ```sh
-decode-wl-diag.py raw.bin > flow.decoded
+decode-wl-diag.py < raw.bin > flow.decoded
+verify_decode.py raw.bin flow.decoded    # prima di buttare il binario
 merge_retvals.py flow.decoded > flow.rv
 fold_mod_reads.py flow.rv > flow.folded
 ```
+
+Nel repo va il **decodificato**, non il binario: è leggibile, diffabile, e
+grepabile, ed è la forma che gli strumenti mangiano. Il binario si butta solo
+dopo che `verify_decode.py` dice che il testo copre tutti i campi non nulli; se
+segnala perdite, si sistema il decoder e si rifà, non si tiene il binario come
+scusa.
+
+Poi i controlli che non costano niente e trovano cose: `verify_chantab_trace.py`
+per confrontare la chantab di b43 con tutti i cambi canale della cattura, e
+`trace_tables.py` per tirare fuori i payload delle table-op.
 
 Il confronto col port si fa sul trace **grezzo** (non collassato), con
 `test/compare.py`. Il collassato serve per le analisi macro, non per il gate di

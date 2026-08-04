@@ -1,0 +1,77 @@
+From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: use the rev 7 RF power offsets for radio 2057 rev 8
+
+The table added by commit 21352612198c ("b43: add RF power offset for
+N-PHY r8 + radio 2057 r8") carries the values the proprietary driver uses
+for radio revision 5. That driver, and brcmsmac in get_rf_pwr_offset(),
+select a different table for revisions 7 and 8:
+
+	else if ((pi->pubpi.radiorev == 7) || (pi->pubpi.radiorev == 8))
+		rfpwr_offset = (s16) nphy_papd_padgain_dlt_2g_2057rev7[pad_gn];
+
+get_rf_pwr_offset() is the counterpart of the b43 code that consumes this
+table, so follow its dispatch and use the rev 7 offsets. The values are
+taken from brcmsmac's nphy_papd_padgain_dlt_2g_2057rev7.
+
+The table is not consumed yet: b43_nphy_tx_pwr_ctl_init() fetches it and
+returns immediately for phy->rev >= 7, pending gain configuration. This
+only corrects the data that path will use.
+
+Fixes: 21352612198c ("b43: add RF power offset for N-PHY r8 + radio 2057 r8")
+Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+---
+diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.c b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+index ecd660b..74d867a 100644
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+@@ -2929,13 +2929,13 @@ static const s16 b43_ntab_rf_pwr_offset_2057_rev9_5g[] = {
+  * the same physical PAD gain code on both revisions.
+  */
+ static const s16 b43_ntab_rf_pwr_offset_2057_rev8_2g[] = {
+-	-109, -109, -82, -68, -58,
+-	-50,  -44, -39, -35, -31,
+-	-28,  -26, -23, -21, -19,
+-	-17,  -16, -14, -13, -11,
+-	-10,   -9,  -8,  -7,  -5,
+-	 -5,   -4,  -3,  -2,  -1,
+-	 -1,    0,
++	-122, -122,  -95,  -80,  -69,
++	 -61,  -54,  -49,  -43,  -39,
++	 -35,  -32,  -28,  -26,  -23,
++	 -21,  -18,  -16,  -15,  -13,
++	 -11,  -10,   -8,   -7,   -6,
++	  -5,   -4,   -3,   -2,   -1,
++	  -1,    0,
+ };
+ 
+ /* Extracted from MMIO dump of 6.30.223.248
+
+BOZZA — non mandarla senza aver deciso, e le prove sono contrastanti.
+
+A favore del rev 7 (cioe' di questa patch):
+  - brcmsmac get_rf_pwr_offset() (phy_n.c:14649) sceglie
+    nphy_papd_padgain_dlt_2g_2057rev7 per radiorev 7 e 8, e usa il rev 5
+    solo per radiorev 5. E' il codice che gira davvero su questo silicio, ed
+    e' in-tree e GPL, quindi citabile.
+  - stessa scelta nel secondo sito d'uso, wlc_phy_a4 (phy_n.c:25275).
+
+A favore del rev 5 (cioe' della tabella attualmente merged):
+  - la motivazione del commit originale e' vera, verificata sul blob:
+    nphy_tpc_txgain_ipa_2g_2057rev8 e ..._rev5 hanno i 24 bit bassi
+    IDENTICI su tutte le 128 entry, e differiscono solo nel byte alto
+    (selettore PAD gain, 0x40 contro 0x30).
+  - e la simmetria non vale col rev 7: i 24 bit bassi di
+    nphy_tpc_txgain_ipa_2g_2057rev7 NON coincidono con quelli del rev 8.
+
+Quindi sull'asse "tabella di gain IPA" il rev 8 assomiglia al rev 5, ma la
+dispatch del vendore per gli offset di potenza lo accoppia al rev 7. L'offset
+in dB per indice e' una proprieta' del PA/pad, non del passo di gain, quindi
+la scelta del vendore pesa piu' della somiglianza — ma non e' una prova.
+
+Come si chiude: la tabella e' codice morto finche' il ramo phy->rev >= 7 di
+b43_nphy_tx_pwr_ctl_init() ritorna subito. Quando quel ramo verra' abilitato
+(strada verso M4), si misura la potenza per indice di gain con
+reports/40-tx-power.md e si vede quale delle due serie di offset predice il
+misurato. Prima di allora, mandarla e' rimpiazzare un valore non verificato
+con un altro valore non verificato.

@@ -5,8 +5,12 @@ Generato su `torvalds/linux` @ `848acc8ffe1b` con
 citate" elenca i valori che la funzione discrimina; `assente` significa che la
 revisione target (radio 8 / phy 8) non compare, `stub` che il corpo è vuoto.
 Lo strumento dà indizi, non verdetti: sotto ci sono solo le voci che ho poi
-letto a mano, e due di quelle (`b43_radio_2057_setup` e `b43_radio_2057_rccal`)
-si sono rivelate non-buchi proprio leggendole.
+letto a mano. Il bilancio, dopo averle lette tutte: di sei voci iniziali **tre
+non erano buchi** (`b43_radio_2057_rccal`, `b43_radio_2057_setup`,
+`b43_radio_2057_rcal`) e una era accostata alla funzione sbagliata. Il motivo è
+sistematico: l'assenza di un `case` in questo driver di solito ricalca il fatto
+che il vendore, per quella revisione, non fa niente di speciale. Vale come
+avvertenza su come leggere la tabella qui sopra.
 
 | file:riga | funzione | campo | rev citate | stato |
 |---|---|---|---|---|
@@ -50,6 +54,13 @@ Impatto atteso: sensibilità RX e comportamento AGC. **SALAME**: che sia il
 primo collo di bottiglia sul 2x2 è la mia ipotesi di lettura, va misurato
 (vedi `reports/30-rx-sensitivity.md`) prima di trattarlo come tale.
 
+Patch: `patches/b43/0001`, scritta sui valori della cattura e non su brcmsmac,
+perché i due divergono: LNA1 `8, 13, 18, 25` invece di `9, 14, 19, 24`, W1 clip
+24 invece di 13, e in 2.4 GHz il device programma anche LNA2, TIA e i gain bits
+che il ramo 2 GHz di brcmsmac non tocca. Dettaglio in `docs/trace-init-2g.md`.
+Limitata a radio rev 8, 2.4 GHz, 20 MHz: per le altre revisioni non ho catture.
+Applica pulito su `848acc8ffe1b`, **non compilata e non provata su hardware**.
+
 ### 2. `b43_radio_2057_setup` — nessun `case 8`, ma NON è un buco (phy_n.c:719)
 
 Correzione rispetto alla prima stesura di questo documento: il ramo mancante per
@@ -62,7 +73,9 @@ radiorev 5/7/8 è un no-op sul 6362 in 2.4 GHz. La catena è questa:
 3. in `b43_nphy_chantab_phy_rev8_radio_rev8` tutte e 14 le entry portano
    `r1=0x1b, c2=0x0a, c1=0x0a, cp_kpd=0x30`;
 4. che sono esattamente i valori che brcmsmac scrive nell'override per radiorev
-   5/7/8 in 2.4 GHz (`phy_n.c:20960`).
+   5/7/8 in 2.4 GHz (`phy_n.c:20960`);
+5. e sono gli stessi che la cattura mostra sul silicio, `025=1b 027=0a 028=0a
+   029=30` a ogni cambio canale (`docs/trace-init-2g.md`).
 
 Quindi i registri finiscono giusti per un'altra strada. Vale anche per radio rev
 5 (`chantab_phy_rev8_radio_rev5`, stessi quattro valori su tutte le 14 entry).
@@ -75,15 +88,30 @@ radiorev != 5 scrive `pad2g_tune_pus = 0x3` e `txmix2g_tune_boost_pu = 0x61`.
 Rilevante solo su board con PA esterno: la DSL-3580L non è fra queste, quindi
 per questo progetto è una nota, non un lavoro.
 
-### 3. `b43_radio_2057_rcal` — nessun `case 8` (phy_n.c:811)
+### 3. `b43_radio_2057_rcal` — nessun `case 8`, e va bene così (phy_n.c:811)
 
-I due switch di save/restore pre e post calibrazione non hanno il rev 8, quindi
-la rcal gira in una configurazione non preparata. Riferimento brcmsmac:
-`wlc_phy_radio205x_rcal` (`phy_n.c:19766`).
+Seconda correzione: in `wlc_phy_radio205x_rcal` (brcmsmac `phy_n.c:19766`) i
+rami radiorev-specifici sono solo tre — radiorev 5 (pre e post, `0x342` e
+`IQTEST_SEL_PU`) e radiorev <= 4 o 6 (il trim di tempsense/bandgap alla fine).
+Per radiorev 8 il vendore esegue **solo** la sequenza comune di `RCAL_CONFIG`,
+che è esattamente ciò che b43 fa cadendo fuori dai suoi `case 5/9/14`.
+Verificato riga per riga: niente da aggiungere.
 
-### 4. `b43_nphy_tx_cal_radio_setup_rev7` — solo radiorev 5 (phy_n.c:4725)
+### 4. `b43_nphy_tx_cal_radio_setup_rev7` — non è quello che sembrava (phy_n.c:4725)
 
-Riferimento: `wlc_phy_a4` (brcmsmac `25191`), che ha tre siti radiorev 8.
+Il `phy->radio_rev != 5` in questa funzione riguarda l'esistenza del registro
+`TSSIA`, non un ramo mancante per il rev 8. I tre siti radiorev 8 di
+`wlc_phy_a4` che lo strumento aveva accostato a questa funzione stanno altrove:
+sono la scelta della tabella PAPD pad-gain, cioè la questione di
+`rf-pwr-offset-rev8.md`. Voce chiusa, e sostituita da quella.
+
+### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5
+
+Il vendore per radiorev 7 e 8 usa `nphy_papd_padgain_dlt_2g_2057rev7`, la
+tabella merged usa i valori del rev 5. Prove da entrambi i lati, conseguenze e
+modo di decidere: `docs/rf-pwr-offset-rev8.md`. Bozza di patch in
+`patches/b43/0002`, da non mandare prima della misura. Oggi è codice morto,
+quindi non è un bug attivo.
 
 ### 5. `b43_radio_2057_rccal` — non è un buco
 
@@ -92,6 +120,15 @@ Lo strumento lo segnala perché il ramo "special" cita solo 3/4/6, ma per il rev
 (`19874`) il gruppo `chip43226_6362A0` è radiorev 3/4/6, e il rev 8 va sul ramo
 v7 con `MASTER 0x61/0x69/0x73`, `TRC0 0xe9/0xd5/0x99`, `X1 0x6e`. Le costanti
 combaciano con quelle in b43: **verificato, niente da fare**.
+
+### 5b. La chantab non scrive i campi 5 GHz che il vendore azzera
+
+Sul cambio canale il vendore scrive dieci registri in più, tutti a zero: i campi
+5 GHz e PGA della entry dual band (`LOGEN_MX5G_TUNE`, `LOGEN_INDBUF5G_TUNE`,
+`PGA_BOOST_TUNE_CORE0/1`, `TXMIX5G_BOOST_TUNE_CORE0/1`,
+`PAD5G_TUNE_MISC_PUS_CORE0/1`, `LNA5G_TUNE_CORE0/1`). b43 usa la variante
+`chantabent_rev7_2g` e non li tocca. Impatto ignoto, e il percorso è condiviso
+con altri device: voce aperta, non patch. Vedi `docs/trace-init-2g.md`.
 
 ### 6. `dev_id 0x435f` e la banda 5 GHz
 

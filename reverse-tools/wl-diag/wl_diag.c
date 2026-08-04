@@ -246,10 +246,11 @@ static struct hook hooks[] = {
 	{ "si_pmu_chipcontrol", OP_PMU_CC,    1, 3, 2, .retcap = true },
 	{ "si_pmu_regcontrol",  OP_PMU_RC,    1, 3, 2, .retcap = true },
 	{ "si_pmu_pllcontrol",  OP_PMU_PLL,   1, 3, 2, .retcap = true },
-	/* Spur avoidance: dipende dal canale e su N-PHY 2.4 GHz e' parte della
-	 * sequenza di cambio canale. ATTENZIONE: del disasm e' verificato solo il
-	 * prologo, NON quale argomento porta il valore di spuravoid; si registrano
-	 * a1 e a2 e si guarda nel trace quale dei due segue il canale. */
+	/* Spur avoidance. Del disasm e' verificato solo il prologo, NON quale
+	 * argomento porta il valore, quindi si registrano a1 e a2. Nella cattura
+	 * di 70796 record su cinque canali NON scatta mai, e non c'e' nessun altro
+	 * record PMU: su questo SoC il clocking non passa dal PMU bcma. L'hook
+	 * resta perche' non costa nulla, ma non aspettarsi record da qui. */
 	{ "si_pmu_spuravoid",   OP_PMU_SPURAVOID, 1, 2, 0 },
 	/* si_corereg(sih, coreidx, regoff, mask, val): accesso generico a un
 	 * registro di un core del backplane. addr=regoff(a2), aux=coreidx(a1).
@@ -262,24 +263,27 @@ static struct hook hooks[] = {
 	{ "si_gpioouten",       OP_CC_GPIOOE, 0, 2, 1 },
 	/* accesso tabella nphy (pi, id, len, off, width, data): id=a1, len=a2,
 	 * off=a3; width e data sono args di stack e non vengono catturati.
-	 * L'assegnazione len/off resta da confermare sul trace.
-	 * Le table-op passano per i registri 0x72 (indirizzo), 0x73 e 0x74 (dati),
-	 * che passano da phy_reg_write: il record TBL.* e' quindi un'ETICHETTA, il
-	 * contenuto arriva comunque dalle PHY.WR. Per il confronto col port usare
-	 * le PHY.WR, non le TBL. */
+	 * L'assegnazione len/off la conferma il trace: gli offset osservati (0x00,
+	 * 0x04, 0x08, 0x10, 0x1c, 0x20) e le lunghezze (1, 2, 4, 10) hanno senso
+	 * solo in questo verso, invertiti darebbero len=0.
+	 * Nel trace ogni record TBL e' seguito dalle scritture su 0x72 (indirizzo,
+	 * (id << 10) | off), 0x73 e 0x74 (dati), che passano da phy_reg_write: il
+	 * record TBL.* e' quindi un'ETICHETTA, il contenuto arriva comunque dalle
+	 * PHY.WR. Per il confronto col port usare le PHY.WR, non le TBL. */
 	{ "wlc_phy_table_read_nphy",  OP_TBL_R, 1, 2, 3 },
 	{ "wlc_phy_table_write_nphy", OP_TBL_W, 1, 2, 3 },
 	{ "osl_delay",          OP_DELAY,     0, 1, 0 }, /* usec=a1 */
 	/* Marcatore di fase, NON una cattura: phy_reg_write_array(pi, tbl, n)
 	 * esegue le sue op passando dagli accessor agganciati qui sopra, quindi le
 	 * op sono gia' nel trace: dopo ogni marcatore compaiono le PHY.MOD/PHY.WR
-	 * corrispondenti. Il record serve a delimitare le op che vengono da un
-	 * array di initvals: addr=tbl, val=n. */
+	 * corrispondenti, e non c'era nessun buco di copertura da colmare. Il
+	 * record serve solo a delimitare le op che vengono da un array di
+	 * initvals: addr=tbl, val=n. Dal trace, n e' il numero di WORD e non di
+	 * record: 12 word producono 4 scritture, cioe' record da 3 word. */
 	{ "phy_reg_write_array", OP_PHY_ARRW,  1, 2, 0 },
 	/* Controllo verso il MAC (core d11). MACCONTROL RMW + MAC host-flags.
 	 * Firme dedotte dal ramo brcmsmac (mirror del wl proprietario) --
-	 * da riverificare sul blob come per gli altri hook. Se un prologo ha un
-	 * branch nelle prime
+	 * da riverificare sul blob come per gli altri hook. Se un prologo ha un branch nelle prime
 	 * 4 parole, wd_init lo salta con un pr_warn: nessun rischio.
 	 *   wlc_bmac_mctrl(hw, u32 mask, u32 val)   reg fisso: mask=a1, val=a2
 	 *   wlc_bmac_mhf(hw, u8 idx, u16 mask, u16 val, int bands)

@@ -10,5 +10,6 @@
 | `upstreaming.md` | cosa è proponibile così com'è e cosa no |
 | `firmware-rev22.md` | ucode/initvals rev22: cosa serve e cosa è da verificare |
 | `blob-inventory.md` | inventario dei simboli N-PHY/2057 nel blob OEM |
+| `trace-init-2g.md` | la cattura della DSL-3580L: cosa conferma, cosa corregge, cosa trova |
 | `capture-protocol.md` | come si cattura una traccia utile, e cosa la rende inutile |
 | `reporting.md` | l'insieme dei report e i criteri di accettazione |

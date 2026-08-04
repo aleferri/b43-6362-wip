@@ -13,8 +13,14 @@ incluso nel repo perché proprietario.
 | `srdump.txt` | output di `wl srdump` dallo stock firmware |
 | `nvram.txt` | NVRAM CFE rilevante (chiavi wl*) |
 | `kallsyms.txt` | `/proc/kallsyms` dello stock, per `gen_syms.py` |
-| `<flow>.raw` | catture binarie del tracer, una per flow |
+| `<flow>.decoded` | catture del tracer decodificate, una per flow |
 | `<flow>.md` | verbale della cattura: comandi, canale, banda, filtri attivi |
+
+I binari del tracer **non si committano**: il testo decodificato è la forma
+utile e il binario non aggiunge nulla, purché prima si verifichi che il testo
+non perda campi (`reverse-tools/verify_decode.py`). Nel verbale vanno la
+dimensione e lo sha256 del binario di partenza, così la conversione resta
+verificabile a posteriori.
 
 Le catture vanno accompagnate dal verbale. Un `.raw` senza verbale non è un
 dato, è un file.
