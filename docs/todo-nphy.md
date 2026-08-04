@@ -16,14 +16,14 @@ attribuisce.
 | registri | dove nella cattura | attribuzione |
 |---|---|---|
 | `0x1df, 0x1e1` = 0x1591 | #203-204, init radio iniziale | fase prima dell'init PHY, da guardare |
-| `0x1d7, 0x1d9, 0x1db, 0x1dd` | #680-683, **subito prima** del blocco di gain control | confinano con quello che `patches/b43/0001` porta: probabilmente la stessa funzione, coda non portata |
+| ~~`0x1d7, 0x1d9, 0x1db, 0x1dd`~~ | #680-683 | **chiusi**: soglie di carrier sense, `patches/b43/0008` |
 | `0x020, 0x021, 0x2a7, 0x2a8, 0x2e6, 0xc33` | #5614-5625 | fase non identificata |
 | `0x07b, 0x07e` (12 volte ciascuno) | #11769, #12819 | regione della calibrazione |
 | `0x29f, 0x2a0-0x2a4, 0x2be, 0x2e5, 0x348, 0x349, 0x358` | #12194-12324 | regione della calibrazione |
 | `0x09a-0x09d` (8 volte) | #15095-15098 | regione della calibrazione |
 | `0x129, 0x12a, 0x12b` (8-16 volte) | #15863-15865 | regione della calibrazione |
 
-Le ultime quattro righe, 22 registri su 32, cadono fra #11700 e #15900, che è
+Restano 28 registri su 32, di cui 22 fra #11700 e #15900, che è
 dove il vendore fa la calibrazione PAPD e la TX IQ/LO. b43 la PAPD non l'ha
 affatto e la IQ/LO all'init la salta (`perical = 2`, "like wl"). Quindi non sono
 32 buchi indipendenti: sono due funzioni mancanti e sei registri da attribuire.
@@ -54,6 +54,25 @@ Va letto insieme alla voce di `docs/phy-g-only.md` su `b43_rssi_postprocess`, ch
 ha rami per G e LP e non per N: la catena RSSI ha due problemi indipendenti, i
 coefficienti programmati e la conversione di quello che si legge. È il numero che
 finisce in `ieee80211_rx_status.signal`.
+
+**Aggiornamento dal confronto posizionale** (finestra `rssi-cal`), che dice più
+della misura per insiemi e corregge la descrizione qui sopra:
+
+- i registri sono **gli stessi**: il port ne scrive 24 op in tutto il run, il
+  vendore 12 nella sua finestra, e l'insieme coincide;
+- l'**ordine** no. Il vendore li scrive in un blocco contiguo — `0x1b8`, poi
+  `0x1a4, 0x1aa, 0x1b0, 0x1b6` (la X sulle quattro rail), poi `0x1a5, 0x1ab, …`
+  (la Y) — mentre il port ne scrive due e poi va a leggere `0xa6, 0xa7, 0xf9`,
+  cioè intercala letture e scritture per rail;
+- i **valori non sono confrontabili** nell'harness: vengono da
+  `b43_nphy_restore_rssi_cal()`, che rimette la cache prodotta dalla
+  calibrazione RSSI, e la cal senza hardware da misurare produce zeri. Lo stesso
+  vale per `R2057_NB_MASTER_CORE0/1` (radio `0x0b4`/`0x139`): il port ci scrive
+  quello che ha in cache.
+
+Quindi la voce resta aperta ma cambia forma: non "coefficienti sbagliati", ma
+ordine diverso e valori non verificabili da qui. Per chiuderla serve o una
+cattura con la cal RSSI del vendore isolata, o l'hardware.
 
 ### 3b. Potenza target: `0x1ea` = `B43_NPHY_TXPCTL_TPWR`
 
@@ -100,6 +119,44 @@ Non l'ho patchato: "il vendore non scrive" non dice quale sia il valore di reset
 e su questo registro passa la misura di potenza. Per chiudere serve leggere
 `0x17b` prima e dopo il setup su hardware, o una cattura che includa il reset del
 core.
+
+## 3f. `0x7b` e `0x7e`: marcati e basta
+
+`B43_NPHY_RFCTL_RXG1` e `RXG2`. La tabella degli override RF rev7 ha già la voce
+per il campo `0x0800` che li pilota, ma nessun percorso del driver passa quel
+campo; il vendore li scrive 12 volte ciascuno durante la calibrazione. Non c'è
+niente da aggiungere senza sapere in che fase e con che valori, quindi
+`patches/b43/0007` mette una riga di TODO accanto alla voce morta e si va avanti.
+
+## 3g. Il vcocal non mancava
+
+Nella finestra del cambio canale il confronto posizionale segnalava otto op
+mancanti su `0x2b` e `0x2e`, cioè `RFPLL_MISC_EN` e `RFPLL_MISC_CAL_RESETN`: la
+VCO calibration alla fine di `b43_radio_2057_setup()`. b43 la fa, e la fa uguale.
+
+La differenza era nella resa: il tracer del vendore aggancia sia `mod_radio_reg`
+sia la read e la write che quella chiama, quindi una sola RMW compare come tre
+op, mentre b43 con `b43_radio_mask`/`b43_radio_set` ne produce una. Scartate le
+due ombre — solo quando seguono immediatamente una `MOD` sullo stesso indirizzo
+— le quattro op del vcocal combaciano e i mancanti di quella finestra scendono a
+**esattamente 10**, i campi 5 GHz della voce 5b.
+
+Vale la pena notare cosa sarebbe successo senza: otto op attribuite a un buco
+inesistente, e la voce 5b gonfiata da 10 a 18.
+
+## 3e. Nota di metodo: il confronto posizionale viene prima
+
+Le voci 3a-3d sono uscite da `coverage.py --values`, che confronta insiemi e
+primi valori. È la misura debole. Quella forte è `test/phase_compare.py`, che
+diffa op per op dentro una finestra allineata, ed è il metodo di `b43-ac-wip`
+che avevo importato nel primo giro senza mai eseguirlo.
+
+Applicata al TSSI, dice più di quanto avessi capito: non è "un valore diverso su
+`0x17b`", è **un'op in più**. Il port scrive `0x17b = 1` fra `0x17a` e `0x176`,
+dove il vendore in quella fase passa direttamente a `0x176`, e da lì in poi le
+due sequenze sono sfasate di uno. Allo stesso modo il cambio canale combacia per
+11 op e poi il vendore scrive i campi 5 GHz **intercalati**, non in coda: se si
+chiude la voce 5b, vanno messi in quelle posizioni.
 
 ## 4. Come rifare le misure
 

@@ -14,6 +14,8 @@
   valori vecchi scriverebbe 246 celle su 256 sbagliate;
   `0004` inizializza le tabelle epsilon e scalare che il motore PAPD legge;
   `0005` corregge i registri di bias IPA 2 GHz, che erano quelli sbagliati;
+  `0007` marca con un TODO la voce morta della tabella override RF (`0x7b`);
+  `0008` programma le soglie di carrier sense, che nessuno scriveva;
   `0006` misura il rumore di fondo su N-PHY, che non veniva misurato affatto —
   **l'unica gateata sul tipo di PHY e non sulla revisione**, quindi l'unica che
   esce dal recinto del nostro radio.

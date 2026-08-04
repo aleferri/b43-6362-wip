@@ -13,3 +13,4 @@ modules.order
 *.bin
 test/build/
 test/nphy_trace
+*.rv

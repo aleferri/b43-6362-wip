@@ -10,6 +10,7 @@ cattura sotto `router-data/`.
 
 ```sh
 make KDIR=~/src/linux            # costruisce
+./phase_compare.py --vendor ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
 ./nphy_trace init dsl3580l       # flow di init, trace su stdout
 ./nphy_trace chanset dsl3580l 6  # init poi cambio a canale 6
 ./nphy_trace rfkill dsl3580l
@@ -131,11 +132,79 @@ proprio quelli che dipendono dalla frequenza.
 
 ## Quanto lontano arriva
 
-`coverage.py` misura quali registri e quali celle di tabella il vendore scrive e
-il port no. Non è un confronto posizionale — quello vuole due sequenze
-allineabili, e sull'init non lo sono, perché b43 e il driver proprietario
-ordinano le fasi in modo diverso: il port comincia dalle tabelle, il vendore dal
-radio.
+Due misure, e servono a cose diverse. **La forte è quella posizionale**, e per
+troppo tempo ho usato solo l'altra.
+
+### phase_compare.py — confronto posizionale per finestre
+
+È il metodo di `b43-ac-wip`: `compare.py` normalizza i due lati e diffa op per
+op, con `--range` per limitare la cattura a una finestra e `--align-on` per
+agganciare l'output dell'harness al primo op di quella finestra.
+
+Sull'init **intero** non si allinea, e non è un limite del metodo: b43 e il
+driver proprietario ordinano le fasi in modo diverso, il port comincia dalle
+tabelle e il vendore dal radio. Dentro una fase si allinea benissimo.
+`phase_compare.py` tiene la tabella delle finestre riconosciute e le confronta
+tutte:
+
+| finestra | op | run | esito |
+|---|---|---|---|
+| gain-control (`0008`+`0001`) | 87 | **87/87** | **ok** |
+| papd-comp (`0003`) | 16 | **16/16** | **ok** |
+| papd-tables (`0004`) | 5 | **5/5** | **ok** |
+| ipa-bias (`0005`) | 3 | **3/3** | **ok** |
+| chanswitch-ch6 | 39 | 11/39 | mancano **esattamente 10**: i campi 5 GHz della voce 5b |
+| tssi-setup | 19 | 5/19 | mancano 4, in più 15: il `0x17b` di troppo e lo sfasamento |
+| rssi-cal | 16 | 1/16 | mancano 15: i valori vengono dalla cal, che l'harness non fa |
+
+La colonna **run** è la sequenza consecutiva più lunga che combacia, su quante op
+ha la finestra: dice fin dove le due sequenze stanno insieme, che è più
+informativo del conteggio dei mismatch. E accanto a ogni finestra che diverge
+c'è la diagnosi per **multiinsieme** — quante op del vendore mancano e quante ne
+fa il port in più, valori compresi — perché "36 differenze posizionali" non fa
+capire niente e "mancano 10" sì.
+
+### Le equivalenze, calcolate e non dichiarate
+
+Due rese diverse della stessa cosa si riducono, e la riduzione si ricava dai
+dati invece di essere assunta:
+
+- **`PHY.OR`/`PHY.AND` contro `PHY.MOD`**: b43 usa `b43_phy_set`/`b43_phy_mask`,
+  il vendore `phy_reg_mod`. Si portano tutte alla forma della mod, dove `val` è
+  il valore del campo e `mask` il campo modificato.
+- **le ombre di una read-modify-write**: il tracer aggancia sia
+  `mod_radio_reg` sia la `read_radio_reg`/`write_radio_reg` che quella chiama, e
+  la stessa RMW finisce nel trace come **tre** op. b43 ne registra una. Le due
+  ombre si scartano, ma solo se seguono immediatamente una `MOD` sullo stesso
+  indirizzo — una `RD` o `WR` isolata è l'op vera e resta.
+
+La seconda ha ripagato subito: il vcocal del cambio canale sembrava mancare (8
+op) e non mancava, e i "mancanti" di quella finestra sono scesi a 10, che sono
+esattamente i campi 5 GHz della voce 5b.
+
+Un "ok" qui dice una cosa forte: in quella fase il port fa le stesse op, con gli
+stessi valori, nello stesso ordine. E paga: allargando la finestra
+`gain-control` da #685 a #680 sono venute fuori quattro scritture di soglie CRS
+che nessuno faceva (`patches/b43/0008`), e una `PHY.RD` di troppo nella guardia
+di `0001`, che leggeva `BANDCTL` dall'hardware dove b43 usa lo stato software. E le due divergenze note sono localizzate,
+non solo contate — la cattura dice che i dieci campi 5 GHz della voce 5b vanno
+scritti **in mezzo** alla sequenza (0x43 dopo 0x41, 0x4a dopo 0x47), non in coda.
+
+C'è anche `--global-run DA A`, che non scegli una fase a mano: prende tutta la
+finestra del vendore e tutto l'output del flow, e riporta le run più lunghe. Sul
+primo init: **1540 op consecutive** (dal caricamento della TX gain table in poi),
+poi 323, 266, 172, e in totale 3342 op in comune su 23126 in 332 blocchi. È la
+misura più onesta di dove sta il port: copre pezzi, e i pezzi sono contigui.
+
+Il passo che avevo saltato: `merge_retvals.py` sulla cattura prima di
+confrontare. Senza, le 11049 righe `RETVAL` entrano nel diff come op a sé e
+sfasano tutto. `phase_compare.py` lo fa da solo.
+
+### coverage.py — copertura per insiemi
+
+Misura quali registri e quali celle di tabella il vendore scrive e il port no.
+Non è posizionale: serve a dire *quanto* manca e a trovare le voci al contrario,
+non a dire se l'ordine è giusto. Utile per orientarsi, debole come garanzia.
 
 Le celle si contano **espandendo le table-op**: un'op di lunghezza N copre N
 celle. Contarla come una sola sottostimava il port, che scrive in bulk dove il
