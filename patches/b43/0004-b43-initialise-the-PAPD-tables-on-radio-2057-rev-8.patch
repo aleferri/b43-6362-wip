@@ -1,0 +1,120 @@
+From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: initialise the PAPD tables on radio 2057 rev 8
+
+b43_phy_initn() enables the PAPD engine on every device with an internal
+PA, by setting PAPD_EN0 and PAPD_EN1, but never touches the tables that
+engine reads: the scalar lookup (tables 32 and 34) and the epsilon
+coefficients (tables 31 and 33). They keep whatever they happened to
+contain.
+
+An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362
+(N-PHY rev 8, radio 2057 rev 8) shows it writing the scalar lookup with a
+fixed set of 64 values per core, and clearing the 64 epsilon entries per
+core, during init. The constants are the ones brcmsmac carries in
+nphy_papd_scaltbl, and they match the capture exactly.
+
+Do the same when enabling PAPD on radio 2057 rev 8. Other radios keep the
+current behaviour, since the state their PAPD engine expects has not been
+checked against hardware.
+
+This does not add the PAPD calibration, which would compute the epsilon
+values: it gives the engine a defined starting state instead of whatever
+was left in the tables.
+
+Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+---
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.h
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.h
+@@ -195,6 +195,7 @@
+ const s16 *b43_ntab_get_rf_pwr_offset_table(struct b43_wldev *dev);
+ 
+ extern const s8 b43_ntab_papd_pga_gain_delta_ipa_2g[];
++extern const u32 b43_ntab_papd_scaltbl[];
+ 
+ extern const u16 tbl_iqcal_gainparams[2][9][8];
+ extern const struct nphy_txiqcal_ladder ladder_lo[];
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+@@ -2928,6 +2928,28 @@
+  * PAD-gain selector byte differs), so the same gain index maps to
+  * the same physical PAD gain code on both revisions.
+  */
++/* PAPD scalar lookup, common to the N-PHY revisions that have PAPD.
++ * Same values brcmsmac writes from nphy_papd_scaltbl.
++ */
++const u32 b43_ntab_papd_scaltbl[] = {
++	0x0ae2002f, 0x0a3b0032, 0x09a70035, 0x09220038,
++	0x0887003c, 0x081f003f, 0x07a20043, 0x07340047,
++	0x06d2004b, 0x067a004f, 0x06170054, 0x05bf0059,
++	0x0571005e, 0x051e0064, 0x04d3006a, 0x04910070,
++	0x044c0077, 0x040f007e, 0x03d90085, 0x03a1008d,
++	0x036f0095, 0x033d009e, 0x030b00a8, 0x02e000b2,
++	0x02b900bc, 0x029200c7, 0x026d00d3, 0x024900e0,
++	0x022900ed, 0x020a00fb, 0x01ec010a, 0x01d0011a,
++	0x01b7012a, 0x019e013c, 0x0187014f, 0x01720162,
++	0x015d0177, 0x0149018e, 0x013701a5, 0x012601be,
++	0x011501d9, 0x010501f5, 0x00f70212, 0x00e90232,
++	0x00dc0253, 0x00d00276, 0x00c4029c, 0x00b902c3,
++	0x00af02ed, 0x00a5031a, 0x009c0349, 0x0093037a,
++	0x008b03af, 0x008303e7, 0x007c0422, 0x00750461,
++	0x006e04a3, 0x006804ea, 0x00620534, 0x005d0583,
++	0x005805d7, 0x0053062f, 0x004e068d, 0x004a06f1,
++};
++
+ static const s16 b43_ntab_rf_pwr_offset_2057_rev8_2g[] = {
+ 	-122, -122,  -95,  -80,  -69,
+ 	 -61,  -54,  -49,  -43,  -39,
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -6016,6 +6016,20 @@
+ }
+ 
+ /* http://bcm-v4.sipsolutions.net/802.11/PHY/Init/N */
++/* Initialise the tables the PAPD engine reads once it is enabled: the scalar
++ * lookup with its constants, and the epsilon tables cleared. Without this the
++ * engine runs on whatever the tables happened to contain.
++ */
++static void b43_nphy_papd_tables_init(struct b43_wldev *dev)
++{
++	static const u32 zero[64] = { 0 };
++
++	b43_ntab_write_bulk(dev, B43_NTAB32(32, 0), 64, b43_ntab_papd_scaltbl);
++	b43_ntab_write_bulk(dev, B43_NTAB32(34, 0), 64, b43_ntab_papd_scaltbl);
++	b43_ntab_write_bulk(dev, B43_NTAB32(31, 0), 64, zero);
++	b43_ntab_write_bulk(dev, B43_NTAB32(33, 0), 64, zero);
++}
++
+ static int b43_phy_initn(struct b43_wldev *dev)
+ {
+ 	struct ssb_sprom *sprom = dev->dev->bus_sprom;
+@@ -6124,6 +6138,11 @@
+ 		b43_phy_set(dev, B43_NPHY_PAPD_EN1, 0x1);
+ 		b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ1, 0x007F,
+ 				nphy->papd_epsilon_offset[1] << 7);
++		/* The tables the PAPD engine just enabled reads from are only
++		 * known to be initialised this way on radio 2057 rev 8.
++		 */
++		if (phy->rev == 8 && phy->radio_rev == 8)
++			b43_nphy_papd_tables_init(dev);
+ 		b43_nphy_int_pa_set_tx_dig_filters(dev);
+ 	} else if (phy->rev >= 5) {
+ 		b43_nphy_ext_pa_set_tx_dig_filters(dev);
+
+Note per il repo, non per la mailing list:
+
+  - Gate: la chiamata sta dentro il ramo b43_nphy_ipa() e dietro
+    phy->rev == 8 && phy->radio_rev == 8. Per ogni altro device il ramo IPA
+    resta identico a oggi.
+  - Verifica: harness in test/, flow full. Le 256 celle delle tabelle 31, 32, 33
+    e 34 coincidono con la cattura, zero divergenti. La copertura delle celle
+    passa da 1190/1987 a 1446/1987.
+  - Il vendore azzera le epsilon con 64 scritture singole, il port con una bulk:
+    lo STATO della tabella e' lo stesso, la sequenza di op no. Vale per tutte le
+    tabelle qui: il confronto e' sulle celle, non posizionale.
+  - La tabella scalare viene da brcmsmac (nphy_papd_scaltbl, in-tree e GPL) e i
+    64 valori sono stati verificati identici a quelli che il device scrive.
+  - Cosa NON fa: la calibrazione PAPD, che e' quella che riempirebbe le epsilon
+    con valori veri. Su questa board il vendore all'init le azzera e basta, la
+    cal la fa dopo e la cattura non la copre.
+  - NON provata su hardware.

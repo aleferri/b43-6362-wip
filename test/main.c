@@ -50,6 +50,12 @@ struct board {
 	u8 fem_pdet_range;
 	u8 fem_tr_iso;
 	u8 fem_antswlut;
+	/* Per core, dalla SROM: maxpwr in Q5.2, itssi, e i tre coefficienti del
+	 * PA. Senza questi il calcolo della potenza target esce zero, e nel
+	 * confronto col vendore si vede subito (0x1ea = TXPCTL_TPWR). */
+	u8 maxpwr_2g[2];
+	u8 itssi_2g[2];
+	u16 pa_2g[2][3];
 };
 
 /* BCM6362 integrato della DSL-3580L: d11 rev 22, N-PHY rev 8, radio 2057
@@ -81,6 +87,12 @@ static const struct board boards[] = {
 		.fem_pdet_range = 2,
 		.fem_tr_iso = 3,
 		.fem_antswlut = 0,
+		/* srom[0xC0/2] e srom[0xE0/2] e seguenti: maxp 74 (18.5 dBm in
+		 * Q5.2), itssi 32, e i pa_2g dei due core. */
+		.maxpwr_2g = { 74, 74 },
+		.itssi_2g = { 32, 32 },
+		.pa_2g = { { 0xff71, 0x1740, 0xfb17 },
+			   { 0xff81, 0x1784, 0xfb1b } },
 	},
 };
 
@@ -95,6 +107,8 @@ static struct bcma_device bcma_dev;
 
 static void setup(const struct board *b, unsigned int channel)
 {
+	int i;
+
 	memset(&sprom, 0, sizeof(sprom));
 	memset(&bus, 0, sizeof(bus));
 	memset(&wl, 0, sizeof(wl));
@@ -112,6 +126,13 @@ static void setup(const struct board *b, unsigned int channel)
 	sprom.fem.ghz2.pdet_range = b->fem_pdet_range;
 	sprom.fem.ghz2.tr_iso = b->fem_tr_iso;
 	sprom.fem.ghz2.antswlut = b->fem_antswlut;
+	for (i = 0; i < 2; i++) {
+		sprom.core_pwr_info[i].maxpwr_2g = b->maxpwr_2g[i];
+		sprom.core_pwr_info[i].itssi_2g = b->itssi_2g[i];
+		sprom.core_pwr_info[i].pa_2g[0] = b->pa_2g[i][0];
+		sprom.core_pwr_info[i].pa_2g[1] = b->pa_2g[i][1];
+		sprom.core_pwr_info[i].pa_2g[2] = b->pa_2g[i][2];
+	}
 
 	memset(&bcma_bus, 0, sizeof(bcma_bus));
 	memset(&bcma_dev, 0, sizeof(bcma_dev));

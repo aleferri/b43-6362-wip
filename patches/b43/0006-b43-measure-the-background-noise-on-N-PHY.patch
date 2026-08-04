@@ -1,0 +1,150 @@
+From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: measure the background noise on N-PHY
+
+Both halves of the link quality calculation return early unless the PHY is
+a G, so on an N-PHY dev->stats.link_noise keeps the value it was
+initialised with and mac80211 is handed a constant as the noise floor.
+
+The N-PHY reports through the power indication block rather than through
+JSSI: the ucode leaves one 32-bit complex power value per core in shared
+memory, and brcmsmac turns it into dBm by scaling it down by the number of
+samples the ucode averaged, converting to dB, and adding the fixed offset
+of this chip family. Do the same, and clear the block before asking for a
+sample so a stale one cannot be read as fresh.
+
+Verified against an MMIO capture of the proprietary wl driver 6.30.102.7 on
+a BCM6362: it reads the same four shared memory words, and running its
+sampled values through this computation gives noise floors between -82 and
+-88 dBm, per core.
+
+The mechanism is per PHY type, not per revision: brcmsmac uses this same
+path for every N-PHY revision, and the capture only covers rev 8. The
+change is still bounded for the untested ones, since what they report today
+is a value that is never measured at all.
+
+Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+---
+--- a/drivers/net/wireless/broadcom/b43/b43.h
++++ b/drivers/net/wireless/broadcom/b43/b43.h
+@@ -335,6 +335,11 @@
+ #define B43_SHM_SH_NPHY_TXIQW2		0x0704
+ #define B43_SHM_SH_NPHY_TXIQW3		0x0706
+ /* SHM_SHARED tx pwr ctrl */
++/* Power indication block: the ucode leaves one 32-bit complex power value per
++ * core here, low half first. Same offsets brcmsmac calls M_PWRIND_BLKS.
++ */
++#define B43_SHM_SH_PWRIND_BLKS		0x0308
++#define B43_SHM_SH_PWRIND(i)		(B43_SHM_SH_PWRIND_BLKS + 2 * (i))
+ #define B43_SHM_SH_NPHY_TXPWR_INDX0	0x0708
+ #define B43_SHM_SH_NPHY_TXPWR_INDX1	0x070E
+ 
+--- a/drivers/net/wireless/broadcom/b43/main.c
++++ b/drivers/net/wireless/broadcom/b43/main.c
+@@ -1397,16 +1397,65 @@
+ 
+ static void b43_generate_noise_sample(struct b43_wldev *dev)
+ {
+-	b43_jssi_write(dev, 0x7F7F7F7F);
++	int i;
++
++	if (dev->phy.type == B43_PHYTYPE_N) {
++		/* The ucode reports through the power indication block on this
++		 * PHY, not through JSSI. Clear it so a stale sample cannot be
++		 * mistaken for a fresh one.
++		 */
++		for (i = 0; i < 4; i++)
++			b43_shm_write16(dev, B43_SHM_SHARED,
++					B43_SHM_SH_PWRIND(i), 0);
++	} else {
++		b43_jssi_write(dev, 0x7F7F7F7F);
++	}
+ 	b43_write32(dev, B43_MMIO_MACCMD,
+ 		    b43_read32(dev, B43_MMIO_MACCMD) | B43_MACCMD_BGNOISE);
+ }
+ 
++/* The ucode reports the measured complex power per core in the power indication
++ * block. Turn it into a noise floor the way brcmsmac does for this PHY: one
++ * 32-bit value per core, scaled down by the number of samples the ucode
++ * averaged, converted to dB and shifted by the fixed offset of the family.
++ */
++static void b43_nphy_noise_sample(struct b43_wldev *dev)
++{
++	s8 noise = -92;
++	int core;
++
++	for (core = 0; core < 2; core++) {
++		u32 pwr;
++		u8 msb, secondmsb = 0;
++		s8 dbm;
++
++		pwr = b43_shm_read16(dev, B43_SHM_SHARED,
++				     B43_SHM_SH_PWRIND(2 * core));
++		pwr |= (u32)b43_shm_read16(dev, B43_SHM_SHARED,
++					   B43_SHM_SH_PWRIND(2 * core + 1)) << 16;
++		if (!pwr)
++			continue;
++
++		pwr >>= 9;
++		msb = fls(pwr);
++		if (msb) {
++			msb--;
++			if (msb)
++				secondmsb = (pwr >> (msb - 1)) & 1;
++		}
++		dbm = 3 * msb + 2 * secondmsb - 103;
++		if (dbm > noise)
++			noise = dbm;
++	}
++
++	dev->stats.link_noise = noise;
++}
++
+ static void b43_calculate_link_quality(struct b43_wldev *dev)
+ {
+ 	/* Top half of Link Quality calculation. */
+ 
+-	if (dev->phy.type != B43_PHYTYPE_G)
++	if (dev->phy.type != B43_PHYTYPE_G && dev->phy.type != B43_PHYTYPE_N)
+ 		return;
+ 	if (dev->noisecalc.calculation_running)
+ 		return;
+@@ -1426,6 +1475,12 @@
+ 
+ 	/* Bottom half of Link Quality calculation. */
+ 
++	if (dev->phy.type == B43_PHYTYPE_N) {
++		b43_nphy_noise_sample(dev);
++		dev->noisecalc.calculation_running = false;
++		return;
++	}
++
+ 	if (dev->phy.type != B43_PHYTYPE_G)
+ 		return;
+ 
+
+Note per il repo, non per la mailing list:
+
+  - Come e' venuta fuori: da reverse-tools/phy_type_audit.py, che elenca i
+    costrutti dove b43 cita la PHY G e non la N. handle_irq_noise e
+    b43_calculate_link_quality erano due delle venti voci.
+  - Meccanismo, da brcmsmac (in-tree, GPL): wlc_phy_noise_sample_request nel
+    ramo ISNPHY azzera M_PWRIND_MAP0..3 e alza MCMD_BG_NOISE;
+    wlc_phy_noise_sample_intr legge le quattro parole, compone
+    (hi << 16) | lo per core, divide per 512 (PHY_NOISE_SAMPLE_LOG_NUM_UCODE),
+    converte con wlc_phy_compute_dB e somma PHY_NOISE_OFFSETFACT_4322 = -103.
+    Il rumore riportato e' il massimo fra i core.
+  - Gli offset: M_PWRIND_BLKS = 0x184 * 2 = 0x308, e la cattura legge
+    esattamente 0x308, 0x30a, 0x30c, 0x30e, 96 volte. Qui le due codifiche
+    coincidono, a differenza del blocco TXPWR_INDX (vedi test/README.md).
+  - Verifica sui dati: presi i 96 valori dai RETVAL della cattura e passati per
+    questa conversione, escono -82, -86, -88 dBm per core. Plausibili e
+    coerenti fra i due core, che e' quanto si puo' dire senza uno strumento.
+  - Cosa NON fa: la finestra di 8 campioni che brcmsmac tiene per core. Qui il
+    campione corrente diventa il valore riportato, e la media nel tempo la
+    fanno le richieste periodiche. Se serve una finestra, si aggiunge dopo
+    aver visto se cambia qualcosa in pratica.
+  - Il gate e' sul TIPO di PHY e non sulla revisione: e' l'asse giusto per
+    questa cosa, ma tocca tutte le N-PHY e non solo il rev 8. E' l'unica delle
+    sei patch che esce dal recinto del nostro radio, e va detto a chi rivede.
+  - NON provata su hardware.

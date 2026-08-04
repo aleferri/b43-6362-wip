@@ -112,6 +112,13 @@ serve una misura. Voce aperta, non patch.
 
 ## Da catturare ancora
 
+Nota sul 40 MHz, che nell'elenco non c'è per un motivo: su questa board il driver
+vendor non usa i 40 MHz in 2.4 GHz, 31 chanspec su 31 sono bw20. I rami HT40 del
+driver non si verificano qui nemmeno volendo, serve hardware diverso — e nei
+commenti del codice va scritto così, non come "manca la cattura", che suona come
+se non ci avessimo provato.
+
+
 - `cal`: `wl phy_forcecal 1`, per rcal/rccal/tx iq-lo/papd.
 - un giro completo dei canali 1-13: qui ce ne sono cinque (1, 2, 5, 6, 10) e su
   quelli nulla dipende dal canale oltre alla chantab, ma 13 e 14 restano da

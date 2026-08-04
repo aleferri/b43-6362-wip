@@ -22,7 +22,10 @@ write an LNA1 gain set of 9, 14, 19, 24 and a W1 clip threshold of 13,
 where the device is programmed with 8, 13, 18, 25 and 24. Extending this
 to another revision needs a capture from hardware that has it.
 
-40 MHz and 5 GHz return early for the same reason: no captured values.
+40 MHz and 5 GHz return early, for two different reasons. The vendor driver
+does not use 40 MHz in 2.4 GHz on this board, so checking those values needs
+a device that runs 40 MHz. For 5 GHz, b43 has no channel table for radio
+2057 rev 8, so the driver cannot tune there in the first place.
 
 Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
 ---

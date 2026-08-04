@@ -58,7 +58,9 @@ Patch: `patches/b43/0001`, scritta sui valori della cattura e non su brcmsmac,
 perché i due divergono: LNA1 `8, 13, 18, 25` invece di `9, 14, 19, 24`, W1 clip
 24 invece di 13, e in 2.4 GHz il device programma anche LNA2, TIA e i gain bits
 che il ramo 2 GHz di brcmsmac non tocca. Dettaglio in `docs/trace-init-2g.md`.
-Limitata a radio rev 8, 2.4 GHz, 20 MHz: per le altre revisioni non ho catture.
+Limitata a radio rev 8, 2.4 GHz, 20 MHz. Per le altre revisioni servirebbe una
+cattura da quell'hardware; per i 40 MHz serve un device che li accenda, perché il
+driver vendor non li usa in 2.4 GHz su questa board (31 chanspec su 31 sono bw20).
 Applica pulito su `848acc8ffe1b`, **non compilata e non provata su hardware**.
 
 ### 2. `b43_radio_2057_setup` — nessun `case 8`, ma NON è un buco (phy_n.c:719)
@@ -139,6 +141,67 @@ Sul cambio canale il vendore scrive dieci registri in più, tutti a zero: i camp
 `PAD5G_TUNE_MISC_PUS_CORE0/1`, `LNA5G_TUNE_CORE0/1`). b43 usa la variante
 `chantabent_rev7_2g` e non li tocca. Impatto ignoto, e il percorso è condiviso
 con altri device: voce aperta, non patch. Vedi `docs/trace-init-2g.md`.
+
+### 4d. Il motore PAPD gira su tabelle non inizializzate — CHIUSA
+
+`b43_phy_initn()` accende PAPD su ogni device con PA interno (`PAPD_EN0` e
+`PAPD_EN1`), ma non tocca le tabelle che quel motore legge: la scalare (32 e 34)
+e le epsilon (31 e 33). Restano con quello che c'era.
+
+La cattura mostra il vendore scrivere la scalare con 64 valori per core — gli
+stessi che brcmsmac ha in `nphy_papd_scaltbl`, verificati identici — e azzerare le
+64 epsilon per core. `patches/b43/0004` fa lo stesso per radio 2057 rev 8: nell'
+harness le 256 celle coincidono con la cattura, zero divergenti.
+
+Non aggiunge la calibrazione PAPD, che è quella che riempirebbe le epsilon con
+valori veri: dà al motore uno stato definito invece di quello che capita.
+
+### 4e. I registri di bias IPA 2 GHz sono sbagliati sul rev 8 — CHIUSA
+
+Trovata dalla lista **al contrario** di `test/coverage.py`, cioè i registri che il
+port scrive e il vendore no. Era una riga sola, `r05f`.
+
+Il ramo rev 7/8 dei workaround IPA scrive `0x5F` e `0xE8`, che sono
+`IPA2G_GAIN_CORE0` e `IPA2G_IMAIN_CORE1`: un registro di ciascuna coppia, su core
+diversi. Lo scostamento fra i due core di questo radio è 0x85, quindi il gemello
+di `IPA2G_IMAIN_CORE1` è `IPA2G_IMAIN_CORE0` a `0x63`, non `0x5F`.
+
+La cattura, nello stesso punto e in entrambi gli init, scrive `0x63 = 0x14` e
+`0xE8 = 0x14` — IMAIN su entrambi i core, stesso valore — e `0x5F` non lo tocca
+mai. b43 invece lascia IMAIN_CORE0 al suo valore, scrive il registro di gain del
+core 0 con un valore destinato al bias, e programma i due core in modo diverso.
+
+`patches/b43/0005` dà al rev 8 un `case` suo e programma IMAIN su entrambi i core.
+Il rev 7 tiene il suo `case` e il suo comportamento: ha probabilmente lo stesso
+problema, ma non c'è una cattura da hardware con quel radio, e il ramo 40 MHz
+nemmeno. I due `case` sono separati di proposito, con 20 e 40 MHz divisi dentro
+ciascuno: chi arriva con una cattura da un 2057 rev 7 tocca il suo ramo e non deve
+farsi carico del nostro. Il prezzo è la duplicazione delle due righe del 40 MHz, e
+si paga volentieri.
+
+### 4f. Nessuna misura del rumore di fondo su N-PHY — CHIUSA
+
+`b43_calculate_link_quality()` e `handle_irq_noise()` ritornano subito se la PHY
+non è una G, quindi su N-PHY `dev->stats.link_noise` resta al valore iniziale e
+mac80211 riceve una costante come rumore di fondo.
+
+Il meccanismo per N c'è in brcmsmac: la ucode lascia una potenza complessa per
+core nel blocco di power indication in SHM (`M_PWRIND_BLKS = 0x308`), il driver
+azzera le quattro parole, alza `MCMD_BG_NOISE`, e alla risposta compone
+`(hi << 16) | lo` per core, divide per 512, converte in dB e somma −103. Il rumore
+riportato è il massimo fra i core.
+
+La cattura legge esattamente quelle quattro parole, 96 volte, e passando i suoi
+valori per la conversione escono **−82, −86, −88 dBm** per core: plausibili e
+coerenti fra i due core. `patches/b43/0006` la cabla.
+
+Attenzione al recinto: è l'unica delle sei patch gateata sul **tipo** di PHY e
+non sulla revisione, quindi tocca tutte le N-PHY. L'argomento per accettarla è che
+oggi quelle riportano un numero che non è mai stato misurato.
+
+Il resto dei punti dove b43 tratta la G e non la N sta in `docs/phy-g-only.md`:
+venti costrutti, di cui i due del rumore e quattro in `xmit.c` sul RSSI e sulla
+decodifica RX sono buchi veri, gli altri legittimi.
 
 ### 6. `dev_id 0x435f` e la banda 5 GHz
 
