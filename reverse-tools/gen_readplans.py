@@ -34,7 +34,7 @@ KINDS = {'PHY.RD': 'phy', 'RAD.RD': 'radio', 'MMIO.RD': 'mmio'}
 TABLE_PORT = {0x72, 0x73, 0x74}
 
 
-def collect(path, lo, hi, max_len):
+def collect(path, lo, hi, max_len, skip=()):
     pending = {}          # seq del record di read -> (kind, addr)
     plans = OrderedDict()  # (kind, addr) -> [valori]
     reads = 0
@@ -49,6 +49,8 @@ def collect(path, lo, hi, max_len):
         kv = dict(re.findall(r'(\w+)=(\S+)', m.group(3)))
 
         if lo is not None and not (lo <= seq <= hi):
+            continue
+        if any(a <= seq <= b for a, b in skip):
             continue
 
         if op in KINDS:
@@ -118,12 +120,20 @@ def main():
     ap.add_argument('trace')
     ap.add_argument('--range', nargs=2, type=int, metavar=('DA', 'A'))
     ap.add_argument('--name', default='init')
+    ap.add_argument('--skip', nargs=2, type=int, action='append', default=[],
+                    metavar=('DA', 'A'),
+                    help='intervallo di record da NON mettere nel piano, '
+                         'ripetibile. Il piano e\' una FIFO per indirizzo: le '
+                         'letture di una fase che il port non esegue vanno '
+                         'escluse, o le consuma lui e da li\' in poi legge i '
+                         'valori del giro sbagliato.')
     ap.add_argument('--max-len', type=int, default=64,
                     help='valori per indirizzo (i poll ne hanno migliaia)')
     args = ap.parse_args()
 
     lo, hi = args.range if args.range else (None, None)
-    plans, reads, matched = collect(args.trace, lo, hi, args.max_len)
+    plans, reads, matched = collect(args.trace, lo, hi, args.max_len,
+                                   [tuple(x) for x in args.skip])
     if not plans:
         sys.exit('nessuna read con RETVAL appaiato: e\' il trace giusto?')
     emit(plans, args.name, args.trace.split('/')[-1], reads, matched, sys.stdout)

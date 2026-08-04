@@ -113,12 +113,57 @@ salva-riconfigura tipico della calibrazione TX.
 
 Quindi il ramo `phy->rev != 7 ? 1 : 0x31` sembra mescolare le due fasi: mette il
 valore della cal nel setup per il rev 7, e per gli altri rev scrive 1 dove il
-vendore lascia il valore di reset.
+vendore lascia stare.
 
-Non l'ho patchato: "il vendore non scrive" non dice quale sia il valore di reset,
-e su questo registro passa la misura di potenza. Per chiudere serve leggere
-`0x17b` prima e dopo il setup su hardware, o una cattura che includa il reset del
-core.
+**Il valore però si sa, e prima avevo scritto che serviva una lettura su
+hardware: non serve.** La cattura contiene la scrittura della tabella di init del
+radio, `#104: 0x17b = 0x02` e `#105: 0x19b = 0x02`, un core per riga; e le quattro
+letture di `0x17b` nei due init (#1256, #8528, #23907, #35958) tornano **tutte
+`0x02`**. Quindi il valore che il vendore ha su quel registro durante il setup è
+`0x02`, ci arriva dalla tabella di init, e non dipende dal valore di reset del
+chip. `0x31` è il valore della cal TX: scritto a #8537, rimesso a `0x02` a #10743.
+
+E `r2057_rev8_init` di b43 ha già `0x17b = 0x02` e `0x19b = 0x02`, identici. Il
+setup TSSI quindi **sovrascrive** con 1 un valore che b43 stessa aveva appena
+programmato bene.
+
+I due driver del vendore non sono d'accordo fra loro: `0x02` il blob
+6.30.102.7 catturato, `0x01` brcmsmac a `brcmsmac/phy/phy_n.c:17077`, che scrive
+`TSSIG = 0x1` per ogni phy rev diverso dal 7 e quindi anche per il nostro. **Fra i
+due vale il blob**: `wl 6.30` è molto più avanti di brcmsmac, che è fermo a
+5.100.x, e per questo radio è il driver che gira sull'hardware da cui viene la
+cattura. Il valore giusto è `0x02`, cioè quello che la tabella di init già mette:
+il difetto è la scrittura di `1` nel setup, che va tolta per il rev 8.
+
+Non è ancora una patch perché su quel registro passa la misura di potenza e la
+patch va accompagnata dalla misura corrispondente (`reports/40-tx-power.md`), come
+`0001` e `0002`. Ma il valore non è più in discussione.
+
+### 3d bis. E un refuso di trascrizione, nella riga accanto
+
+Guardando quel ramo è venuto fuori altro. brcmsmac gatea i due registri su cose
+diverse:
+
+    if (pi->pubpi.radiorev != 5)      -> TSSIA
+    if (!NREV_IS(pi->pubpi.phy_rev,7)) -> TSSIG
+
+b43 ha trascritto **entrambi** come `phy->rev`:
+
+    if (phy->rev != 5)  b43_radio_write(dev, r + 0xA, 0);   /* radiorev in brcmsmac */
+    if (phy->rev != 7)  b43_radio_write(dev, r + 0xB, 1);   /* questo combacia */
+
+Il radio 2057 esiste dal phy rev 7 in su, quindi `phy->rev != 5` è **sempre vero**
+in quel ramo e b43 scrive sempre TSSIA, dove brcmsmac lo salta sui radio rev 5 —
+e una tabella di canale per radio rev 5 in questo albero c'è
+(`b43_nphy_chantab_phy_rev8_radio_rev5`). Sul nostro rev 8 le due forme del gate
+danno lo stesso risultato, quindi non spiega nessuna divergenza della cattura e
+non è patchabile con quello che abbiamo. Resta scritto qui perché è un difetto
+vero e chi arriva con un 2057 rev 5 parte da qui.
+
+**Non viene dalla serie merged**, verificato e non sperato: nessuna delle sette
+patch di `docs/upstream-status.md` tocca `phy_n.c` — i file sono `main.c`,
+`radio_2057.c` e `tables_nphy.c`. Il refuso è più vecchio, del codice rev 7+
+scritto per i 43217/43227/43228.
 
 ## 3f. `0x7b` e `0x7e`: marcati e basta
 
@@ -156,7 +201,7 @@ Applicata al TSSI, dice più di quanto avessi capito: non è "un valore diverso 
 dove il vendore in quella fase passa direttamente a `0x176`, e da lì in poi le
 due sequenze sono sfasate di uno. Allo stesso modo il cambio canale combacia per
 11 op e poi il vendore scrive i campi 5 GHz **intercalati**, non in coda: se si
-chiude la voce 5b, vanno messi in quelle posizioni.
+chiude la voce 5b, vanno messi in quelle posizioni. È quello che fa `0011`.
 
 ## 5. Le formule: cosa manca davvero per il rev 8
 
@@ -171,13 +216,31 @@ save/restore delle calibrazioni. Non sono stub: girano.
 
 **Mancante per intero**: la **calibrazione PAPD**. b43 non ha nessuna funzione
 che la faccia — accende il motore (`PAPD_EN0`/`EN1`), ora gli inizializza le
-tabelle (`patches/b43/0004`), ma non calcola mai gli epsilon. In brcmsmac sono
-`wlc_phy_a3_nphy` (146 righe), `wlc_phy_a4` (275), `wlc_phy_ipa_set_bbmult_nphy`
-(722) e `wlc_phy_txpwr_papd_cal_nphy` (12): **~1150 righe**.
+tabelle (`patches/b43/0004`) e calcola l'offset epsilon (`0009`), ma non calcola
+mai gli epsilon. In brcmsmac il blocco è:
+
+| funzione | righe | cosa fa |
+|---|---|---|
+| `wlc_phy_a2_nphy` | 279 | calcola e **scrive** la tabella epsilon, per passo di gain |
+| `wlc_phy_a4` | 276 | il livello alto: setup, per core a3 e a2, ripristino |
+| `wlc_phy_papd_cal_setup_nphy` | 250 | override RF, AFE, TXRXCOUPLE, tono |
+| `wlc_phy_a3_nphy` | 147 | la ricerca dell'indice di gain: **legge** la tabella epsilon |
+| `wlc_phy_papd_cal_cleanup_nphy` | 124 | il ripristino di quel setup |
+| `wlc_phy_ipa_restore_tx_digi_filts_nphy` | 41 | il filtro digitale della cal |
+| `wlc_phy_txpwr_papd_cal_nphy` | 13 | il gate "il gain è derivato di 4" |
+| `wlc_phy_ipa_set_bbmult_nphy` | 6 | scrive il bbmult |
+
+Circa **1150 righe**, ma distribuite in modo molto diverso da come le avevo
+contate: qui prima c'era scritto che il pezzo grosso era
+`wlc_phy_ipa_set_bbmult_nphy` con 722 righe, e ne ha sei. Il numero veniva da
+`reverse-tools/cfuncs.py`, che non riconosceva le firme mandate a capo dallo stile
+kernel e attribuiva a `set_bbmult` tutto ciò che seguiva, cioè `papd_cal_setup`,
+`cleanup` e `a2`. Corretto; l'attribuzione dei gate in `docs/brcmsmac-xref.md`
+era sbagliata per lo stesso motivo.
 
 È anche la spiegazione dei 22 registri PHY non attribuiti fra #11700 e #15900:
-non sono 22 buchi indipendenti, sono quella funzione che non esiste. Portarla è
-il pezzo grosso che resta, e non è roba da mezz'ora.
+non sono 22 buchi indipendenti, sono quel blocco che non esiste. Portarlo è il
+pezzo grosso che resta, e non è roba da mezz'ora.
 
 ## 4bis. La cal RSSI: i piani funzionano, il campionamento no
 
@@ -195,8 +258,50 @@ vendore ne fa **27** per init. Il piano è una FIFO per indirizzo, quindi con 5
 poll in meno il port consuma i valori dei round sbagliati e la media esce di uno.
 
 Cosa NON è la causa: il numero di livelli VCM. b43 cicla `vcm < 8` e brcmsmac ha
-`vcm_level_max = 8`, identici. Le 5 letture in più del vendore vengono da
-qualcos'altro, e non l'ho ancora trovato.
+`vcm_level_max = 8`, identici.
+
+### 4ter. Dove sono le cinque letture in più, e perché saperlo non basta
+
+Contate. Nel primo init il vendore legge `0xa6` **27 volte**, e non sono 27 poll:
+sono 21 dentro la cal RSSI più sei sparse, ognuna di una fase diversa.
+
+| record | fase |
+|---|---|
+| #1668 | il poll dell'idle TSSI (`poll_rssi` con un campione) |
+| #8563 | la cal TX IQ/LO |
+| #11812 | `papd_cal_setup` core 0, il salvataggio dell'AFE |
+| #12930 | `papd_cal_setup` core 1 |
+| #14991 | la regione non attribuita #14093-15920 |
+| #22255 | il salvataggio dei ~20 registri in testa alla cal RSSI (#22247-22289) |
+| #22381-#23761 | i 20 poll del loop vcm, uno ogni 72 record |
+| #24319 | una dopo la cal |
+
+Il piano di lettura è una **FIFO per indirizzo su tutta la cattura**. Il port fa
+22 letture di `0xa6`, quindi consuma le prime 22 voci — e fra quelle ci sono
+`#11812`, `#12930` e `#14991`, cioè tre fasi che il port **non esegue**. Tre dei
+suoi poll leggono valori che appartengono alla cal PAPD e alla regione non
+attribuita.
+
+Sembrava la causa. Non è, o non è tutta: ho aggiunto un `--skip` a
+`gen_readplans.py` per escludere dal piano gli intervalli delle fasi che il port
+non fa, e provato due volte — escludendo #10962-15920, poi anche la cal TX IQ/LO
+a #8500-8600 per far combaciare il conto delle letture prima della cal. In
+entrambi i casi il coefficiente **peggiora**: da `0x3f` a `0x0000`, dove il
+vendore scrive `0x3f` su `0x1b8` e `0x3e` sugli altri otto. Allineare la FIFO non
+basta.
+
+Il motivo per cui non basta è visibile nel trace del port: dentro un poll il port
+legge `0xa6 0xa7 0xf9 0xfb 0x8f 0xa5 0xe5 0xe6`, il vendore in testa alla cal
+legge `0x91 0x92 0x8f 0xa5 0xa6 0xa7 0xe7 ...`. Non è solo il **quante** che
+differisce, è il **quali e in che ordine**: una FIFO per indirizzo non si allinea
+spostando gli estremi di un intervallo, e per chiudere questa voce serve appaiare
+i poll, non le letture.
+
+`--skip` resta nello strumento perché è corretto e serve comunque (il piano deve
+corrispondere al flow: `init` non fa la cal TX IQ/LO, `initcal` sì), ma
+`readplans_init.h` non è stato rigenerato: con lo skip il flow `init` sta peggio,
+e un piano che peggiora il risultato non va committato solo perché è più
+"giusto" in teoria.
 
 ## 4. Come rifare le misure
 

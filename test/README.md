@@ -12,6 +12,7 @@ cattura sotto `router-data/`.
 make KDIR=~/src/linux            # costruisce
 ./phase_compare.py --vendor ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
 ./nphy_trace init dsl3580l       # flow di init, trace su stdout
+./nphy_trace initpor dsl3580l    # solo l'init a freddo (do_full_init)
 ./nphy_trace chanset dsl3580l 6  # init poi cambio a canale 6
 ./nphy_trace rfkill dsl3580l
 make compare FLOW=init REF=../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
@@ -94,6 +95,24 @@ raggiunti, ma compilati fuori non avrebbero mai potuto comparire.
   verifica il compilatore: se il driver ne tocca uno che manca, il build si
   ferma.
 
+## L'init a freddo e quello a caldo
+
+Il flow `init` fa **due** init: il primo con `do_full_init` vero e **non
+tracciato**, il secondo col flag azzerato, e il secondo e' quello che si
+confronta. I piani di lettura si ricaricano fra i due, perche' rappresentano le
+read del secondo e le consuma anche il primo, che gira per davvero.
+
+Il motivo sta in `docs/init-flow.md`: `do_full_init` in b43 e' `phy_init_por` in
+brcmsmac, e la cattura non e' un init a freddo — l'apertura della tabella 10 con
+cui comincia il download statico non compare in nessuno dei suoi due init.
+Modellare sempre l'init a freddo metteva 8320 op di prefisso che nel riferimento
+non ci sono: il flow e' passato da 13223 a 4903 op, e i coefficienti della cal
+RSSI hanno smesso di sbagliare di un LSB perche' i piani non vengono piu'
+consumati dalle read che solo l'init a freddo fa.
+
+`initpor` fa solo l'init a freddo, per guardare cosa scrive: non si confronta con
+questa cattura, perche' una cattura che parta dal power-on reset non c'e'.
+
 ## Cosa NON simula
 
 - Le attese (`udelay`, `msleep`) sono silenziose: nella cattura vendor non c'è
@@ -174,7 +193,7 @@ tutte:
 | sampleplay-tssi | 322 | **322/322** | **ok** |
 | sampleplay-iqlo (`0010`) | 322 | **322/322** | **ok** |
 | txdigi-filts | 60 | 45/60 | mancano 15, e sono **idempotenti**: il vendore riscrive `0x195`-`0x1a3` con gli stessi valori |
-| chanswitch-ch6 | 39 | 11/39 | mancano **esattamente 10**: i campi 5 GHz della voce 5b |
+| chanswitch-ch6 (`0011`) | 39 | 33/39 | **nessuna op mancante**; la coda è sfasata di tre per gli MMIO che il vendore non registra |
 | tssi-setup | 19 | 5/19 | mancano 4, in più 15: il `0x17b` di troppo e lo sfasamento |
 | rssi-cal | 16 | 1/16 | mancano 15: i valori vengono dalla cal, che l'harness non fa |
 | papd-digifilt, papd-calsetup | - | - | fasi della cal PAPD non portate: l'ancora non c'è, ed è lo stato atteso |

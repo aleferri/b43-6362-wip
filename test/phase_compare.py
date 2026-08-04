@@ -150,13 +150,13 @@ WINDOWS = [
          anchor='PHY.WR addr=0x1b8 val=0x3f',
          flow=('init', '1'),
          what='coefficienti di moltiplicazione RSSI',
-         test_len=44,
-         equiv='multiset',
          allow=('PHY.RD', 'RAD.RD', 'RAD.MOD', 'PHY.WR addr=0x1d',
                 'PHY.WR addr=0x1c', 'PHY.MOD'),
-         equiv_why='le scritture dei coefficienti sono indipendenti fra loro: '
-                   'il vendore le raggruppa, il port le intercala alle '
-                   'letture, e (write read)xN equivale a writexN readxN.'),
+         known='i nove coefficienti combaciano da quando il flow init modella '
+               'l\'init a freddo separatamente (0x1b8 = 0x3f e gli altri otto '
+               '0x3e, come il vendore). Le 3 op mancanti sono PHY.RD su 0x73, '
+               'la porta dati delle tabelle: i piani la escludono di proposito '
+               '(gen_readplans.py, TABLE_PORT) e il port legge il suo specchio.'),
     # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
     # passano e non devono: b43 la cal PAPD non ce l'ha. Sono qui pronte per
     # quando la si porta, cosi' si verifica una fase per volta.
@@ -175,15 +175,16 @@ WINDOWS = [
          pending='cal PAPD non portata. Scritture pure, quindi verificabile '
                  'per intero appena c\'e\': override RF, save/mod AFE e i '
                  'TXRXCOUPLE_2G del radio. Vedi docs/papd-cal-map.md punto 1.'),
-    dict(name='chanswitch-ch6', rng='34940:34990', test_len=220,
+    dict(name='chanswitch-ch6', rng='34940:34990', test_len=42,
          anchor='RAD.WR addr=0x16 val=0x58',
          flow=('chanset', '6'),
          what='upload della chantab al cambio canale',
          allow=('MMIO.', 'PHY.WR addr=0x1d3'),
-         known='mancano i 10 campi 5 GHz (voce 5b), INTERCALATI: 0x43 dopo 0x41, '
-               '0x4a dopo 0x47. Gli 8 su 0x2b/0x2e non mancano: sono il vcocal, '
-               'che il vendore fa come RD+WR e b43 come mask/set - stessa cosa, '
-               'resa diversa (docs/todo-nphy.md 3g).'),
+         known='nessuna op mancante da quando 0011 scrive i dieci campi 5 GHz '
+               'intercalati. Le prime 33 combaciano; dalla 34 il port infila tre '
+               'MMIO su 0x492 (deroga dichiarata: il tracer vendor non le '
+               'registra li\') e da li\' in poi le due sequenze sono sfasate di '
+               'tre, con le stesse op e gli stessi valori.'),
 ]
 
 

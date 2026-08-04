@@ -179,9 +179,61 @@ static void setup(const struct board *b, unsigned int channel)
 	dev.phy.desired_txpower = 20;
 }
 
+/* Un init a freddo: `do_full_init` vero, come dopo l'attach o un power-on reset.
+ * E' quello che l'harness faceva sempre, ed e' il motivo per cui il confronto
+ * sull'init INTERO non si allineava. */
+/* La sequenza di b43_phy_init() in phy_common.c, nel suo ordine:
+ *
+ *	ops->switch_analog(dev, true);
+ *	b43_software_rfkill(dev, false);	 <- da qui l'init del radio
+ *	ops->init(dev);
+ *	phy->do_full_init = false;
+ *	b43_switch_channel(dev, phy->channel);
+ *
+ * `radio_on` va falso in ingresso: sull'hardware ci arriva sempre cosi', perche'
+ * b43_phy_exit() fa software_rfkill(true). Con `radio_on` vero
+ * b43_nphy_op_software_rfkill() salta b43_radio_2057_init() e il trace perde la
+ * tabella di init del radio. */
+static int init_once(bool full)
+{
+	int err;
+
+	dev.phy.do_full_init = full;
+	dev.phy.radio_on = false;
+	b43_phyops_n.switch_analog(&dev, true);
+	b43_software_rfkill(&dev, false);
+	err = b43_phyops_n.init(&dev);
+	if (err) {
+		fprintf(stderr, "init(full=%d): %d\n", full, err);
+		return err;
+	}
+	dev.phy.do_full_init = false;
+	return b43_switch_channel(&dev, dev.phy.channel);
+}
+
+/* Il flow che si confronta con la cattura.
+ *
+ * `do_full_init` in b43 e' `phy_init_por` in brcmsmac, stessa semantica: vero
+ * all'attach e dopo `b43_phy_exit()`, azzerato da `b43_phy_init()` appena
+ * `ops->init()` e' andata bene. Dietro quel flag stanno il download delle
+ * tabelle statiche (quattro siti in tables_nphy.c) e rcal/rccal del radio
+ * (phy_n.c:1053).
+ *
+ * La cattura NON e' un init a freddo: `PHY.WR addr=0x72 val=0x2800`, cioe'
+ * l'apertura della tabella 10 con cui comincia il download statico, non compare
+ * in nessuno dei due init dei 70796 record, e le aperture di tabella sono 950 e
+ * 1226 contro le ~2400 di un download completo. Quando il tracer e' partito il
+ * driver aveva gia' fatto il suo init a freddo.
+ *
+ * Quindi qui si fanno due init: il primo a freddo e NON tracciato, che porta le
+ * tabelle statiche nello specchio e fa rcal/rccal come l'attach; il secondo con
+ * il flag azzerato, tracciato, ed e' quello confrontabile. I piani di lettura si
+ * ricaricano fra i due, perche' rappresentano le read del secondo: le consuma
+ * anche il primo, che gira per davvero. */
 static int flow_init(void)
 {
 	int err;
+	FILE *null;
 
 	err = b43_phyops_n.allocate(&dev);
 	if (err) {
@@ -189,10 +241,39 @@ static int flow_init(void)
 		return err;
 	}
 	b43_phyops_n.prepare_structs(&dev);
-	err = b43_phyops_n.init(&dev);
+
+	null = fopen("/dev/null", "w");
+	if (!null) {
+		fprintf(stderr, "/dev/null: non apribile\n");
+		return -1;
+	}
+	b43_test_trace_to(null);
+	err = init_once(true);
+	b43_test_trace_to(stdout);
+	fclose(null);
 	if (err)
-		fprintf(stderr, "init: %d\n", err);
-	return err;
+		return err;
+	fprintf(stderr, "--- init a freddo fatto e non tracciato, ora quello "
+			"che la cattura contiene ---\n");
+
+	b43_test_plans_reset();
+	if (!getenv("B43_TEST_NOPLANS"))
+		b43_test_load_readplans();
+
+	return init_once(false);
+}
+
+/* L'init a freddo da solo, per guardare cosa fa il download statico e rcal. Non
+ * si confronta con questa cattura: non c'e' una cattura che parta dal power-on
+ * reset. */
+static int flow_initpor(void)
+{
+	int err = b43_phyops_n.allocate(&dev);
+
+	if (err)
+		return err;
+	b43_phyops_n.prepare_structs(&dev);
+	return init_once(true);
 }
 
 /* mac80211 aggiorna hw->conf.chandef PRIMA di chiamare l'op, e il driver legge
@@ -322,6 +403,8 @@ int main(int argc, char **argv)
 		err = flow_rfkill();
 	else if (!strcmp(flow, "txpower"))
 		err = flow_txpower();
+	else if (!strcmp(flow, "initpor"))
+		err = flow_initpor();
 	else if (!strcmp(flow, "initcal"))
 		err = flow_initcal();
 	else if (!strcmp(flow, "full"))
