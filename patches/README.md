@@ -16,6 +16,8 @@
   `0005` corregge i registri di bias IPA 2 GHz, che erano quelli sbagliati;
   `0007` marca con un TODO la voce morta della tabella override RF (`0x7b`);
   `0008` programma le soglie di carrier sense, che nessuno scriveva;
+  `0009` calcola l'offset epsilon del PAPD, che b43 scriveva a zero (24 dB di
+  differenza) — dopo `0002`, da cui prende la tabella;
   `0006` misura il rumore di fondo su N-PHY, che non veniva misurato affatto —
   **l'unica gateata sul tipo di PHY e non sulla revisione**, quindi l'unica che
   esce dal recinto del nostro radio.

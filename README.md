@@ -28,6 +28,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | rumore di fondo su N-PHY | non misurato affatto, **patch `0006`** | `docs/phy-g-only.md` |
 | RSSI e decodifica RX su N-PHY | rami solo per G e LP in `xmit.c`, e coefficienti RSSI diversi dal vendore | `docs/todo-nphy.md` |
 | potenza target, TSSIG, RF ctl misc | scritti da entrambi con valori diversi | `docs/todo-nphy.md` |
+| offset epsilon del PAPD | scritto a zero da b43, **patch `0009`**: 24 dB di differenza | `docs/papd-cal-map.md` |
+| calibrazione PAPD, il resto | i due loop guidati dalle letture, ~1150 righe; fasi mappate | `docs/papd-cal-map.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato

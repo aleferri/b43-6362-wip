@@ -117,6 +117,15 @@ WINDOWS = [
          equiv_why='le scritture dei coefficienti sono indipendenti fra loro: '
                    'il vendore le raggruppa, il port le intercala alle '
                    'letture, e (write read)xN equivale a writexN readxN.'),
+    # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
+    # passano e non devono: b43 la cal PAPD non ce l'ha. Sono qui pronte per
+    # quando la si porta, cosi' si verifica una fase per volta.
+    dict(name='papd-tone', rng='11741:11755',
+         anchor='PHY.WR addr=0x186 val=0x100',
+         flow=('init', '1'),
+         what='tono di test, 0x186-0x194',
+         pending='cal PAPD non portata: b43 ha b43_nphy_tx_tone() ma nessuno la '
+                 'chiama nell\'init. Vedi docs/papd-cal-map.md punto 1.'),
     dict(name='chanswitch-ch6', rng='34940:34990', test_len=220,
          anchor='RAD.WR addr=0x16 val=0x58',
          flow=('chanset', '6'),
@@ -236,13 +245,20 @@ def main():
               % (tot, len(vops), 100.0 * tot / max(1, len(vops)), len(blocks)))
         return 0
 
-    bad = known = 0
+    bad = known = pending = 0
     print('%-16s %-5s %-6s %-9s %s'
           % ('finestra', 'op', 'run', 'esito', 'cosa copre'))
     for win in WINDOWS:
         if args.only and win['name'] != args.only:
             continue
         res, err = run(vendor, win, args.verbose)
+        if err and win.get('pending'):
+            # Fase non ancora portata: non trovare l'ancora e' lo stato atteso.
+            print('%-16s %-5s %-6s %-9s %s'
+                  % (win['name'], '-', '-', 'assente', win['what']))
+            print('%-30s %s' % ('', win['pending']))
+            pending += 1
+            continue
         if err:
             print('%-16s %-5s %-6s %-9s %s'
                   % (win['name'], '-', '-', 'ERR', err))
@@ -284,8 +300,9 @@ def main():
           'op ha la finestra')
     print("ok* = stesse op con gli stessi valori, ordine diverso, equivalenza "
           "dichiarata per quella finestra")
-    print('\n%d finestre: %d da guardare, %d divergenze note e spiegate'
-          % (len(WINDOWS) if not args.only else 1, bad, known))
+    print('\n%d finestre: %d da guardare, %d divergenze note, %d fasi non '
+          'ancora portate'
+          % (len(WINDOWS) if not args.only else 1, bad, known, pending))
     return 1 if bad else 0
 
 

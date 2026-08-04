@@ -17,7 +17,9 @@ Per ogni riga aggiunta lo strumento trova la funzione che la contiene nel file
 E' un'euristica su brace depth, non un parser C: serve a non spedire una patch
 senza esserci passato sopra, non a certificarla. Limite visto in pratica: se
 l'hunk cade nelle ultime righe di una funzione, il nome riportato puo' essere
-quello della funzione SEGUENTE (il contesto del diff sconfina). Il verdetto sul
+quello della funzione SEGUENTE (il contesto del diff sconfina). E su una serie:
+--tree vuole l'albero alla BASE di quella patch, cioe' con le precedenti della
+serie applicate, non mainline nudo. Il verdetto sul
 gate resta valido, il nome no: se conta, verificarlo con cfuncs.index_functions
 sul file dopo la patch. Un "NON GATEATA" va guardato;
 puo' essere legittimo (una funzione nuova chiamata solo da un ramo iffato) o
