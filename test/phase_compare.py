@@ -62,6 +62,22 @@ def longest_run(vops, tops):
     return best
 
 
+def find_anchor(tops, anchor, nth):
+    """L'indice dell'occorrenza `nth` dell'ancora, o -1.
+
+    L'ancora non e' sempre unica dentro un flow: la tabella dei campioni viene
+    ricaricata a ogni tono, quindi la sua TBL.WR compare piu' volte e la
+    finestra deve poter dire quale delle due la interessa.
+    """
+    seen = 0
+    for i, op in enumerate(tops):
+        if CMP.ops_equal(anchor, op):
+            if seen == nth:
+                return i
+            seen += 1
+    return -1
+
+
 def multiset_verdict(vops, tops, allow):
     """Confronto per multiinsieme dentro la finestra.
 
@@ -106,6 +122,30 @@ WINDOWS = [
          anchor='PHY.WR addr=0x32f val=0x3',
          flow=('init', '1'),
          what='bias IPA 2 GHz, patches/b43/0005'),
+    # Filtri digitali TX dell'init: tre gruppi di 15 coefficienti su 0x186,
+    # 0x195 e 0x2c5, le prime tre righe di tbl_tx_filter_coef_rev4.
+    dict(name='txdigi-filts', rng='289:348', test_len=45,
+         anchor='PHY.WR addr=0x186 val=0xfe87',
+         flow=('init', '1'),
+         what='b43_nphy_int_pa_set_tx_dig_filters',
+         known='mancano 15: il vendore riscrive 0x195-0x1a3 con la riga 1 una '
+               'seconda volta, con valori IDENTICI alla prima, quindi lo stato '
+               'della tabella e\' lo stesso e la differenza e\' solo nel '
+               'conteggio delle op. Lo fa in due punti indipendenti della '
+               'cattura (#334-348 all\'init, #13904-13918 in coda alla cal). In '
+               'b43 quella riscrittura c\'e\' solo nel ramo phy rev 17, dove e\' '
+               'altrettanto idempotente.'),
+    # La tabella dei campioni, id 17: il tono che ogni cal che suona campioni
+    # usa come stimolo. Due finestre perche' le due chiamate hanno ampiezze
+    # diverse, e l'ampiezza e' cio' che rende visibile il difetto di 0010.
+    dict(name='sampleplay-tssi', rng='1288:1609',
+         anchor='TBL.WR id=0x11 off=0x0 len=160',
+         flow=('init', '1'),
+         what='tono a ampiezza 0 dell\'idle TSSI, 160 word'),
+    dict(name='sampleplay-iqlo', rng='8638:8959',
+         anchor='TBL.WR id=0x11 off=0x0 len=160', anchor_nth=1,
+         flow=('initcal', '1'),
+         what='tono 2500 kHz ampiezza 250 della cal TX IQ/LO, patches/b43/0010'),
     dict(name='rssi-cal', rng='3723:3740',
          anchor='PHY.WR addr=0x1b8 val=0x3f',
          flow=('init', '1'),
@@ -120,12 +160,21 @@ WINDOWS = [
     # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
     # passano e non devono: b43 la cal PAPD non ce l'ha. Sono qui pronte per
     # quando la si porta, cosi' si verifica una fase per volta.
-    dict(name='papd-tone', rng='11741:11755',
-         anchor='PHY.WR addr=0x186 val=0x100',
+    dict(name='papd-digifilt', rng='11741:11755',
+         anchor='PHY.WR addr=0x186 val=0xfed9',
          flow=('init', '1'),
-         what='tono di test, 0x186-0x194',
-         pending='cal PAPD non portata: b43 ha b43_nphy_tx_tone() ma nessuno la '
-                 'chiama nell\'init. Vedi docs/papd-cal-map.md punto 1.'),
+         what='filtri digitali TX della cal, riga 3 su 0x186-0x194',
+         pending='cal PAPD non portata: b43 ha la riga 3 di '
+                 'tbl_tx_filter_coef_rev4 ma nessun equivalente di '
+                 'wlc_phy_ipa_restore_tx_digi_filts_nphy, che la scrive solo '
+                 'per la durata della cal.'),
+    dict(name='papd-calsetup', rng='11756:11837',
+         anchor='RAD.WR addr=0x17e val=0xc',
+         flow=('init', '1'),
+         what='wlc_phy_papd_cal_setup_nphy, core 0',
+         pending='cal PAPD non portata. Scritture pure, quindi verificabile '
+                 'per intero appena c\'e\': override RF, save/mod AFE e i '
+                 'TXRXCOUPLE_2G del radio. Vedi docs/papd-cal-map.md punto 1.'),
     dict(name='chanswitch-ch6', rng='34940:34990', test_len=220,
          anchor='RAD.WR addr=0x16 val=0x58',
          flow=('chanset', '6'),
@@ -167,9 +216,11 @@ def run(vendor, win, verbose):
     if not vops:
         return None, 'finestra vendore vuota'
 
-    off = CMP.find_offset(tall, CMP.normalize_op(win['anchor']))
+    nth = win.get('anchor_nth', 0)
+    off = find_anchor(tall, CMP.normalize_op(win['anchor']), nth)
     if off < 0:
-        return None, 'ancora non trovata: %s' % win['anchor']
+        return None, 'ancora non trovata%s: %s' % (
+            '' if not nth else ' (occorrenza %d)' % nth, win['anchor'])
 
     # Il confronto posizionale usa tante op quante ne ha il vendore; la finestra
     # piu' larga (test_len) serve solo alla diagnosi per multiinsieme, dove
@@ -246,7 +297,7 @@ def main():
         return 0
 
     bad = known = pending = 0
-    print('%-16s %-5s %-6s %-9s %s'
+    print('%-16s %-5s %-8s %-9s %s'
           % ('finestra', 'op', 'run', 'esito', 'cosa copre'))
     for win in WINDOWS:
         if args.only and win['name'] != args.only:
@@ -254,13 +305,13 @@ def main():
         res, err = run(vendor, win, args.verbose)
         if err and win.get('pending'):
             # Fase non ancora portata: non trovare l'ancora e' lo stato atteso.
-            print('%-16s %-5s %-6s %-9s %s'
+            print('%-16s %-5s %-8s %-9s %s'
                   % (win['name'], '-', '-', 'assente', win['what']))
             print('%-30s %s' % ('', win['pending']))
             pending += 1
             continue
         if err:
-            print('%-16s %-5s %-6s %-9s %s'
+            print('%-16s %-5s %-8s %-9s %s'
                   % (win['name'], '-', '-', 'ERR', err))
             bad += 1
             continue
@@ -286,7 +337,7 @@ def main():
             verdict = '%d DIFF' % res['mismatch']
             bad += 1
 
-        print('%-16s %-5d %-6s %-9s %s'
+        print('%-16s %-5d %-8s %-9s %s'
               % (win['name'], res['nops'], run_s, verdict, win['what']))
         if diag:
             print('%-30s %s' % ('', diag))

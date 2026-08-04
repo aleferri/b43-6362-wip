@@ -195,13 +195,56 @@ La cattura legge esattamente quelle quattro parole, 96 volte, e passando i suoi
 valori per la conversione escono **−82, −86, −88 dBm** per core: plausibili e
 coerenti fra i due core. `patches/b43/0006` la cabla.
 
-Attenzione al recinto: è l'unica delle sei patch gateata sul **tipo** di PHY e
-non sulla revisione, quindi tocca tutte le N-PHY. L'argomento per accettarla è che
-oggi quelle riportano un numero che non è mai stato misurato.
+Attenzione al recinto: non è gateata sulla revisione ma sul **tipo** di PHY,
+quindi tocca tutte le N-PHY. L'argomento per accettarla è che oggi quelle
+riportano un numero che non è mai stato misurato. L'altra patch che esce dal
+recinto è `0010`, vedi 4g.
 
 Il resto dei punti dove b43 tratta la G e non la N sta in `docs/phy-g-only.md`:
 venti costrutti, di cui i due del rumore e quattro in `xmit.c` sul RSSI e sulla
 decodifica RX sono buchi veri, gli altri legittimi.
+
+### 4g. La tabella dei campioni non contiene un tono — CHIUSA
+
+Trovata dalle finestre `sampleplay-*` di `test/phase_compare.py`, confrontando le
+160 word della tabella 17 op per op con la cattura.
+
+La tabella SAMPLEPLAY è lo stimolo di ogni calibrazione che suona campioni: cal
+TX IQ/LO, misura dell'idle TSSI, cal RX IQ del rev 2, e la cal PAPD quando ci
+sarà. Due refusi in mainline la rendono inutilizzabile, e vanno insieme perché
+nessuno dei due si vede senza l'altro corretto.
+
+**Il passo di fase.** `b43_nphy_gen_load_samples()` (phy_n.c:1530) tiene `rot` e
+`angle` in `u16` e calcola `rot = (((freq * 36) / bw) << 16) / 100`, poi passa
+`CORDIC_FIXED(angle)`. Il riferimento è `wlc_phy_gen_load_samples_nphy`
+(`brcmsmac/phy/phy_n.c:23030`), dove `rot` e `theta` sono `s32` e
+`rot = ((f_kHz * 36) / phy_bw) / 100`, cioè gradi interi, perché
+`cordic_calc_iq()` scala il suo argomento da sé. Il `<< 16` di b43 è quindi di
+troppo, e in più rende il risultato un multiplo esatto di 65536 ogni volta che
+`(freq * 36) / bw` è multiplo di 100 — che vale per **tutte** le frequenze che il
+driver chiede: 2500 e 5000 dalla cal TX IQ/LO (phy_n.c:5389), 4000 dall'idle TSSI
+(phy_n.c:3950) e dalla cal RX IQ rev 2 (phy_n.c:5718). Nella `u16` il passo
+diventa 0: l'angolo non avanza e i campioni sono tutti uguali. Al posto del tono
+c'è un livello continuo.
+
+**L'impacchettamento.** `b43_nphy_load_samples()` (phy_n.c:1518) scrive
+`data[i] = (samples[i].i & 0x3FF << 10)`, e `<<` lega più forte di `&`: maschera
+con `0x3FF << 10` invece di spostare il valore mascherato. Per le ampiezze in uso
+la componente in fase sta nei dieci bit bassi e viene azzerata; sui valori
+negativi resta l'estensione del segno.
+
+La cattura dà il formato senza ambiguità — `((i & 0x3ff) << 10) | (q & 0x3ff)`,
+come in `wlc_phy_loadsampletable_nphy` — e tre toni da confrontare: ampiezza 0 a
+#1288 (idle TSSI), ampiezza 250 a 2500 kHz a #8638 (cal TX IQ/LO, periodo 8
+campioni), ampiezza 181 a 4000 kHz a #11838 (cal PAPD, periodo 5).
+
+`patches/b43/0010` sistema entrambi. Sul tono di #8638, parole sbagliate su 160:
+160 in mainline (tutte zero), 140 con la sola maschera corretta, 120 col solo
+passo corretto, **0** con la patch.
+
+Anche questa esce dal recinto del nostro radio: non è gateata su niente, tocca
+ogni N-PHY. L'argomento per accettarla è che oggi quelle calibrazioni girano su
+uno stimolo che non è il segnale che credono di suonare.
 
 ### 6. `dev_id 0x435f` e la banda 5 GHz
 

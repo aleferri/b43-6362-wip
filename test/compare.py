@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """
-Normalize a wl-diag capture and compare it against the trace emitted by
-ac_trace. Only op lines are compared (address / value / mask); the
-episode number, timestamp, and cpuN prefix are stripped from the vendor
-trace before diffing since the test does not simulate scheduling.
+Normalizza una cattura wl-diag e la confronta col trace emesso da nphy_trace.
+Si confrontano solo le righe di op (indirizzo / valore / maschera): numero di
+episodio, timestamp e prefisso cpuN vengono via dal lato vendore prima del diff,
+perche' l'harness non simula lo scheduling.
 
-Usage:
-    compare.py <vendor.txt> <test.out> [OPTIONS]
+Uso:
+    compare.py <vendor.txt> <test.out> [OPZIONI]
 
---range LO:HI     keep only vendor lines whose episode # is within [LO,HI]
---auto-align     find the offset in <test> that best matches <vendor>[0]
-                  by scanning for the first common op; useful when the
-                  test flow does a prologue (save-gain, save-tone, ...)
-                  that the vendor does not emit. Reports the offset and
-                  compares from there.
---align-on OP    like --auto-align but pin to a specific op string
-                  (e.g. 'PHY.WR   addr=0x0463 val=0x0027').
+--range LO:HI    tiene solo le righe del vendore con episodio in [LO,HI]
+--auto-align     salta il prologo dell'harness allineandosi alla prima op in
+                 comune con vendor[0], e riporta l'offset trovato
+--align-on OP    come --auto-align ma su un'op precisa
+                 (es. 'PHY.WR   addr=0x0186 val=0xfe87')
 
-Vendor uses PHY.OR/PHY.AND for single-bit sets/clears; they get folded
-to PHY.MOD in the format `val=<kernel_mask> mask=<kernel_set>` so the
-test's PHY.MOD lines diff cleanly.
+Per confrontare una fase per volta con le finestre gia' riconosciute c'e'
+phase_compare.py, che usa questo modulo per la normalizzazione.
+
+Su N-PHY e' b43 a usare PHY.OR/PHY.AND (b43_phy_set, b43_phy_mask) e il vendore a
+usare PHY.MOD (phy_reg_mod), quindi la normalizzazione porta le prime alla forma
+della mod: val = valore del campo, mask = campo modificato. Vedi il commento su
+SET_OP/CLR_OP piu' sotto: nelle catture AC era il contrario, e la direzione della
+riduzione e' stata girata di conseguenza.
 """
 import re
 import sys
