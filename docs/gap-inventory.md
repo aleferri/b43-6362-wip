@@ -105,13 +105,23 @@ Il `phy->radio_rev != 5` in questa funzione riguarda l'esistenza del registro
 sono la scelta della tabella PAPD pad-gain, cioè la questione di
 `rf-pwr-offset-rev8.md`. Voce chiusa, e sostituita da quella.
 
-### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5
+### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5 — CHIUSA
 
 Il vendore per radiorev 7 e 8 usa `nphy_papd_padgain_dlt_2g_2057rev7`, la
-tabella merged usa i valori del rev 5. Prove da entrambi i lati, conseguenze e
-modo di decidere: `docs/rf-pwr-offset-rev8.md`. Bozza di patch in
-`patches/b43/0002`, da non mandare prima della misura. Oggi è codice morto,
-quindi non è un bug attivo.
+tabella merged usa i valori del rev 5. **Deciso dalla cattura**: ricalcolando le
+128 celle PAPD che quella tabella alimenta, i valori rev 7 le predicono tutte, i
+valori in tree ne predicono 5. Correzione in `patches/b43/0002`, dettaglio in
+`docs/rf-pwr-offset-rev8.md`.
+
+### 4c. Il percorso PAPD non viene mai eseguito sui rev 7+
+
+`b43_nphy_tx_gain_table_upload()` recupera la tabella degli offset e poi ritorna
+per `phy->rev >= 7` con un `/* TODO: Enable this once we have gains configured */`,
+quindi le tabelle 26 e 27 a offset 576 (128 celle per core, la compensazione
+PAPD) restano non programmate. Il loop che le calcola è già lì e nell'harness
+produce esattamente le 256 celle della cattura. `patches/b43/0003` lo abilita per
+radio 2057 rev 8 e lascia gli altri rev 7+ come sono. Da mandare dopo `0002`:
+con i valori sbagliati scrive 246 celle su 256 diverse dal vendore.
 
 ### 5. `b43_radio_2057_rccal` — non è un buco
 

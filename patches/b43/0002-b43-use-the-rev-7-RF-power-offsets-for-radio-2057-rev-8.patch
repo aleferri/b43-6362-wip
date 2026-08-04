@@ -14,9 +14,11 @@ get_rf_pwr_offset() is the counterpart of the b43 code that consumes this
 table, so follow its dispatch and use the rev 7 offsets. The values are
 taken from brcmsmac's nphy_papd_padgain_dlt_2g_2057rev7.
 
-The table is not consumed yet: b43_nphy_tx_pwr_ctl_init() fetches it and
-returns immediately for phy->rev >= 7, pending gain configuration. This
-only corrects the data that path will use.
+An MMIO capture of wl 6.30.102.7 on a BCM6362 settles it: the driver writes
+128 PAPD compensation cells per core during init, each one an entry of this
+table indexed by the pad gain of the TX gain table. Recomputing them from
+the values in tree reproduces 5 cells out of 128; recomputing them from the
+rev 7 values reproduces all 128.
 
 Fixes: 21352612198c ("b43: add RF power offset for N-PHY r8 + radio 2057 r8")
 Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
@@ -47,7 +49,12 @@ index ecd660b..74d867a 100644
  
  /* Extracted from MMIO dump of 6.30.223.248
 
-BOZZA — non mandarla senza aver deciso, e le prove sono contrastanti.
+Gate: cambia solo i dati di b43_ntab_rf_pwr_offset_2057_rev8_2g, che
+b43_nphy_get_rf_pwr_offset_table() ritorna solo per phy->rev == 8 con
+radio_rev == 8. Nessun altro device vede quei valori.
+
+La questione e' chiusa dalla cattura: 128 celle su 128 predette dai valori rev 7,
+5 su 128 da quelli in tree. Sotto, per memoria, le prove che c'erano prima.
 
 A favore del rev 7 (cioe' di questa patch):
   - brcmsmac get_rf_pwr_offset() (phy_n.c:14649) sceglie
@@ -69,9 +76,8 @@ dispatch del vendore per gli offset di potenza lo accoppia al rev 7. L'offset
 in dB per indice e' una proprieta' del PA/pad, non del passo di gain, quindi
 la scelta del vendore pesa piu' della somiglianza — ma non e' una prova.
 
-Come si chiude: la tabella e' codice morto finche' il ramo phy->rev >= 7 di
-b43_nphy_tx_pwr_ctl_init() ritorna subito. Quando quel ramo verra' abilitato
-(strada verso M4), si misura la potenza per indice di gain con
-reports/40-tx-power.md e si vede quale delle due serie di offset predice il
-misurato. Prima di allora, mandarla e' rimpiazzare un valore non verificato
-con un altro valore non verificato.
+Come si e' chiusa: non con una misura di potenza, ma ricalcolando dalla cattura
+le celle che quella tabella alimenta. Il confronto e' netto, 128 contro 5, e
+non lascia spazio all'argomento della somiglianza fra le gain table.
+
+Va prima di 0003, che abilita il percorso che la consuma.

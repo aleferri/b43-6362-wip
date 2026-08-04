@@ -6,11 +6,14 @@
   rimosso e il rimando al binding corretto; `0003` è il binding DT, che alla
   serie mancava e che **non è ancora passato sotto `dt_binding_check`**.
 - `openwrt/` — fix sul target bmips che non hanno senso upstream.
-- `b43/` — le nuove patch b43. `0001` implementa il gain control rev 7+ per
-  2.4 GHz (applica pulito, non compilata, non provata); `0002` è una **bozza**
-  sugli offset di potenza del rev 8, da non mandare prima della misura, vedi
-  `docs/rf-pwr-offset-rev8.md`. Le sette già merged sono in
-  `docs/upstream-status.md`.
+- `b43/` — le nuove patch b43, **in quest'ordine**:
+  `0001` gain control per radio 2057 rev 8;
+  `0002` gli offset di potenza corretti (i valori in mainline sbagliano 123 celle
+  su 128, vedi `docs/rf-pwr-offset-rev8.md`);
+  `0003` abilita la compensazione PAPD, che consuma la tabella di `0002` — con i
+  valori vecchi scriverebbe 246 celle su 256 sbagliate.
+  Tutte e tre riproducono la cattura nell'harness e **nessuna** ha girato su
+  hardware. Le sette già merged sono in `docs/upstream-status.md`.
 
 Le patch si applicano con `git am`. Non contengono `Fixes:` verso commit non
 merged e non vanno riordinate senza rigenerare i rimandi fra i messaggi.
