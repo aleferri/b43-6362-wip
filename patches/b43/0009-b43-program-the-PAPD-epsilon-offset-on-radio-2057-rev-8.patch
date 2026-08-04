@@ -1,0 +1,105 @@
+From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: program the PAPD epsilon offset on radio 2057 rev 8
+
+b43_phy_initn() writes nphy->papd_epsilon_offset[] into the EPS table
+adjust registers, but nothing ever computes it, so the PAPD engine gets an
+offset of zero.
+
+brcmsmac computes it at the end of its PAPD calibration:
+
+	offset = -60 + 27 + eps_offset - (padgain_delta[pad_gain] + 1) / 2
+
+with eps_offset -1 for this radio in 2 GHz, and pad_gain the index its PAPD
+gain search settles on. b43 has no PAPD calibration, so take the index the
+vendor driver settles on: an MMIO capture of wl 6.30.102.7 on a BCM6362
+shows 15 for both cores, and the -24 that comes out of the formula is what
+it writes. b43 currently writes 0, which is 24 dB off.
+
+The pad gain delta table is the one the previous patches already carry, so
+the formula is evaluated rather than its result hardcoded: when the gain
+search arrives, only the index has to come from it.
+
+Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.h
++++ b/drivers/net/wireless/broadcom/b43/phy_n.h
+@@ -835,6 +835,11 @@
+ #define B43_NPHY_RADAR_T2_MIN			B43_PHY_N(0x295)
+ #define B43_NPHY_TXPWRCTRLDAMPING		B43_PHY_N(0x296)
+ #define B43_NPHY_PAPD_EN0			B43_PHY_N(0x297) /* PAPD Enable0 TBD */
++/* Pad gain index the PAPD gain search settles on, from a capture of the vendor
++ * driver on radio 2057 rev 8 in 2.4 GHz. Placeholder for the search itself.
++ */
++#define B43_NPHY_PAPD_CAL_PAD_GAIN		15
++
+ #define B43_NPHY_EPS_TABLE_ADJ0			B43_PHY_N(0x298) /* EPS Table Adj0 TBD */
+ #define B43_NPHY_EPS_OVERRIDEI_0		B43_PHY_N(0x299)
+ #define B43_NPHY_EPS_OVERRIDEQ_0		B43_PHY_N(0x29A)
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -6061,6 +6061,40 @@
+ 	b43_ntab_write_bulk(dev, B43_NTAB32(33, 0), 64, zero);
+ }
+ 
++/* The offset the PAPD engine applies to the epsilon table. brcmsmac computes it
++ * at the end of its PAPD calibration as
++ *
++ *	offset = -60 + 27 + eps_offset - (padgain_delta[pad_gain] + 1) / 2
++ *
++ * where eps_offset is -1 for this radio in 2 GHz and pad_gain is the index the
++ * PAPD gain search settles on. b43 has no PAPD calibration, so the offset stays
++ * at zero and the engine runs 24 dB off.
++ *
++ * Until the calibration is there, use the index the vendor driver settles on,
++ * which an MMIO capture on a BCM6362 shows to be 15 for both cores: the offset
++ * that comes out, -24, is what it programs.
++ */
++static void b43_nphy_papd_epsilon_offset(struct b43_wldev *dev)
++{
++	struct b43_phy *phy = &dev->phy;
++	struct b43_phy_n *nphy = phy->n;
++	const s16 *delta;
++	int offset, core;
++
++	if (phy->rev != 8 || phy->radio_rev != 8 ||
++	    b43_current_band(dev->wl) != NL80211_BAND_2GHZ)
++		return;
++
++	delta = b43_ntab_get_rf_pwr_offset_table(dev);
++	if (!delta)
++		return;
++
++	offset = -60 + 27 - 1 - (delta[B43_NPHY_PAPD_CAL_PAD_GAIN] + 1) / 2;
++
++	for (core = 0; core < 2; core++)
++		nphy->papd_epsilon_offset[core] = offset;
++}
++
+ static int b43_phy_initn(struct b43_wldev *dev)
+ {
+ 	struct ssb_sprom *sprom = dev->dev->bus_sprom;
+@@ -6163,6 +6197,7 @@
+ 	}
+ 
+ 	if (b43_nphy_ipa(dev)) {
++		b43_nphy_papd_epsilon_offset(dev);
+ 		b43_phy_set(dev, B43_NPHY_PAPD_EN0, 0x1);
+ 		b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ0, 0x007F,
+ 				nphy->papd_epsilon_offset[0] << 7);
+
+Note per il repo, non per la mailing list:
+
+  - Derivazione, tutta verificabile: il vendore scrive 0xf400 con maschera
+    0xff80 su 0x298 e 0x29c, cioe' -24 nel campo a 9 bit segnato. Dalla formula
+    -34 - (delta[i] + 1) / 2 = -24 segue delta[i] = -21, che nella tabella dei
+    valori rev7 (quella di patches/b43/0002) e' l'indice 15.
+  - Verifica: harness, flow init -> il port ora scrive 0xf400 su entrambi i
+    registri, identico alla cattura. Prima scriveva 0x0000.
+  - Cosa NON e': la calibrazione PAPD. Questa e' una costante che viene da una
+    cattura su una board, al posto di uno zero che non viene da niente. Quando
+    ci sara' la ricerca del gain (docs/papd-cal-map.md punto 3) l'indice arriva
+    da lei e la define sparisce.
+  - Ordine: dopo 0002, che porta la tabella da cui si indicizza.
+  - NON provata su hardware. Questa tocca la predistorsione del PA: e' fra le
+    prime da misurare.

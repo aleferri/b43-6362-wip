@@ -158,6 +158,46 @@ due sequenze sono sfasate di uno. Allo stesso modo il cambio canale combacia per
 11 op e poi il vendore scrive i campi 5 GHz **intercalati**, non in coda: se si
 chiude la voce 5b, vanno messi in quelle posizioni.
 
+## 5. Le formule: cosa manca davvero per il rev 8
+
+Ho contato i `TODO` in `phy_n.c` e sono 25, ma è un conteggio che inganna: la
+grande maggioranza sono rami `phy->rev >= 19`, cioè PHY che non ci riguardano.
+Per il rev 8 la situazione è questa.
+
+**Presenti e funzionanti**: la calibrazione RSSI (`b43_nphy_rev3_rssi_cal`, che
+il rev 8 usa perché il dispatch è `rev >= 3`), la TX IQ/LO
+(`b43_nphy_cal_tx_iq_lo` con il ramo rev 7 e i registri `R2057_TX*_LOFT_*`), il
+save/restore delle calibrazioni. Non sono stub: girano.
+
+**Mancante per intero**: la **calibrazione PAPD**. b43 non ha nessuna funzione
+che la faccia — accende il motore (`PAPD_EN0`/`EN1`), ora gli inizializza le
+tabelle (`patches/b43/0004`), ma non calcola mai gli epsilon. In brcmsmac sono
+`wlc_phy_a3_nphy` (146 righe), `wlc_phy_a4` (275), `wlc_phy_ipa_set_bbmult_nphy`
+(722) e `wlc_phy_txpwr_papd_cal_nphy` (12): **~1150 righe**.
+
+È anche la spiegazione dei 22 registri PHY non attribuiti fra #11700 e #15900:
+non sono 22 buchi indipendenti, sono quella funzione che non esiste. Portarla è
+il pezzo grosso che resta, e non è roba da mezz'ora.
+
+## 4bis. La cal RSSI: i piani funzionano, il campionamento no
+
+Aggiornamento su 3a, misurato e non più ipotizzato.
+
+I piani di lettura **vengono consumati**: 22 valori su 27 per ciascuno di
+`0xa6`, `0xa7`, `0xf9`, `0xfb`, che sono i registri che `b43_nphy_poll_rssi()`
+legge. (Il giro precedente in cui "non spostavano niente" era un binario stale:
+lezione a parte, `make` prima di misurare.)
+
+Con i piani attivi i coefficienti che il port scrive sono `0x3f` dove il vendore
+mette `0x3e`: **un LSB**. La formula quindi è giusta; quello che differisce è il
+campionamento. Il conto preciso: il port fa **22** letture per registro dove il
+vendore ne fa **27** per init. Il piano è una FIFO per indirizzo, quindi con 5
+poll in meno il port consuma i valori dei round sbagliati e la media esce di uno.
+
+Cosa NON è la causa: il numero di livelli VCM. b43 cicla `vcm < 8` e brcmsmac ha
+`vcm_level_max = 8`, identici. Le 5 letture in più del vendore vengono da
+qualcos'altro, e non l'ho ancora trovato.
+
 ## 4. Come rifare le misure
 
 ```sh
