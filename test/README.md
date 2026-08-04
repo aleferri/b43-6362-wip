@@ -124,6 +124,24 @@ azzera a ogni cambio canale (`LOGEN_MX5G_TUNE`, `PGA_BOOST_TUNE_CORE0/1`,
 `TXMIX5G_*`, `PAD5G_*`, `LNA5G_*`) dal lato port non ci sono, perché b43 usa la
 variante `chantabent_rev7_2g`.
 
+Le due finestre della **tabella dei campioni** hanno trovato il difetto più
+grosso finora, e in mainline, non nel port. La tabella 17 è il tono che ogni
+calibrazione che suona campioni usa come stimolo, e b43 non ne produceva uno:
+`b43_nphy_gen_load_samples()` teneva il passo di fase in una `u16` dopo averlo
+moltiplicato per 2^16, e per tutte le frequenze che il driver chiede quel
+prodotto è un multiplo esatto di 65536, quindi il passo troncava a **zero** e i
+160 campioni uscivano tutti uguali; e `b43_nphy_load_samples()` mascherava con
+`0x3FF << 10` invece di spostare il valore mascherato, buttando via la componente
+in fase. `patches/b43/0010` chiude i due, e le 160 word diventano identiche alla
+cattura. Senza la patch `sampleplay-iqlo` fa 2/322, con la patch 322/322: è la
+misura di quanto valga avere la finestra.
+
+Ha anche corretto la mappa della cal: `papd-tone` cercava `0x186` con `val=0x100`,
+un valore che nella cattura non esiste, perché `0x186`-`0x194` non è il tono ma
+sono i coefficienti del filtro digitale TX (vedi `docs/papd-cal-map.md`). Una
+finestra `pending` con un'ancora impossibile non fallisce mai e non dice mai
+niente: è il modo più silenzioso di sbagliarsi.
+
 Il confronto ha anche trovato un difetto dell'harness, non del driver: `chanset`
 chiamava `switch_channel(dev, 6)` senza aggiornare `hw->conf.chandef`, che è
 quello che mac80211 fa prima di invocare l'op, e il port programmava la chantab
@@ -153,9 +171,13 @@ tutte:
 | papd-comp (`0003`) | 16 | **16/16** | **ok** |
 | papd-tables (`0004`) | 5 | **5/5** | **ok** |
 | ipa-bias (`0005`) | 3 | **3/3** | **ok** |
+| sampleplay-tssi | 322 | **322/322** | **ok** |
+| sampleplay-iqlo (`0010`) | 322 | **322/322** | **ok** |
+| txdigi-filts | 60 | 45/60 | mancano 15, e sono **idempotenti**: il vendore riscrive `0x195`-`0x1a3` con gli stessi valori |
 | chanswitch-ch6 | 39 | 11/39 | mancano **esattamente 10**: i campi 5 GHz della voce 5b |
 | tssi-setup | 19 | 5/19 | mancano 4, in più 15: il `0x17b` di troppo e lo sfasamento |
 | rssi-cal | 16 | 1/16 | mancano 15: i valori vengono dalla cal, che l'harness non fa |
+| papd-digifilt, papd-calsetup | - | - | fasi della cal PAPD non portate: l'ancora non c'è, ed è lo stato atteso |
 
 La colonna **run** è la sequenza consecutiva più lunga che combacia, su quante op
 ha la finestra: dice fin dove le due sequenze stanno insieme, che è più
@@ -214,12 +236,20 @@ il port.
 
 Contro il primo init della cattura (record 132-26100), flow `full`:
 
-| | mainline | +`0001`..`0003` | +`0004` | +`0005` |
-|---|---|---|---|---|
-| registri PHY | 175/218 (80%) | 186/218 (85%) | 186/218 (85%) | 186/218 (85%) |
-| registri radio | 39/54 (72%) | 39/54 (72%) | 39/54 (72%) | **40/54 (74%)** |
-| celle di tabella | 878/1987 (44%) | 1190/1987 (60%) | 1446/1987 (73%) | 1446/1987 (73%) |
-| op emesse | 14488 | 15598 | 16118 | 16118 |
+| | mainline | +`0001`..`0003` | +`0004` | +`0005` | serie intera |
+|---|---|---|---|---|---|
+| registri PHY | 175/218 (80%) | 186/218 (85%) | 186/218 (85%) | 186/218 (85%) | **190/218 (87%)** |
+| registri radio | 39/54 (72%) | 39/54 (72%) | 39/54 (72%) | **40/54 (74%)** | 40/54 (74%) |
+| celle di tabella | 878/1987 (44%) | 1190/1987 (60%) | 1446/1987 (73%) | 1446/1987 (73%) | 1446/1987 (73%) |
+| op emesse | 14488 | 15598 | 16118 | 16118 | 16121 |
+
+I quattro registri PHY in più dell'ultima colonna sono le soglie CRS di `0008`.
+**`0010` non muove nulla in questa tabella**, e non è un difetto della patch: le
+celle della tabella 17 b43 le scriveva già, solo col contenuto sbagliato, e questa
+misura guarda quali celle vengono toccate e non cosa ci finisce dentro. È la
+dimostrazione più netta del limite della copertura per insiemi: il difetto della
+tabella dei campioni non poteva uscire da qui, l'ha trovato il confronto
+posizionale.
 
 Il flow `initcal` accende la calibrazione mettendo `nphy->perical = 0` **dal
 main dell'harness**, dopo `prepare_structs`. Quel knob deve restare qui:

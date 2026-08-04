@@ -18,11 +18,21 @@
   `0008` programma le soglie di carrier sense, che nessuno scriveva;
   `0009` calcola l'offset epsilon del PAPD, che b43 scriveva a zero (24 dB di
   differenza) — dopo `0002`, da cui prende la tabella;
+  `0010` sistema la generazione della tabella dei campioni, che non produceva un
+  tono: passo di fase troncato a zero in una `u16` e componente in fase buttata
+  via da una precedenza sbagliata. **Non è gateata su questo radio**: è un
+  difetto di mainline su ogni N-PHY, e riguarda tutte le calibrazioni che suonano
+  campioni;
   `0006` misura il rumore di fondo su N-PHY, che non veniva misurato affatto —
-  **l'unica gateata sul tipo di PHY e non sulla revisione**, quindi l'unica che
-  esce dal recinto del nostro radio.
-  Tutte e tre riproducono la cattura nell'harness e **nessuna** ha girato su
-  hardware. Le sette già merged sono in `docs/upstream-status.md`.
+  gateata sul tipo di PHY e non sulla revisione, quindi anche lei esce dal
+  recinto del nostro radio.
+  Tutte riproducono la cattura nell'harness (`test/phase_compare.py`) e
+  **nessuna** ha girato su hardware. Le sette già merged sono in
+  `docs/upstream-status.md`.
+
+`0010` non porta un `Fixes:`: il tree si prende con `--depth 1`
+(`scripts/fetch-upstream-state.sh`), quindi non c'è la storia da cui ricavare lo
+sha del commit che ha introdotto i due refusi. Va aggiunto prima di mandarla.
 
 Le patch si applicano con `git am`. Non contengono `Fixes:` verso commit non
 merged e non vanno riordinate senza rigenerare i rimandi fra i messaggi.

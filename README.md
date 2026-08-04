@@ -29,7 +29,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | RSSI e decodifica RX su N-PHY | rami solo per G e LP in `xmit.c`, e coefficienti RSSI diversi dal vendore | `docs/todo-nphy.md` |
 | potenza target, TSSIG, RF ctl misc | scritti da entrambi con valori diversi | `docs/todo-nphy.md` |
 | offset epsilon del PAPD | scritto a zero da b43, **patch `0009`**: 24 dB di differenza | `docs/papd-cal-map.md` |
-| calibrazione PAPD, il resto | i due loop guidati dalle letture, ~1150 righe; fasi mappate | `docs/papd-cal-map.md` |
+| tabella dei campioni, cioè il tono di test | passo di fase troncato a zero in una `u16` e componente in fase persa per una precedenza: b43 non ha mai suonato un tono, su nessun N-PHY. **Patch `0010`**, 160 word su 160 identiche alla cattura | `docs/papd-cal-map.md` |
+| calibrazione PAPD, il resto | le due `wlc_phy_a3_nphy` guidate dalle letture; fasi mappate e attribuite | `docs/papd-cal-map.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato
@@ -46,7 +47,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
   analisi di copertura sul tree kernel.
 - `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board. La
   prima cattura c'è (70796 record, due cicli down/up su canali operativi 1 e 6,
-  zero perdite) e ha già corretto una patch: `docs/trace-init-2g.md`.
+  zero perdite) e ha già corretto una patch (`docs/trace-init-2g.md`) e trovato
+  due difetti di mainline (`patches/b43/0005` e `0010`).
 
 ## Riproducibilità dello stato
 

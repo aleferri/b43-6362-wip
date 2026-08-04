@@ -5,7 +5,8 @@
 #   ./scripts/fetch-upstream-state.sh ~/src/linux [ref]
 #
 # Un clone completo di Linux non serve e costa: con --filter=blob:none e il
-# cone mode restano ~40 MB.
+# cone mode restano ~60 MB. lib/math c'e' perche' l'harness di test/ compila il
+# cordic vero del kernel, non uno stub.
 
 set -e
 
@@ -23,7 +24,8 @@ include/dt-bindings
 arch/mips/bcm63xx
 arch/mips/include/asm/mach-bcm63xx
 drivers/clk/bcm
-drivers/soc/bcm"
+drivers/soc/bcm
+lib/math"
 
 if [ -d "$DEST/.git" ]; then
 	git -C "$DEST" fetch --filter=blob:none --depth 1 origin "$REF"
