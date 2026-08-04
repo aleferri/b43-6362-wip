@@ -137,16 +137,20 @@ allineabili, e sull'init non lo sono, perché b43 e il driver proprietario
 ordinano le fasi in modo diverso: il port comincia dalle tabelle, il vendore dal
 radio.
 
-Contro il primo init della cattura (record 132-26100), **con
-`patches/b43/0001` applicata al tree** — senza, il flow `full` scende a 175/218
-PHY e 122/533 celle, ed è esattamente la differenza che quella patch fa:
+Le celle si contano **espandendo le table-op**: un'op di lunghezza N copre N
+celle. Contarla come una sola sottostimava il port, che scrive in bulk dove il
+vendore scrive cella per cella — le percentuali di questa tabella sono quindi
+diverse da quelle che avevo scritto prima del fix, ed è cambiata la misura, non
+il port.
 
-| | flow `init` | flow `full` |
-|---|---|---|
-| registri PHY | 173/218 (79%) | **186/218 (85%)** |
-| registri radio | 19/54 (35%) | **39/54 (72%)** |
-| celle di tabella | 86/533 (16%) | **130/533 (24%)** |
-| op emesse | 11675 | 14572 |
+Contro il primo init della cattura (record 132-26100), flow `full`:
+
+| | mainline | +`0001`..`0003` | +`0004` | +`0005` |
+|---|---|---|---|---|
+| registri PHY | 175/218 (80%) | 186/218 (85%) | 186/218 (85%) | 186/218 (85%) |
+| registri radio | 39/54 (72%) | 39/54 (72%) | 39/54 (72%) | **40/54 (74%)** |
+| celle di tabella | 878/1987 (44%) | 1190/1987 (60%) | 1446/1987 (73%) | 1446/1987 (73%) |
+| op emesse | 14488 | 15598 | 16118 | 16118 |
 
 Il flow `initcal` accende la calibrazione mettendo `nphy->perical = 0` **dal
 main dell'harness**, dopo `prepare_structs`. Quel knob deve restare qui:
@@ -159,19 +163,22 @@ calibrazione accesa, poi `recalc_txpower`, poi un cambio canale. Non è una
 sequenza che sul device capita così: serve a misurare la copertura, non a
 riprodurre una run reale.
 
+Il confronto è **sulle celle e sui registri toccati, non posizionale**: dove il
+vendore scrive 64 celle una per una e il port ne fa una bulk, lo stato della
+tabella è lo stesso e la sequenza di op no.
+
 I registri SHM restano a 0/677 e non è un difetto: le scrive il core di b43, che
 non compiliamo — qui c'è solo il PHY.
 
 Cosa resta fuori, e perché:
 
-- **tabelle 26 e 27** (`C0/C1_*_R3`, cioè estimated e adjusted power, gain
-  control, I/Q, LO feedthrough, PAPD), 130 celle ciascuna: è il TX power control,
-  e `b43_nphy_tx_pwr_ctl_init()` per `phy->rev >= 7` ritorna subito con un
-  `/* TODO: Enable this once we have gains configured */`. Il port non può
-  scriverle: è il buco del driver, non dell'harness. È anche la ragione per cui
-  la tabella RF power offset è codice morto (`docs/rf-pwr-offset-rev8.md`).
-- **tabelle 31 e 33**, 64 celle ciascuna, e i registri di gain 0x1d7-0x1e1,
-  0x9a-0x9d, 0x129-0x12b: da attribuire, non ancora guardati.
+- **tabelle 26 e 27** a offset 576, la compensazione PAPD: era l'early return di
+  `b43_nphy_tx_gain_table_upload()`, chiuso da `patches/b43/0003`.
+- **tabelle 31, 32, 33, 34**, cioè epsilon e scalare del PAPD: b43 accendeva il
+  motore PAPD senza inizializzare le tabelle che legge. Chiuso da
+  `patches/b43/0004`.
+- **i registri di gain 0x1d7-0x1e1, 0x9a-0x9d, 0x129-0x12b** e gli altri 32
+  ancora scoperti: da attribuire, non ancora guardati.
 ## Piani di lettura, e cosa NON spiegano
 
 `readplans_init.h` è generato da `reverse-tools/gen_readplans.py`: appaia ogni
@@ -197,6 +204,27 @@ il driver, non stato dell'hardware. I piani restano perché costano nulla, rendo
 fedeli le read e serviranno quando i loop di calibrazione gireranno davvero, ma
 non sono la leva.
 
-Tre cose che il port tocca e il vendore no, da guardare: SHM 0x708 e 0x70e (la
-`tx_iq_workaround` di b43 scrive lì, il vendore no o lo fa altrove), il registro
-radio 0x5f, e la cella `tbl15+0x60`.
+## Le voci al contrario, guardate
+
+Il port che tocca qualcosa che il vendore non tocca è il segnale più forte che
+l'harness produce, perché non c'è modo di spiegarlo con "b43 fa meno". Erano tre,
+e sono finite in tre modi diversi.
+
+**`r05f` era un bug vero**, in mainline: il ramo rev 7/8 dei workaround IPA scrive
+`IPA2G_GAIN_CORE0` dove il vendore scrive `IPA2G_IMAIN_CORE0`, e programma i due
+core con valori diversi dove il vendore usa lo stesso. `patches/b43/0005` lo
+sistema per il rev 8, dettaglio in `docs/gap-inventory.md`.
+
+**`o708` e `o70e` non erano confrontabili.** Sono `B43_SHM_SH_NPHY_TXPWR_INDX0/1`,
+e il problema è l'unità di misura: `b43_shm_write16()` prende un offset in **byte**
+nella regione SHARED e lo divide per 4 al suo interno, mentre il tracer del vendore
+registra l'argomento di `write_objmem16()`, che è un indirizzo di parola con un
+selettore di spazio diverso (`0x10000` contro `B43_SHM_SHARED` = 1). L'harness
+intercetta al livello dell'API e il tracer a un altro: confrontare quegli indirizzi
+produce solo rumore. Ora `coverage.py` la object memory la conta e non la confronta,
+e lo dice.
+
+**`tbl15+0x60..0x63` è un artefatto mio.** Compare solo nel flow `full`, che accende
+la calibrazione con `perical = 0`: è la tabella IQLOCAL scritta dalla cal, che il
+vendore all'init non fa. Nel flow `init`, quello che imita il vendore, la lista al
+contrario è **vuota**.

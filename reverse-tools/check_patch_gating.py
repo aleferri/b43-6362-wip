@@ -37,6 +37,9 @@ RE_FILE = re.compile(r'^\+\+\+ b/(.+)$')
 RE_HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
 RE_REV_NAME = re.compile(r'_rev\d+\w*$')
 RE_REV_GUARD = re.compile(r'\b(?:phy->)?(?:radio_)?rev\b')
+# Un gate sul TIPO di PHY e' legittimo, ma ha un raggio diverso: tocca tutte le
+# revisioni di quel tipo, non solo la nostra. Va riconosciuto e detto.
+RE_TYPE_GUARD = re.compile(r'B43_PHYTYPE_\w+')
 RE_RETURN = re.compile(r'\breturn\b')
 
 
@@ -110,11 +113,14 @@ def check(tree, patch_path):
                 open(dst, 'w').close()
         # patch(1) e non git apply: la directory temporanea non e' un repo, e
         # git apply fuori da un work tree rifiuta i path.
-        res = subprocess.run(['patch', '-p1', '--silent', '-i',
+        res = subprocess.run(['patch', '-p1', '--forward', '--silent', '-i',
                               os.path.abspath(patch_path)],
                              cwd=tmp, capture_output=True, text=True)
-        if res.returncode:
-            return [('(patch non applicabile sull\'albero dato)', None, res.stderr.strip()[:80])]
+        if res.returncode or 'previously applied' in res.stdout:
+            hint = ('la patch sembra GIA\' applicata sull\'albero: --tree vuole '
+                    'un albero pulito' if 'previously applied' in res.stdout
+                    else (res.stderr.strip() or res.stdout.strip())[:90])
+            return [('(patch non applicabile)', None, hint)]
 
         for rel, nums in per_file.items():
             path = os.path.join(tmp, rel)
@@ -135,6 +141,13 @@ def check(tree, patch_path):
                 if RE_REV_NAME.search(fn):
                     verdicts.append((rel, fn, 'nome rev-specifico'))
                     continue
+                # Funzione aggiunta per intero dalla patch: il gate, se c'e',
+                # sta nel chiamante. Non e' un allarme.
+                span_lines = set(range(spans[fn][0], spans[fn][1] + 1))
+                if span_lines <= set(nums):
+                    verdicts.append((rel, fn,
+                                     'funzione nuova, il gate sta nel chiamante'))
+                    continue
                 # Se il gate lo introduce la patch stessa, e' quello da dire.
                 own = None
                 for k in sorted(x for x in nums if spans[fn][0] <= x <= spans[fn][1]):
@@ -145,7 +158,15 @@ def check(tree, patch_path):
                     if RE_REV_GUARD.search(code) and re.search(r'\bif\b', code):
                         own = 'gate aggiunto dalla patch alla riga %d' % k
                         break
+                    if RE_TYPE_GUARD.search(code) and re.search(r'\b(if|return)\b', code):
+                        own = ('gate sul TIPO di PHY alla riga %d: tocca tutte '
+                               'le rev di quel tipo' % k)
+                        break
                 gate = own or gate_for(lines, spans[fn], n)
+                if not gate:
+                    body = ''.join(lines[spans[fn][0] - 1:spans[fn][1]])
+                    if RE_TYPE_GUARD.search(strip(body)):
+                        gate = 'gate sul TIPO di PHY: tocca tutte le rev di quel tipo'
                 verdicts.append((rel, fn, gate or 'NON GATEATA'))
     return verdicts
 

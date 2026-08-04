@@ -17,12 +17,17 @@ decodifica delle tracce del driver `wl`.
 - **cfuncs.py** — localizzazione riga→funzione per sorgenti in stile kernel,
   usata dai due sopra. Non è un parser C: euristica a profondità di graffe.
 
+- **phy_type_audit.py** — elenca i costrutti dove b43 discrimina sul tipo di PHY
+  e cita la G senza la N. Genera `docs/phy-g-only.md`. Euristica testuale: vede la
+  presenza del caso N, non la sua correttezza.
 - **check_patch_gating.py** — per ogni riga aggiunta da una patch cerca un gate di
   revisione che la domini. Serve perché nel PHY di b43 quasi tutto è condiviso fra
   tutte le N-PHY, e una modifica non iffata cambia hardware che non possiamo
   provare. Euristica, non parser: un `NON GATEATA` va guardato. Vedi
   `docs/upstreaming.md` per l'elenco delle funzioni condivise e il gate che
-  ciascuna vuole.
+  ciascuna vuole. Distingue il gate sulla revisione da quello sul **tipo** di PHY,
+  che è legittimo ma tocca tutte le rev di quel tipo. Vuole un albero **pulito**:
+  se la patch è già applicata lo dice invece di fallire in modo oscuro.
 
 ## Estrazione dal blob OEM
 
@@ -78,6 +83,10 @@ Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
 - **fold_mod_reads.py** — ripiega la read implicita di ogni `MOD`.
 - **collapse_trace.py** — compatta le table-op (porte N-PHY 0x72/0x73/0x74). Per
   il confronto op-per-op col port usare il trace **grezzo**, non il collassato.
+- **test/coverage.py** — copertura per classe, e con `--values` confronta il primo
+  valore scritto su ogni registro toccato da entrambi: è la classe di differenza
+  che la sola presenza non vede, e ha trovato il TSSI. Vuole il port sullo stesso
+  canale della cattura, altrimenti la chantab produce falsi positivi.
 - **trace_tables.py** — riassocia ogni `TBL.WR` alle `PHY.WR` su 0x72/0x73/0x74
   che la implementano e stampa i valori, con controllo di coerenza fra
   intestazione e dati (indirizzo = `(id << 10) | off`, conteggio = `len`). Con

@@ -28,16 +28,27 @@ Copertura misurata con `test/coverage.py` contro il primo init (132-26100), con
 `patches/b43/0001` applicata al tree. Su mainline pulito il flow `full` fa
 175/218 registri PHY e 122/533 celle: la differenza è quella patch.
 
-| | flow `init` | flow `full` | `full` con 0001+0002+0003 |
-|---|---|---|---|
-| registri PHY | 173/218 (79%) | 186/218 (85%) | 186/218 (85%) |
-| registri radio | 19/54 (35%) | 39/54 (72%) | 39/54 (72%) |
-| celle di tabella | 86/533 (16%) | 130/533 (24%) | **386/533 (72%)** |
-| op emesse | 11675 | 14572 | 15598 |
+Le celle sono contate espandendo le table-op (un'op di lunghezza N copre N
+celle): le percentuali sono diverse da quelle di prima perché è cambiata la
+misura, non il port.
 
-Le prime due colonne di `full` sono con la sola `0001`; su mainline pulito fa
-175/218 PHY e 122/533 celle. Il salto delle celle viene da `0003`, che abilita la
-compensazione PAPD: 256 celle in più, e tutte identiche alla cattura.
+Flow `full`, contro il primo init:
+
+| | mainline | +`0001`..`0003` | +`0004` | +`0005` |
+|---|---|---|---|---|
+| registri PHY | 175/218 (80%) | 186/218 (85%) | 186/218 (85%) | 186/218 (85%) |
+| registri radio | 39/54 (72%) | 39/54 (72%) | 39/54 (72%) | **40/54 (74%)** |
+| celle di tabella | 878/1987 (44%) | 1190/1987 (60%) | **1446/1987 (73%)** | 1446/1987 (73%) |
+| op emesse | 14488 | 15598 | 16118 | 16118 |
+
+Con le cinque patch e il flow `init`, quello che imita il vendore, **il port non
+tocca più niente che il vendore non tocchi**. Nel flow `full` restano quattro
+celle IQLOCAL, che vengono dalla calibrazione forzata dell'harness e non dal
+driver.
+
+I due salti sono `0003` (compensazione PAPD, 256 celle) e `0004` (tabelle
+epsilon e scalare, 256 celle), e in entrambi i casi ogni valore coincide con la
+cattura.
 
 I piani di lettura generati dalla cattura (149 indirizzi, 2089 read appaiate) non
 cambiano nessuna di queste cifre: 72 piani su 149 vengono consumati, ma la
@@ -60,5 +71,10 @@ tabelle 31 e 33, da attribuire.
 - [x] piani di lettura dai `RETVAL` della cattura — fatti, e misurato che non
       spostano la copertura: il residuo è strutturale
 - [x] tabelle 26 e 27: erano l'early return del percorso PAPD, `patches/b43/0003`
-- [ ] attribuire le tabelle 31 e 33 (64 celle ciascuna) e i 32 registri PHY
-      ancora scoperti
+- [x] tabelle 31, 32, 33, 34: epsilon e scalare del PAPD, mai inizializzate,
+      `patches/b43/0004`
+- [x] le tre voci che il port tocca e il vendore no: una era un bug
+      (`patches/b43/0005`), una non era confrontabile (object memory), una era
+      un artefatto dell'harness
+- [ ] attribuire i 32 registri PHY ancora scoperti (0x1d7-0x1e1, 0x9a-0x9d,
+      0x129-0x12b e altri)

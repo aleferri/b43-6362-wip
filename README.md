@@ -22,6 +22,11 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
 | RF power offset rev 8 | valori sbagliati in mainline, **chiuso dalla cattura**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
 | compensazione PAPD rev 7+ | mai programmata per un early return, **patch `0003`**: 256 celle identiche alla cattura | `docs/gap-inventory.md` |
+| tabelle epsilon e scalare del PAPD | motore acceso su tabelle non inizializzate, **patch `0004`** | `docs/gap-inventory.md` |
+| bias IPA 2 GHz sul rev 8 | registro sbagliato e valori diversi fra i core, **patch `0005`** | `docs/gap-inventory.md` |
+| rumore di fondo su N-PHY | non misurato affatto, **patch `0006`** | `docs/phy-g-only.md` |
+| RSSI e decodifica RX su N-PHY | rami solo per G e LP in `xmit.c`, e coefficienti RSSI diversi dal vendore | `docs/todo-nphy.md` |
+| potenza target, TSSIG, RF ctl misc | scritti da entrambi con valori diversi | `docs/todo-nphy.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato

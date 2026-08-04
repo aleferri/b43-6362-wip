@@ -1,0 +1,95 @@
+From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: fix the IPA 2 GHz bias registers on radio 2057 rev 8
+
+The rev 7 and rev 8 arm of the internal PA workarounds writes 0x5F and
+0xE8, which are IPA2G_GAIN_CORE0 and IPA2G_IMAIN_CORE1: one register from
+each pair, on different cores. The core offset between the two cores of
+this radio is 0x85, so the counterpart of IPA2G_IMAIN_CORE1 is
+IPA2G_IMAIN_CORE0 at 0x63, not 0x5F.
+
+An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362
+(N-PHY rev 8, radio 2057 rev 8) writes, at the same point of the init and
+in both of the two init sequences it contains:
+
+	0x63 = 0x14	IPA2G_IMAIN_CORE0
+	0xE8 = 0x14	IPA2G_IMAIN_CORE1
+
+that is, IMAIN on both cores with the same value, and never touches 0x5F.
+b43 instead leaves IMAIN_CORE0 alone, writes the core 0 gain register with
+a value meant for the bias, and programs the two cores differently.
+
+Give rev 8 its own case and program IMAIN on both cores there, using the
+symbolic names. Radio rev 7 keeps its own case and its current behaviour:
+there is no capture from hardware with that radio, the pattern may well be
+wrong there too, and whoever gets to look at it should not have to reason
+about rev 8 at the same time.
+
+Both cases keep the 20 MHz and 40 MHz arms separate. The 40 MHz values are
+unchanged in both, and carry a TODO: the vendor driver does not use 40 MHz in
+2.4 GHz on the board the capture comes from, so checking them needs a device
+that runs 40 MHz, not more work on this one.
+
+Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -3062,7 +3062,6 @@
+ 				}
+ 				break;
+ 			case 7:
+-			case 8:
+ 				if (!b43_is_40mhz(dev)) {
+ 					b43_radio_write(dev, 0x5F, 0x14);
+ 					b43_radio_write(dev, 0xE8, 0x12);
+@@ -3070,6 +3069,26 @@
+ 					b43_radio_write(dev, 0x5F, 0x16);
+ 					b43_radio_write(dev, 0xE8, 0x16);
+ 				}
++				break;
++			case 8:
++				if (!b43_is_40mhz(dev)) {
++					b43_radio_write(dev,
++							R2057_IPA2G_IMAIN_CORE0,
++							0x14);
++					b43_radio_write(dev,
++							R2057_IPA2G_IMAIN_CORE1,
++							0x14);
++				} else {
++					/* TODO: check these against a capture
++					 * from a device that runs 40 MHz. The
++					 * vendor driver does not use 40 MHz in
++					 * 2.4 GHz on the board this was taken
++					 * from, so they are the values this
++					 * path used before, unverified.
++					 */
++					b43_radio_write(dev, 0x5F, 0x16);
++					b43_radio_write(dev, 0xE8, 0x16);
++				}
+ 				break;
+ 			case 14:
+ 				for (core = 0; core < 2; core++) {
+
+Note per il repo, non per la mailing list:
+
+  - Come e' venuta fuori: dalla lista al contrario di test/coverage.py, cioe' i
+    registri che il PORT scrive e il vendore no. Era una riga, r05f, e sembrava
+    la piu' piccola delle tre voci aperte.
+  - Verifica: harness in test/, flow init. Prima 0x5f=0x14 e 0xe8=0x12, dopo
+    0x63=0x14 e 0xe8=0x14, che e' esattamente quello che il vendore scrive nello
+    stesso punto di entrambi gli init della cattura.
+  - Provenienza dell'errore, per quel che vale: il blocco per radiorev 3/4/6
+    subito sopra scrive 0x5F con la variabile bias, e la coppia 0x5F/0xE8 ha
+    l'aria di essere stata ricopiata da la'. Osservazione, non una tesi.
+  - Da capire, e NON toccato qui: il rev 7 ha probabilmente lo stesso problema,
+    e il ramo 40 MHz del rev 8 pure. Non e' che non ho guardato: il driver
+    vendor non usa i 40 MHz in 2.4 GHz su questa board -- 31 chanspec su 31
+    sono bw20 -- quindi quella cattura non si puo' fare qui, serve un device
+    che i 40 MHz li accenda. Il commento nel codice lo dice come TODO con la
+    ragione, che e' diverso da "manca la cattura". I due case sono separati proprio per questo: chi arriva con una
+    cattura da un 2057 rev 7 tocca il suo ramo e non deve farsi carico del
+    nostro, e le due larghezze di banda sono divise dentro ciascuno.
+  - Il prezzo e' la duplicazione delle due righe del 40 MHz. Voluta: l'
+    alternativa e' una catena di if dove il ramo condiviso lega insieme due
+    revisioni che nessuno ha verificato insieme.
+  - NON provata su hardware.
