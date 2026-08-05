@@ -1,4 +1,4 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: program the carrier sense thresholds on radio 2057 rev 8
 
@@ -6,16 +6,22 @@ The N-PHY carrier sense threshold and control registers have names in
 phy_n.h and no writer: the driver leaves them at whatever the initvals put
 there.
 
-An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362
-(N-PHY rev 8, radio 2057 rev 8) clears bit 5 of both control registers and
-sets both threshold 2 registers to 0x55, in the rev 7+ workarounds and
+An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362 (N-PHY
+rev 8, radio 2057 rev 8) clears bit 5 of both control registers and sets
+both threshold 2 registers to 0x55, in the rev 7+ workarounds and
 immediately before the gain control ones. Do the same.
 
 Only for radio 2057 rev 8 in 2.4 GHz at 20 MHz, which is what the capture
 covers. Note that neither brcmsmac nor the bcm-v4 notes write these
 registers at all, so the capture is the only source here.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Verified: records #680-#770, from "PHY.MOD  addr=0x01d9 val=0x0000 mask=0x0020"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows gain-control
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c

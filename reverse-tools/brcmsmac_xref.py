@@ -57,7 +57,7 @@ def main():
     rows = sorted(hits.items(), key=lambda kv: first[kv[0]])
 
     if args.format == 'md':
-        print('| funzione brcmsmac | prima riga | radiorev==%d | NREV_IS(rev,%d) |'
+        print('| funzione brcmsmac | primo match | radiorev==%d | NREV_IS(rev,%d) |'
               % (args.radio_rev, args.phy_rev))
         print('|---|---|---|---|')
         for fn, c in rows:

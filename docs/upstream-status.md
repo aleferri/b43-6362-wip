@@ -9,7 +9,7 @@ Serie "b43: complete N-PHY rev 8 + radio 2057 rev 8 support", 7 patch:
 
 | sha | titolo | file toccati |
 |---|---|---|
-| `682edc28b91c` | b43: add firmware mappings and remove comments wondering about rev22 initvals | `main.c` |
+| `682edc28b91c` | b43: add firmware mappings for rev22 | `main.c` |
 | `ee81dc7636fb` | b43: add d11 core revision 0x16 to id table | `main.c` |
 | `2691a1ae6bcc` | b43: route d11 corerev 22 to 24-bit indirect radio access | `main.c` |
 | `454518d95d07` | b43: support radio 2057 rev 8 | `radio_2057.c`, `main.c` |
@@ -49,16 +49,21 @@ target sta su kernel 6.12. Diventano ridondanti al primo bump a >= 6.16.
 `patches/bcma/0001..0003`: enumerazione del backplane. Vedi `soc-glue.md` per il
 contenuto e `upstreaming.md` per gli ostacoli.
 
-## Non merged, scritte qui e non ancora provate
+## Non merged, scritte qui e mai girate su hardware
+
+Sono quattordici, `patches/b43/0001..0014`: l'elenco con lo stato per voce sta nella
+tabella del `README.md` e il dettaglio in `gap-inventory.md`. Applicano tutte
+pulito su `848acc8ffe1b` e compilano nell'harness, che le verifica contro la
+cattura. Due meritano una riga a parte:
 
 | patch | cosa fa | stato |
 |---|---|---|
-| `patches/b43/0001` | programma il gain control RX per radio 2057 rev 8 in 2.4 GHz bw20, sui valori della cattura | applica pulito, **non compilata, non provata**; gate `reports/30-rx-sensitivity.md` |
-| `patches/b43/0002` | porta gli offset di potenza del rev 8 sui valori rev 7 del vendore | **bozza**, prove contrastanti, vedi `rf-pwr-offset-rev8.md`; oggi è codice morto |
+| `patches/b43/0001` | programma il gain control RX per radio 2057 rev 8 in 2.4 GHz bw20, sui valori della cattura | verificata op per op nell'harness (finestra `gain-control`, 87/87), **mai girata su hardware**; gate `reports/30-rx-sensitivity.md` |
+| `patches/b43/0002` | porta gli offset di potenza del rev 8 sui valori rev 7 del vendore | **chiusa dalla cattura**: i valori rev 7 predicono 128 celle su 128, quelli in tree 5 (`rf-pwr-offset-rev8.md`). Non è più codice morto, `0003` abilita il percorso che la legge |
 
-Nessuna delle due va spedita prima della misura corrispondente. La prima ha già
-cambiato forma una volta: era scritta su brcmsmac, la cattura ha mostrato valori
-diversi (`trace-init-2g.md`).
+`0001` non va spedita prima della misura di sensibilità RX. Ha già cambiato forma
+una volta: era scritta su brcmsmac, la cattura ha mostrato valori diversi
+(`trace-init-2g.md`).
 
 ## Non esistente da nessuna parte
 

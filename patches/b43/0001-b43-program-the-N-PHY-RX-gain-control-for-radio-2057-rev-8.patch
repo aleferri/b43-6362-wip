@@ -1,9 +1,9 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: program the N-PHY RX gain control for radio 2057 rev 8
 
-b43_nphy_gain_ctl_workarounds_rev7() has been an empty stub since N-PHY
-rev 7+ support was added, so the RX gain control is left at whatever the
+b43_nphy_gain_ctl_workarounds_rev7() has been an empty stub since N-PHY rev
+7+ support was added, so the RX gain control is left at whatever the
 initvals put there: LNA1, LNA2 and TIA gain tables, the CRS minimum power
 thresholds, the clip1 low gain codes and the W1 clip thresholds are never
 programmed.
@@ -12,22 +12,28 @@ Program them for radio 2057 rev 8 in 2.4 GHz, 20 MHz. The register and
 table writes, and their order, are taken from an MMIO capture of the
 proprietary wl driver 6.30.102.7 running on a BCM6362 (D-Link DSL-3580L).
 The capture contains two init sequences, on operating channel 1 and on
-operating channel 6, and both program the same values in the same order,
-so none of them depends on the channel.
+operating channel 6, and both program the same values in the same order, so
+none of them depends on the channel.
 
 Other radio revisions keep the current behaviour. The vendor driver uses
-different gain values per radio revision, and the ones brcmsmac carries
-for this code path are from an older release: on radio rev 8 it would
-write an LNA1 gain set of 9, 14, 19, 24 and a W1 clip threshold of 13,
-where the device is programmed with 8, 13, 18, 25 and 24. Extending this
-to another revision needs a capture from hardware that has it.
+different gain values per radio revision, and the ones brcmsmac carries for
+this code path are from an older release: on radio rev 8 it would write an
+LNA1 gain set of 9, 14, 19, 24 and a W1 clip threshold of 13, where the
+device is programmed with 8, 13, 18, 25 and 24. Extending this to another
+revision needs a capture from hardware that has it.
 
 40 MHz and 5 GHz return early, for two different reasons. The vendor driver
-does not use 40 MHz in 2.4 GHz on this board, so checking those values needs
-a device that runs 40 MHz. For 5 GHz, b43 has no channel table for radio
-2057 rev 8, so the driver cannot tune there in the first place.
+does not use 40 MHz in 2.4 GHz on this board, so checking those values
+needs a device that runs 40 MHz. For 5 GHz, b43 has no channel table for
+radio 2057 rev 8, so the driver cannot tune there in the first place.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Verified: records #680-#770, from "PHY.MOD  addr=0x01d9 val=0x0000 mask=0x0020"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows gain-control
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
 index 22359bd..9cfeef9 100644

@@ -31,6 +31,7 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | offset epsilon del PAPD | scritto a zero da b43, **patch `0009`**: 24 dB di differenza | `docs/papd-cal-map.md` |
 | tabella dei campioni, cioè il tono di test | passo di fase troncato a zero in una `u16` e componente in fase persa per una precedenza: b43 non ha mai suonato un tono, su nessun N-PHY. **Patch `0010`**, 160 word su 160 identiche alla cattura | `docs/papd-cal-map.md` |
 | calibrazione PAPD, il resto | le due `wlc_phy_a3_nphy` guidate dalle letture; fasi mappate e attribuite | `docs/papd-cal-map.md` |
+| cal periodica: TX IQ/LO, RX IQ, seconda cal RSSI | in mainline il ramo che le chiama è un `;/* TODO */`, quindi non girano mai: **patch `0014`**, seconda cal RSSI da 0% a 46% nel flow `init`, non verificata (vedi `CLAUDE.md`, prossimo passo 2) | `CLAUDE.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato
@@ -45,10 +46,13 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 - `reverse-tools/` — tracer `wl-diag` (due varianti, **tarate su N-PHY**),
   pipeline di decodifica, estrattore/verificatore delle tabelle dal blob OEM,
   analisi di copertura sul tree kernel.
-- `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board. La
-  prima cattura c'è (70796 record, due cicli down/up su canali operativi 1 e 6,
-  zero perdite) e ha già corretto una patch (`docs/trace-init-2g.md`) e trovato
-  due difetti di mainline (`patches/b43/0005` e `0010`).
+- `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board. Di
+  catture ce ne sono due: `opinit-ch1-ch6-bw20` (70796 record, due cicli
+  down/up su canali operativi 1 e 6, zero perdite), che ha già corretto una
+  patch (`docs/trace-init-2g.md`) e trovato quattro difetti di mainline
+  (`patches/b43/0005`, `0010`, `0011`, `0012`), e `full-init-ch1-bw20` (81397
+  record, init a freddo, con un buco da 65285 record per overflow della fifo),
+  la sola che contenga il download delle tabelle statiche.
 
 ## Riproducibilità dello stato
 

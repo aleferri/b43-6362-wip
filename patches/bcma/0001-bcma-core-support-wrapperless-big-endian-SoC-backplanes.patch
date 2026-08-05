@@ -2,17 +2,16 @@ From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Fri, 12 Jun 2026 09:38:25 +0000
 Subject: [PATCH] bcma: core: support wrapperless big-endian SoC backplanes
 
-Some Broadcom SoCs integrate an on-chip WLAN backplane that uses
-bcma but differs from the BCM47xx family the generic bcma_host_soc
-driver was originally written for. The backplane registers are
-big-endian peripherals on the big-endian CPU, and the cores that
-bcma needs to gate (ChipCommon, the 802.11 core, the SHIM core
-itself) publish no per-core DMP wrappers in the EROM (NMW=NSW=0) -
-clock and reset gating happens through a SoC-level control
-register window owned by the host driver instead.
+Some Broadcom SoCs integrate an on-chip WLAN backplane that uses bcma but
+differs from the BCM47xx family the generic bcma_host_soc driver was
+originally written for. The backplane registers are big-endian peripherals
+on the big-endian CPU, and the cores that bcma needs to gate (ChipCommon,
+the 802.11 core, the SHIM core itself) publish no per-core DMP wrappers in
+the EROM (NMW=NSW=0) - clock and reset gating happens through a SoC-level
+control register window owned by the host driver instead.
 
-Add the core infrastructure needed by a per-SoC host driver to
-support such backplanes:
+Add the core infrastructure needed by a per-SoC host driver to support such
+backplanes:
 
   - Two fields on struct bcma_bus: big_endian and wrapperless.
     The host driver populates them before calling

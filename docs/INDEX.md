@@ -2,6 +2,7 @@
 
 | file | cosa contiene |
 |---|---|
+| `../CLAUDE.md` | il minimo per non ripetere errori gia' fatti: setup, stato, regole, trappole |
 | `init-flow.md` | il flusso di init dei due lati affiancato, fase per fase, e perché b43 non arriva alla cal PAPD |
 | `upstream-status.md` | cosa è già merged, con sha e date verificati |
 | `soc-glue.md` | enumerazione bcma sul BCM6362: mappa registri, bring-up, DT, SPROM |

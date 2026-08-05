@@ -1,11 +1,11 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: use the rev 7 RF power offsets for radio 2057 rev 8
 
-The table added by commit 21352612198c ("b43: add RF power offset for
-N-PHY r8 + radio 2057 r8") carries the values the proprietary driver uses
-for radio revision 5. That driver, and brcmsmac in get_rf_pwr_offset(),
-select a different table for revisions 7 and 8:
+The table added by commit 21352612198c ("b43: add RF power offset for N-PHY
+r8 + radio 2057 r8") carries the values the proprietary driver uses for
+radio revision 5. That driver, and brcmsmac in get_rf_pwr_offset(), select
+a different table for revisions 7 and 8:
 
 	else if ((pi->pubpi.radiorev == 7) || (pi->pubpi.radiorev == 8))
 		rfpwr_offset = (s16) nphy_papd_padgain_dlt_2g_2057rev7[pad_gn];
@@ -21,7 +21,11 @@ the values in tree reproduces 5 cells out of 128; recomputing them from the
 rev 7 values reproduces all 128.
 
 Fixes: 21352612198c ("b43: add RF power offset for N-PHY r8 + radio 2057 r8")
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n17788
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.c b/drivers/net/wireless/broadcom/b43/tables_nphy.c
 index ecd660b..74d867a 100644

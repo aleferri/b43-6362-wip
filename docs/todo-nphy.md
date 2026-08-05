@@ -115,8 +115,7 @@ Quindi il ramo `phy->rev != 7 ? 1 : 0x31` sembra mescolare le due fasi: mette il
 valore della cal nel setup per il rev 7, e per gli altri rev scrive 1 dove il
 vendore lascia stare.
 
-**Il valore però si sa, e prima avevo scritto che serviva una lettura su
-hardware: non serve.** La cattura contiene la scrittura della tabella di init del
+**Il valore si sa senza hardware.** La cattura contiene la scrittura della tabella di init del
 radio, `#104: 0x17b = 0x02` e `#105: 0x19b = 0x02`, un core per riga; e le quattro
 letture di `0x17b` nei due init (#1256, #8528, #23907, #35958) tornano **tutte
 `0x02`**. Quindi il valore che il vendore ha su quel registro durante il setup è
@@ -193,11 +192,10 @@ inesistente, e la voce 5b gonfiata da 10 a 18.
 
 Le voci 3a-3d sono uscite da `coverage.py --values`, che confronta insiemi e
 primi valori. È la misura debole. Quella forte è `test/phase_compare.py`, che
-diffa op per op dentro una finestra allineata, ed è il metodo di `b43-ac-wip`
-che avevo importato nel primo giro senza mai eseguirlo.
+diffa op per op dentro una finestra allineata.
 
-Applicata al TSSI, dice più di quanto avessi capito: non è "un valore diverso su
-`0x17b`", è **un'op in più**. Il port scrive `0x17b = 1` fra `0x17a` e `0x176`,
+Applicata al TSSI dice una cosa precisa: non è "un valore diverso su `0x17b`", è
+**un'op in più**. Il port scrive `0x17b = 1` fra `0x17a` e `0x176`,
 dove il vendore in quella fase passa direttamente a `0x176`, e da lì in poi le
 due sequenze sono sfasate di uno. Allo stesso modo il cambio canale combacia per
 11 op e poi il vendore scrive i campi 5 GHz **intercalati**, non in coda: se si
@@ -230,13 +228,9 @@ mai gli epsilon. In brcmsmac il blocco è:
 | `wlc_phy_txpwr_papd_cal_nphy` | 13 | il gate "il gain è derivato di 4" |
 | `wlc_phy_ipa_set_bbmult_nphy` | 6 | scrive il bbmult |
 
-Circa **1150 righe**, ma distribuite in modo molto diverso da come le avevo
-contate: qui prima c'era scritto che il pezzo grosso era
-`wlc_phy_ipa_set_bbmult_nphy` con 722 righe, e ne ha sei. Il numero veniva da
-`reverse-tools/cfuncs.py`, che non riconosceva le firme mandate a capo dallo stile
-kernel e attribuiva a `set_bbmult` tutto ciò che seguiva, cioè `papd_cal_setup`,
-`cleanup` e `a2`. Corretto; l'attribuzione dei gate in `docs/brcmsmac-xref.md`
-era sbagliata per lo stesso motivo.
+Circa **1150 righe**. Attenzione a `wlc_phy_ipa_set_bbmult_nphy`: ne ha sei, non
+722 — quel numero viene da `cfuncs.py` prima che riconoscesse le firme mandate a capo
+dallo stile kernel, e vale per qualunque conteggio fatto con quella versione.
 
 È anche la spiegazione dei 22 registri PHY non attribuiti fra #11700 e #15900:
 non sono 22 buchi indipendenti, sono quel blocco che non esiste. Portarlo è il
@@ -319,3 +313,42 @@ Due trappole in cui sono cascato, per non ricascarci:
 - **SPROM incompleta** nell'harness: i campi che non decodifico diventano zeri, e
   gli zeri sembrano buchi del driver. Se una differenza riguarda la potenza,
   guardare prima `main.c` che il driver.
+
+## 6. Le prime 84 op: non c'e' spur avoidance, e non ci sono misure
+
+`PMU.SPUR` compare **zero** volte in entrambe le catture, quella a caldo e quella a
+freddo. Lo spur avoidance non e' qui e non e' altrove in quello che abbiamo:
+`si_pmu_spuravoid` e' fra i simboli agganciati, quindi se il vendore lo chiamasse lo
+vedremmo. L'assenza e' un dato.
+
+E non sono misure, benche' ci siano letture. Due pattern, nessuno dei due interroga
+l'hardware:
+
+**Le `SI.COREREG` sono la meta' di lettura di un read-modify-write.** Il valore che
+tornano e' quello appena scritto — `#10` legge `0x64` e torna `0x400`, che e' quello
+che `#9` ha scritto con `GPIO.OUT`; `#14` legge `0x68` e torna `0x407`, scritto da
+`#13` con `GPIO.OE`. `si_gpioout` e `si_gpioouten` sono helper mask/set, e il tracer
+vede la lettura perche' aggancia l'accessor.
+
+**Le `OBJ` sono un write-then-verify della SHM.** `#46-#49` scrivono quattro word
+(`0x98`, `0x9a`, `0x9c`, `0x9e`), `#50-#57` rileggono le stesse quattro e tornano
+valori identici. Coerente col rapporto 17 scritture contro 5 letture: se fossero
+misure sarebbe rovesciato.
+
+Le misure vere nella cattura stanno tutte piu' tardi, e si riconoscono perche' il
+valore letto **non e' prevedibile** da quello scritto: il poll dell'idle TSSI, i 20
+poll del loop vcm della cal RSSI, le 40 riletture per passo di gain della cal PAPD,
+`rcal`/`rccal`. E' la stessa distinzione su cui si regge l'harness — dove il valore e'
+prevedibile lo specchio basta, dove non lo e' servono i piani di lettura.
+
+### Da verificare: la sequenza AFE e' doppia
+
+`PHY.ARRW` piu' le quattro scritture AFE (`0xa6 0x8f 0xa7 0xa5`) compaiono due volte,
+a **#20-#24** e a **#27-#31**, con gli stessi valori. In mezzo ci sono solo
+`MAC.MHF 0x0000` e `MAC.MCTRL`.
+
+b43 chiama `switch_analog(true)` una volta sola da `b43_phy_init()`, e l'harness ne
+emette una. Se il vendore la fa due volte c'e' un passaggio che non abbiamo — il
+sospetto e' un `radio_on` che va e torna, o un secondo giro del percorso di rfkill —
+ma non e' verificato. Non sono misure in nessun caso: sono le stesse quattro
+scritture, quindi la domanda e' cosa succede **fra** le due, non cosa leggono.

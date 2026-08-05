@@ -71,3 +71,83 @@ prodotto un match pieno.
 Ricaduta pratica: i 109 record 5 GHz sono estraibili come array C con
 `--emit-c --band 5g`, se un giorno servissero. Non servono a questo progetto e
 non vanno mandati upstream senza hardware per provarli.
+
+## Un secondo blob: `wlD6220.o_save`, wl 7.14.89.14
+
+Netgear D6220, 5,4 MB, molto piu' recente del 6.30.102.7 del DSL-3580L. Serve come
+controllo indipendente, e la prima cosa che ha dato e' una smentita: `regs_2057_rev8`
+e' **identica** fra i due blob, 412 indirizzi, 412 valori e 39 flag senza una
+differenza (vedi `gap-inventory.md` 4h).
+
+Cosa aggiunge, sui simboli che ci interessano (679 contro 738 per il filtro
+`nphy|2057`, 101 in piu' nel 7.14):
+
+- **quattordici** tabelle `regs_2057_*` invece di cinque: `rev7v1`, `rev7v2`,
+  `rev10`, `rev11`, `rev12`, `rev13`, `rev14v1` in piu';
+- `chan_info` per 2057 `rev12`, `rev13`, `rev14`, `rev14v1`, e per il radio
+  **20671** su phy rev 19, che e' una generazione oltre;
+- le LUT di desense bphy/ofdm `rev3to6` e `rev7to15`.
+
+Il 6.30 in compenso ha tutta la famiglia **sslpnphy** e il radio 2063, che il 7.14 ha
+buttato: se serviranno, stanno solo nel vecchio.
+
+Nessuno dei due va nel repo. Le tabelle estratte stanno in
+`router-data/blob-tables/`.
+
+### La size delle funzioni fra i due blob
+
+Sui 578 simboli in comune col filtro `nphy|2057`, 358 hanno la stessa size e 220 no.
+Ma quelli generici crescono per forza — il 7.14 supporta radio che nel 6.30 non
+esistevano — quindi la domanda va posta sui simboli **per revisione**, e li' la
+risposta e' netta.
+
+**Tutti e 33 i simboli specifici del 2057 rev5-8 hanno size identica**, nei due blob:
+`regs_2057_rev5/rev7/rev8`, tutte le `chan_info_nphyrev*_2057_rev*`, le
+`nphy_tpc_txgain_*`, le `nphy_papd_padgain_dlt_*`, le `pad_gain_codes_used_*`. I dati
+della nostra strada non si sono mossi di un byte.
+
+Tranne tre, e sono tutti e tre codice della stessa famiglia:
+
+| simbolo | 6.30 | 7.14 | |
+|---|---|---|---|
+| `wlc_phy_workarounds_nphy_gainctrl_2057_rev5` | 572 | 1340 | +768 |
+| `wlc_phy_workarounds_nphy_gainctrl_2057_rev6` | 1692 | 1780 | **+88** |
+| `wlc_phy_workarounds_nphy_gainctrl_2057_rev7` | 1096 | 1252 | +156 |
+
+Il `rev6` e' **il corpo che manca allo stub di b43** (voce 1 di
+`docs/gap-inventory.md`, `b43_nphy_gain_ctl_workarounds_rev7` vuota). Quindi quando
+si andra' a ricostruirlo **conta quale blob si legge**: sono 88 byte di differenza,
+una ventina di istruzioni MIPS, e la cattura che abbiamo e' del 6.30. Per quel
+lavoro il blob vecchio e' il riferimento, non il nuovo.
+
+### I nomi veri di `a2`, `a3`, `a4`
+
+Il rilascio GPL di brcmsmac ha nomi offuscati per la cal PAPD. Il blob no:
+
+| brcmsmac | blob | size 6.30 | righe C in brcmsmac |
+|---|---|---|---|
+| `wlc_phy_a4` | `wlc_phy_papd_cal_nphy` | 6088 | 276 |
+| `wlc_phy_a3_nphy` | `wlc_phy_papd_cal_gctrl_nphy` | 2444 | 147 |
+| `wlc_phy_papd_cal_cleanup_nphy` | stesso nome | 2124 | 124 |
+| `wlc_phy_txpwr_papd_cal_nphy` | stesso nome | 1028 | 13 |
+
+`gctrl` conferma da fuori quello che avevamo dedotto leggendo il codice: `a3` e' la
+ricerca dell'indice di gain, e la size sta nel rapporto giusto con le sue 147 righe.
+
+**`a4` invece non e' identificata.** `a2` ha 279 righe e `a4` ne ha 276: la size non
+le distingue, e i 6088 byte di `wlc_phy_papd_cal_nphy` calzano a entrambe uguale, quindi
+il nome e' l'unico indizio e non basta.
+
+Cercando `a2` per size — 279 righe, e il rapporto misurato su `a3` e sul cleanup e'
+16,6-17,1 byte per riga, quindi 4600-6200 — fra tutte le `wlc_phy*` del blob in quel
+range **non c'e' nessun candidato**: sono `tbl_init_nphy`, `chanspec_radio2057_setup`,
+`papd_cal_nphy` e roba di altri PHY. Quindi una delle due, `a2` o `a4`, sta sotto un
+nome che non contiene `papd`, e quale delle due sia `wlc_phy_papd_cal_nphy` resta
+aperto.
+
+Una cosa emersa cercando, e che vale per il metodo: il blob 6.30 ha **zero** simboli
+con `.isra`/`.constprop`/`.part`, il 7.14 ne ha **159**. I due sono compilati in modo
+diverso e il vecchio non espone i cloni che gcc fa delle funzioni static. Non spiega
+l'assenza di `a2` — `a3` e `a4` sono static anche loro in brcmsmac e nel blob ci sono —
+ma spiega perche' nel 7.14 si vedono nomi come
+`wlc_lcn40phy_papd_cal.isra.33.constprop.35` e nel 6.30 no.

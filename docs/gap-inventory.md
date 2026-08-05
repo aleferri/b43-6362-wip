@@ -45,8 +45,9 @@ avvertenza su come leggere la tabella qui sopra.
 anche il rev 8: soglie di clip, LNA gain, crsmin, RSSI gain. Corpo attuale: un
 solo commento `/* TODO */`.
 
-Riferimento: `wlc_phy_workarounds_nphy_gainctrl` (brcmsmac `phy_n.c:15593`), che
-per radiorev 3 e 8 chiama `wlc_phy_workarounds_nphy_gainctrl_2057_rev6`
+Riferimento: `wlc_phy_workarounds_nphy_gainctrl` (brcmsmac `phy_n.c:15425`), che
+per radiorev 3 e 8 — il ramo comincia a `15593` — chiama
+`wlc_phy_workarounds_nphy_gainctrl_2057_rev6`
 (`15224`) e per il solo rev 8 aggiunge `mod_phy_reg(0x283, 0xff, 0x44)` e
 `mod_phy_reg(0x280, 0xff, 0x44)`.
 
@@ -106,6 +107,40 @@ Il `phy->radio_rev != 5` in questa funzione riguarda l'esistenza del registro
 `wlc_phy_a4` che lo strumento aveva accostato a questa funzione stanno altrove:
 sono la scelta della tabella PAPD pad-gain, cioè la questione di
 `rf-pwr-offset-rev8.md`. Voce chiusa, e sostituita da quella.
+
+### 4a bis. `b43_nphy_rev3_cal_rx_iq()` e' uno stub — la cal RX IQ non esiste
+
+Non e' nella tabella qui sopra, e il motivo e' un limite dello strumento:
+`check_gaps.py` guarda le funzioni che discriminano su `rev` o `radio_rev`, e il
+corpo di questa e' **`return -1;`** senza nessun test di revisione, quindi non la
+vede. Un secondo posto dove guardare sono le funzioni chiamate e mai scritte.
+
+Il corpo per intero:
+
+    static int b43_nphy_rev3_cal_rx_iq(struct b43_wldev *dev,
+                    struct nphy_txgains target, u8 type, bool debug)
+    {
+            return -1;
+    }
+
+Vale per **ogni N-PHY rev 3+**, non solo il rev 8. E il chiamante ci mette del
+suo: `b43_nphy_cal_rx_iq()` forza `type = 0` quando `phy->rev >= 7`, quindi il
+`type = 2` che il vendore usa all'init non arriva comunque a destinazione.
+
+Cosa c'e' dietro, misurato sulla cattura: **7510 op**, #14093-22246, un terzo
+della finestra di init. Che sia la cal RX IQ si riconosce da tre cose, tutte
+contabili: sette scritture della tabella dei campioni da 160 word (#16319,
+#17130, #17542, #18588, #19399, #20210, #20624), un upload di gain sulle tabelle
+26 e 27 a `off=0x40 len=84` fra un tono e il successivo, e diciassette coppie
+read/write su IQLOCAL una cella per volta.
+
+Ricaduta oltre le op: lo stub torna -1, e in `b43_phy_initn` la `save_cal` sta
+dietro `if (b43_nphy_cal_rx_iq(...) == 0)`, quindi **non viene mai salvata una
+calibrazione** — vale per la sequenza di `0014` come per il ramo `perical != 2`.
+
+Non e' portabile a pezzi come le tabelle: e' un loop guidato dalle letture, come
+`a2`/`a3`. Prima di scriverla serve la mappa della fase, come si e' fatto per la
+cal PAPD in `papd-cal-map.md`.
 
 ### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5 — CHIUSA
 
@@ -269,6 +304,149 @@ passo corretto, **0** con la patch.
 Anche questa esce dal recinto del nostro radio: non è gateata su niente, tocca
 ogni N-PHY. L'argomento per accettarla è che oggi quelle calibrazioni girano su
 uno stimolo che non è il segnale che credono di suonare.
+
+### 4h. L'init del radio scriveva 412 registri dove il blob ne segna 39 — CHIUSA
+
+Nella fase dell'init del radio, fino al primo `CHANSPEC` (#132), il vendore scrive
+43 registri radio e b43 ne scriveva 412. Il dump del blob spiega tutto.
+
+Il record di `regs_2057_rev8` e' **sei byte**, non quattro:
+
+    { u16 address; u16 init; u8 do_init; u8 pad; }      /* 413 record, 2478 byte */
+
+e **39 record hanno `do_init` a uno**. Il terzo `u16` vale solo `0x0000` (374 volte)
+o `0x0100` (39), cioe' `do_init = 1, pad = 0` in big-endian.
+
+`r2057_rev8_init` di b43 ha ereditato indirizzo e valore — **412 valori su 412
+identici alla colonna `init` del blob**, trascrizione perfetta — e ha perso la
+colonna che dice *quali* scrivere. brcmsmac quel campo lo tiene (`u8 do_init` in
+`struct radio_20xx_regs`) e lo rispetta (`phy_cmn.c:897`).
+
+La cattura combacia col flag **esattamente**: nella fase di init il vendore scrive
+tutti e 39 i registri segnati, con il valore segnato, **zero eccezioni**, e nessun
+altro di quella tabella. I quattro registri radio in piu' che tocca lì — `0x11`,
+`0x2e`, `0xce`, `0x164` — li scrive con valori che questa tabella non contiene,
+quindi vengono da altro codice.
+
+E si chiude anche la domanda del commit merged, che diceva di non aver trovato
+l'origine dello stub da 54 voci che **impianta il radio** con "Microcode not
+responding": e' il set `do_init` di **brcmsmac**, che non e' quello del blob — 21
+registri che brcmsmac segna e il blob no, 6 che il blob segna e brcmsmac no. I flag
+di brcmsmac sono piu' vecchi di questo radio, ed e' per questo che lo stub non
+tornava con nessuno dei due.
+
+### Dove finiscono le 373 voci senza il flag
+
+| | |
+|---|---|
+| mai scritte in 70796 record, da nessuno | **322** |
+| scritte, prima o poi col valore della tabella | 15 |
+| scritte, solo con altri valori | 36 |
+
+Le 51 che qualcuno tocca sono **per-canale**, e si riconoscono dal conteggio: 31
+scritture ciascuna, che sono i 31 cambi canale della cattura, gli stessi che
+scrivono `R2057_LOGEN_MX2G_TUNE`. Sono i registri della chantab e del PLL —
+`VCOCAL_COUNTVAL0/1`, `RFPLL_REFMASTER_SPAREXTALSIZE`, `RFPLL_LOOPFILTER_R1/C1/C2`,
+`CP_KPD_IDAC`, `RFPLL_MMD0/1`, `VCOBUF_TUNE`, i `LOGEN_*_TUNE` — piu' due che
+ballano piu' spesso, `RFPLL_MISC_CAL_RESETN` 70 volte e `RFPLL_MISC_EN` 66, perche'
+li tocca anche il vcocal.
+
+Il che spiega il flag e conferma la patch: quei 51 li riprogramma il cambio canale
+con i valori della chantab, non con quelli della tabella di init, e il primo cambio
+canale arriva subito dopo (`CHANSPEC` #132). Scriverli all'init voleva dire, nel
+migliore dei casi, buttare via 51 scritture; nel peggiore, tenere il PLL su valori
+sbagliati fino al primo cambio canale. ### La linea fra le 412
+
+Le quattro classi partizionano la tabella senza sovrapporsi:
+
+| classe | n | cosa sono |
+|---|---|---|
+| `init` | **39** | il flag del blob: scritte all'init del radio, sono quelle che `0013` porta in b43 |
+| `chan` | **51** | le riprogramma il cambio canale o una cal, dalla chantab e non da qui — vcocal, RFPLL loopfilter, MMD, i `LOGEN_*_TUNE`; 31 scritture ciascuna, una per cambio canale |
+| `altrarev` | **42** | hanno il flag in `regs_2057_rev4`/`rev5`/`rev5v1`/`rev7` di brcmsmac ma non nel rev8: **la tabella e' un superset condiviso fra revisioni** e il flag seleziona |
+| `ignota` | **280** | nessuna revisione le segna e nessuno le scrive, mai, in 70796 record |
+
+Quindi 132 delle 412 hanno uno scopo identificato, e 280 no. La distribuzione per
+banco delle 280 e' da **ricalcolare**: i numeri che c'erano qui (190 SYN, 91 core0,
+50 core1) sommano 331, non 280, e il `radio_2057.h` di b43 non basta per rifarla —
+i suoi nomi `*_CORE0`/`*_CORE1` non partizionano lo spazio degli indirizzi in
+intervalli contigui, quindi serve la mappa dei banchi del blob.
+
+E un dettaglio che chiude il cerchio sullo stub: i **21** registri che il rev8 di
+brcmsmac segna e il blob no cadono **tutti e 21 in `altrarev`**. Lo stub scriveva
+all'init del BCM6362 l'init di un altro radio, e questo e' il motivo per cui impianta
+il chip con "Microcode not responding". Zero di quei 21 sono per-canale.
+
+### L'unica asimmetria fra i due core, e perche' non e' un bug
+
+`regs_2057_rev8` e' simmetrica fra i core: 112 registri consecutivi, `0x04f-0x0cc`,
+ricopiati identici a `0x0d4-0x151` con offset `0x85`. Su 129 coppie che portano lo
+stesso valore, **una sola** ha il flag asimmetrico:
+
+    0x062  R2057_IPA2G_TUNEV_CASCV_PTAT_CORE0   val 0x33  do_init=1
+    0x0e7  R2057_IPA2G_TUNEV_CASCV_PTAT_CORE1   val 0x33  do_init=0
+
+wl scrive il core 0 e il core 1 mai, in 70796 record. Non e' un copia-incolla mancato
+nel blob, ed e' verificabile.
+
+Il blob del Netgear D6220, `wl 7.14.89.14` — molto piu' recente del 6.30.102.7 —
+porta lo stesso simbolo `regs_2057_rev8`, e non e' "leggermente diverso": e'
+**identico**, 412 indirizzi su 412, 412 valori su 412, 39 flag su 39, zero
+differenze. E ha quattordici tabelle `regs_2057_*` invece di cinque, quindi il test
+si puo' fare per revisione:
+
+| tabella | `0x062` | `0x0e7` |
+|---|---|---|
+| rev4, rev5, rev7, rev7v1, rev8, rev12 | `flag=1` | **`flag=0`** |
+| rev5v1, rev9, rev11, rev13, rev14, rev14v1 | `flag=0` | `flag=0` |
+
+Il valore e' `0x33` in tutte e dodici. **Non esiste una revisione, in nessuno dei
+due blob, che segni `0x0e7`**: dove il core 0 e' segnato il core 1 non lo e' mai, e
+dove il core 0 non lo e' nemmeno il core 1. Un refuso non sopravvive a quattordici
+tabelle e a due generazioni di blob distanti anni.
+
+**SALAME** su cosa lo giustifichi: che il riferimento PTAT sia condiviso fra i due
+core, e quindi che `0x0e7` sia un alias morto, e' l'unica lettura che mi viene, ma
+dalle tabelle non e' falsificabile e non l'ho verificata. Quello che conta per noi e'
+che `patches/b43/0013` fa la cosa giusta a non scriverlo: nessuna versione del
+driver proprietario lo scrive.
+
+La tabella intera, con la colonna `do_init` e la classe, sta in
+`router-data/blob-tables/regs_2057_rev8.txt`: `0013` in b43 ne porta solo 39, ma i
+373 valori restanti sono dati estratti dal blob e alcuni serviranno — i 51
+per-canale per confrontare la chantab, e i 322 se qualcuno capira' a cosa servono.
+
+Gli altri **322 non li programma nessuno, mai**: il blob porta il valore e
+nient'altro lo usa.
+
+Perche', non lo so, e l'unica spiegazione plausibile non regge: non sono "i registri
+5 GHz". Il chip **ha** la banda 5 GHz — lo dice la voce 6 di questo stesso documento, e
+il blob ha
+`nphy_tpc_txgain_ipa_5g_2057rev8` e 109 canali 5 GHz nella chantab; e' questa board
+che non ha le antenne 5 GHz collegate alla wlan integrata. E i numeri non tornano
+comunque: fra i 322 mai scritti, 50 hanno `5G` nel nome e 40 hanno `2G`, cioe' lo
+stesso rapporto della tabella intera (70 e 63). L'unica parte spiegata e' che 50 dei
+70 registri con `5G` nel nome non vengano scritti in una cattura che sta solo sul 2.4
+GHz. I restanti **272 restano senza spiegazione**.
+
+`patches/b43/0013` filtra la tabella alle 39 voci. **Nessun valore cambia**: delle
+39 che restano, tutte tengono indirizzo e valore che avevano, e non ne compare
+nessuna nuova — 373 cancellate, 0 aggiunte, 0 modificate. Il diff sembra una
+riscrittura solo perche' le voci stanno quattro per riga, quindi togliendone 373 su
+412 si riflowa ogni riga e `git diff` puo' solo dire "104 righe fuori, 11 dentro".
+La patch porta il comando per verificarlo senza leggere la tabella.
+
+Filtrare invece di aggiungere una terza colonna e' quello che le altre sei
+tabelle `r2057_rev*_init` di questo file **sono gia'**: rev4 42 contro le 42 che
+brcmsmac segna, rev5 44 contro 44, rev7 54 contro 54. Solo la rev 8 se ne era
+discostata.
+
+Il conteggio delle op in comune sull'init **non si muove**, 4434 prima e dopo: quelle
+373 scritture non combaciavano con niente comunque. Il valore della patch e' la
+correttezza, non la metrica.
+
+**Non provata su hardware**, e sbagliare qui impianta il radio all'init, quindi vuole
+un boot su BCM6362 prima di andare da qualche parte.
 
 ### 6. `dev_id 0x435f` e la banda 5 GHz
 

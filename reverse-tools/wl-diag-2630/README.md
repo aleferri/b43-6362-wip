@@ -1,5 +1,12 @@
 # wl-diag-2630 — tracer inline-detour per il driver `wl` (kernel 2.6.30)
 
+> **Quale delle due directory.** `wl-diag-2630/` e' per il kernel 2.6.30 della
+> DSL-3580L: coda a ring manuale, `pr_warn` via shim, niente `raw_spinlock`, e la
+> cattura si legge da `/proc/wl_diag`. `wl-diag/` vuole **>= 2.6.33** (kfifo
+> tipizzato, `DEFINE_RAW_SPINLOCK`) e su un kernel piu' vecchio si ferma con un
+> `#error` che lo dice.
+
+
 Modulo kernel che aggancia gli accessor PHY/radio/PMU/MAC del driver Broadcom
 `wl` senza kprobe (detour all'ingresso funzione), ed espone i record su un
 misc-device. Vedi la testata di `wl_diag.c` per i dettagli del meccanismo e i
@@ -271,6 +278,37 @@ ricostruisce offline.
 | `skipphyrd` | vuoto | letture di **registro PHY** da non registrare, es. `"0x253,0x254"` |
 | `arm`   | `0` | `0` = dry-run (logga solo il piano hook); `1` = applica le patch |
 | `delay` | `0` | `1` = aggancia anche `osl_delay` (rumoroso, usec inaffidabile) |
+| `poke` | vuoto | scrive un byte in memoria kernel: `<hexaddr>:<valore>`, vedi sotto |
+
+### `poke=`: forzare un init completo del PHY
+
+Il percorso di down del blob non azzera `hw_up`, quindi `wl down; wl up` rifa' solo
+un init parziale. Azzerando quel byte, l'up successivo passa da `hw_up()` ->
+`wlc_phy_por_inform()` e il PHY si reinizializza per intero, tabelle statiche e
+`rcal`/`rccal` compresi:
+
+```sh
+insmod wl_diag.ko arm=1 poke=82a4bcac:0
+wl up
+```
+
+L'indirizzo e' della **propria** istanza e cambia a ogni caricamento di `wl`. La
+catena, verificata leggendo la memoria del device e non dedotta da brcmsmac:
+
+    netdev_priv(dev)  = wl_if        <- dal log di wd_dump_privs
+    wl_if  + 0x04     = ogg. radio   (uguale fra wl0 e wl0.1, diverso fra wl0 e wl1)
+    radio  + 0x04     = pub
+    radio  + 0x08     = wlc          (wlc e pub si puntano a vicenda a offset 0)
+    pub    + 0x2c     = hw_up
+
+`poke=` stampa il valore prima e dopo, cosi' un indirizzo sbagliato si vede subito
+invece di non fare niente in silenzio. La scrittura la fa il kernel e non
+`/dev/mem`, perche' su MIPS quello mappa non-cached e potrebbe non essere coerente
+con la vista KSEG0 che usa il driver.
+
+La prova che ha funzionato non e' il byte: e' che nel trace compaia
+`PHY.WR addr=0x0072 val=0x2800`, l'apertura della tabella 10 con cui comincia il
+download statico. Se non c'e', l'init e' stato di nuovo parziale.
 
 ## Build
 

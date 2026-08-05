@@ -39,12 +39,19 @@
  * Target: kernel 3.4.x, MIPS32 big-endian, o32, SMP=2, PREEMPT.
  */
 
+#include <linux/version.h>
+#include <linux/proc_fs.h>
+#include <linux/rtnetlink.h>
+#include <linux/netdevice.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 33)
+#error "Questa variante vuole un kernel >= 2.6.33 (kfifo tipizzato, DEFINE_RAW_SPINLOCK, pr_warn). Per il 2.6.30 della DSL-3580L compila reverse-tools/wl-diag-2630/."
+#endif
+
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/kallsyms.h>
 #include <linux/kfifo.h>
-#include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/sched.h>
@@ -902,11 +909,136 @@ static const struct file_operations wd_fops = {
 	.poll = wd_poll,
 	.llseek = no_llseek,
 };
-static struct miscdevice wd_misc = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "wl_diag",
-	.fops = &wd_fops,
-};
+/* La cattura si legge da /proc/wl_diag.
+ *
+ * Prima era un misc device, e su questo userspace non c'e' udev: il nodo andava
+ * creato a mano leggendo il minor da /proc/misc, due comandi prima di poter
+ * leggere un record e il punto in cui si sbagliava. Una entry in /proc non ha
+ * bisogno di nessun nodo: `cat /proc/wl_diag` funziona appena il modulo e'
+ * caricato.
+ *
+ * create_proc_entry piu' l'assegnazione di proc_fops e' la forma giusta su
+ * questo kernel; proc_create arriva dopo. NB: `pde->owner` non lo tocchiamo: e'
+ * deprecato proprio in questa finestra di versioni e il refcount del modulo lo
+ * tiene .owner dentro wd_fops. */
+static struct proc_dir_entry *wd_pde;
+
+static int wd_proc_add(void)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+	wd_pde = create_proc_entry("wl_diag", S_IRUSR, NULL);
+	if (wd_pde)
+		wd_pde->proc_fops = &wd_fops;
+#else
+	/* create_proc_entry e' via dal 3.10. Dal 5.6 proc_create vuole
+	 * struct proc_ops e non file_operations: se serve arrivare fin la',
+	 * qui va una seconda struttura, non una conversione. */
+	wd_pde = proc_create("wl_diag", S_IRUSR, NULL, &wd_fops);
+#endif
+	if (!wd_pde) {
+		pr_err("wl_diag: /proc/wl_diag non creata\n");
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+static void wd_proc_del(void)
+{
+	if (wd_pde) {
+		remove_proc_entry("wl_diag", NULL);
+		wd_pde = NULL;
+	}
+}
+
+/* Stampa in dmesg il base pointer dei dati privati di ogni interfaccia wl, con
+ * il nome e l'unit. Serve come punto di partenza per camminare la catena
+ * (wl+0x8 -> wlc, wlc+0x130 -> wlc_hw, wlc_hw+0x90 -> band, band+0x24 -> pi sul
+ * blob 6.30) senza doverla cercare a mano ogni volta.
+ *
+ * Il riconoscimento e' su netdev_ops: le due strutture sono simboli globali del
+ * driver wl. Sono DATI, e su un kernel senza KALLSYMS_ALL i dati di vmlinux non
+ * sono in kallsyms -- ma wl e' un modulo, e i simboli di un modulo ci entrano
+ * dalla sua symtab, dati compresi. Verificato sul device. `wl_dslcpe_netdev_ops` sta
+ * in .bss (riempita a runtime) e `wl_netdev_ops` in .rodata: proviamo entrambe,
+ * perche' quale delle due sia in uso dipende dalla build del blob.
+ *
+ * Solo log: non tocca la fifo e non entra nel percorso caldo. */
+static void wd_dump_privs(void)
+{
+	const void *ops[2];
+	struct net_device *dev;
+	int n = 0, found = 0;
+
+	ops[0] = (const void *)kallsyms_lookup_name("wl_dslcpe_netdev_ops");
+	ops[1] = (const void *)kallsyms_lookup_name("wl_netdev_ops");
+	if (!ops[0] && !ops[1]) {
+		pr_info("wl_diag: netdev_ops di wl non risolte, niente base pointer\n");
+		return;
+	}
+
+	rtnl_lock();
+	for_each_netdev(&init_net, dev) {
+		for (n = 0; n < 2; n++) {
+			if (!ops[n] || dev->netdev_ops != ops[n])
+				continue;
+			pr_info("wl_diag: %s: priv=%p (netdev=%p, ops=%s)\n",
+				dev->name, netdev_priv(dev), dev,
+				n ? "wl_netdev_ops" : "wl_dslcpe_netdev_ops");
+			found++;
+			break;
+		}
+	}
+	rtnl_unlock();
+
+	if (!found)
+		pr_info("wl_diag: nessuna interfaccia wl trovata (wl caricato?)\n");
+}
+
+/* Scrittura singola in memoria kernel, per armare a mano un flag del driver wl.
+ *
+ * Nasce per `hw_up` in pub: il percorso di down del blob non lo azzera, quindi
+ * `wl down; wl up` rifa' solo un init parziale. Azzerandolo, il successivo up
+ * passa da hw_up() -> wlc_phy_por_inform() e il PHY si reinizializza per intero,
+ * tabelle statiche e rcal/rccal compresi. Farlo dal kernel e non via /dev/mem
+ * non e' pignoleria: su MIPS /dev/mem mappa non-cached e la scrittura potrebbe
+ * non essere coerente con la vista KSEG0 cached che usa il driver.
+ *
+ * Formato: poke=<hexaddr>:<byte>, una sola volta, applicata in wd_init dopo
+ * l'arm. Stampa il valore prima e dopo, cosi' si vede se ha preso. Solo un byte
+ * di proposito: tutti i flag che ci interessano sono bool. */
+static char *poke;
+module_param(poke, charp, 0444);
+MODULE_PARM_DESC(poke, "scrivi un byte in memoria kernel: '<hexaddr>:<valore>'");
+
+static void wd_do_poke(void)
+{
+	unsigned long addr;
+	unsigned int val;
+	const char *colon;
+	u8 *p, before;
+
+	if (!poke || !*poke)
+		return;
+	colon = strchr(poke, ':');
+	if (!colon) {
+		pr_warn("wl_diag: poke: manca ':' in '%s'\n", poke);
+		return;
+	}
+	addr = simple_strtoul(poke, NULL, 16);
+	val = simple_strtoul(colon + 1, NULL, 0);
+	if (!addr || val > 0xff) {
+		pr_warn("wl_diag: poke: '%s' non valido\n", poke);
+		return;
+	}
+	/* Nessun modo di validare l'indirizzo: e' un attrezzo da banco e chi lo
+	 * usa ha appena letto quel byte con dumpmem. Un indirizzo sbagliato qui
+	 * corrompe il kernel, ed e' per questo che stampa cosa ha trovato. */
+	p = (u8 *)addr;
+	before = *p;
+	*p = (u8)val;
+	pr_info("wl_diag: poke %p: 0x%02x -> 0x%02x (riletto 0x%02x)\n",
+		p, before, (u8)val, *p);
+}
 
 /* ---- init/exit -------------------------------------------------------- */
 static int eligible[NHOOK];   /* indici agganciabili */
@@ -988,7 +1120,7 @@ static int __init wd_init(void)
 		return -ENODEV;
 	}
 
-	err = misc_register(&wd_misc);
+	err = wd_proc_add();
 	if (err)
 		return err;
 
@@ -1099,7 +1231,9 @@ static int __init wd_init(void)
 		patch_entry(eligible[i]);
 		hooks[eligible[i]].armed = true;
 	}
-	pr_info("wl_diag: ARMATO (%d hook) -> /dev/wl_diag\n", n_elig);
+	pr_info("wl_diag: ARMATO (%d hook) -> /proc/wl_diag\n", n_elig);
+	wd_dump_privs();
+	wd_do_poke();
 	return 0;
 }
 
@@ -1150,7 +1284,7 @@ static void __exit wd_exit(void)
 		module_put(target_mod);
 		mod_ref_held = false;
 	}
-	misc_deregister(&wd_misc);
+	wd_proc_del();
 	pr_info("wl_diag: scaricato (persi: %d, filtrati: %d)\n",
 		atomic_read(&drops), atomic_read(&filtered));
 }

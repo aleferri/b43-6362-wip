@@ -4,7 +4,7 @@ Generato con `reverse-tools/brcmsmac_xref.py --tree ~/src/linux --format md`.
 brcmsmac è in-tree e GPL: è la fonte di riferimento per ogni buco dell'
 inventario.
 
-| funzione brcmsmac | prima riga | radiorev==8 | NREV_IS(rev,8) |
+| funzione brcmsmac | primo match | radiorev==8 | NREV_IS(rev,8) |
 |---|---|---|---|
 | `wlc_phy_workarounds_nphy_gainctrl` | 15593 | 2 | 0 |
 | `wlc_phy_workarounds_nphy_rev7` | 16165 | 4 | 0 |
@@ -16,6 +16,12 @@ inventario.
 | `wlc_phy_a2_nphy` | 24741 | 2 | 0 |
 | `wlc_phy_a3_nphy` | 24991 | 1 | 0 |
 | `wlc_phy_a4` | 25191 | 3 | 0 |
+
+La colonna `primo match` è la riga della **prima occorrenza del pattern** dentro
+la funzione, non la riga in cui la funzione comincia: lo strumento la registra
+mentre scorre i match. Per la riga di definizione c'è la tabella qui sotto, e le
+due non coincidono — `wlc_phy_workarounds_nphy_gainctrl` comincia a `15425` e il
+suo primo `radiorev == 8` è a `15593`.
 
 Le prime tre righe della tabella qui sopra dicevano `wlc_phy_switch_radio_nphy`,
 `wlc_phy_radio205x_vcocal_nphy` e `wlc_phy_ipa_set_bbmult_nphy`, e `wlc_phy_a2_nphy`
@@ -32,10 +38,10 @@ Funzioni 2057-specifiche utili, dallo stesso file:
 | `wlc_phy_radio_init_2057` | 19731 | init table + dispatch per phy rev |
 | `wlc_phy_radio2057_rccal` | 19874 | rccal, gruppi per radiorev |
 | `wlc_phy_radio_postinit_2057` | 19957 | post-init |
-| `wlc_phy_chanspec_radio2057_setup` | 20822 | per-canale, e il blocco loopfilter RFPLL per radiorev 5/7/8 (riga 20961) |
+| `wlc_phy_chanspec_radio2057_setup` | 20821 | per-canale, e il blocco loopfilter RFPLL per radiorev 5/7/8 (riga 20960) |
 | `wlc_phy_radio205x_vcocal_nphy` | 20802 | vcocal, 20 righe, chiamata dai due `chanspec_radio205x_setup` e dalla cal periodica |
 | `wlc_phy_papd_cal_setup_nphy` | 24242 | setup della cal PAPD per core, 250 righe |
 | `wlc_phy_papd_cal_cleanup_nphy` | 24496 | e il suo ripristino, 124 righe |
 | `wlc_phy_a3_nphy` | 24959 | la ricerca dell'indice di gain: **legge** la tabella epsilon in un loop di 20 passi, 147 righe |
-| `wlc_phy_a2_nphy` | 24678 | il calcolo dell'epsilon: **scrive** la tabella epsilon via `set_bbmult`, 279 righe |
+| `wlc_phy_a2_nphy` | 24676 | il calcolo dell'epsilon: **scrive** la tabella epsilon via `set_bbmult`, 279 righe |
 | `wlc_phy_a4` | 25108 | il livello alto della cal PAPD, 276 righe |

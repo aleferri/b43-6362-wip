@@ -1,5 +1,12 @@
 # wl-diag — tracer inline-detour per il driver `wl`
 
+> **Quale delle due directory.** `wl-diag-2630/` e' per il kernel 2.6.30 della
+> DSL-3580L: coda a ring manuale, `pr_warn` via shim, niente `raw_spinlock`, e la
+> cattura si legge da `/proc/wl_diag`. `wl-diag/` vuole **>= 2.6.33** (kfifo
+> tipizzato, `DEFINE_RAW_SPINLOCK`) e su un kernel piu' vecchio si ferma con un
+> `#error` che lo dice.
+
+
 Modulo kernel che aggancia gli accessor PHY/radio/PMU/MAC del driver Broadcom
 `wl` senza kprobe (detour all'ingresso funzione), ed espone i record su un
 misc-device. Vedi la testata di `wl_diag.c` per i dettagli del meccanismo e i

@@ -60,8 +60,10 @@
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/kallsyms.h>
-#include <linux/miscdevice.h>
+#include <linux/netdevice.h>
+#include <linux/proc_fs.h>
 #include <linux/fs.h>
+#include <linux/vmalloc.h>
 #include <linux/uaccess.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
@@ -69,6 +71,7 @@
 #include <linux/poll.h>
 #include <asm/cacheflush.h>
 #include <linux/notifier.h>
+#include <linux/rtnetlink.h>
 
 /*
  * pr_warn è un alias di pr_warning aggiunto in 2.6.35; il kernel 2.6.30
@@ -155,6 +158,119 @@ static unsigned long sym_override(const char *name)
 	return 0;
 }
 
+/* Ricerca in /proc/kallsyms fatta dal modulo, cosi' `insmod wl_diag.ko arm=1`
+ * basta e non serve piu' ne' syms= ne' klookup=.
+ *
+ * Perche' il file e non kallsyms_lookup_name: su 2.6.30 quella non e' esportata
+ * ai moduli (il link fallisce con "Unknown symbol"), ed e' la ragione per cui
+ * klookup= esiste. kallsyms_on_each_symbol compare proprio in questa versione e
+ * non mi fido del confine. Il file c'e' sempre e non dipende da nessun export.
+ *
+ * Una passata sola, riga per riga, tenendo gli indirizzi dei nomi che ci
+ * servono: 25 nomi contro un file da qualche MB, ma e' init-time e si paga una
+ * volta. Formato: "<hexaddr> <tipo> <nome>[\t[modulo]]".
+ *
+ * Ha priorita' piu' bassa di syms=: chi passa la lista a mano vince, cosi' un
+ * blob con nomi diversi resta gestibile senza toccare il codice. */
+static char *ksbuf;
+static size_t kslen;
+
+static int wd_kallsyms_slurp(void)
+{
+	struct file *f;
+	mm_segment_t old;
+	loff_t pos = 0;
+	size_t cap = 512 * 1024, used = 0;
+	ssize_t n;
+
+	f = filp_open("/proc/kallsyms", O_RDONLY, 0);
+	if (IS_ERR(f)) {
+		pr_warn("wl_diag: /proc/kallsyms non apribile (%ld)\n", PTR_ERR(f));
+		return -ENOENT;
+	}
+	ksbuf = vmalloc(cap);
+	if (!ksbuf) {
+		filp_close(f, NULL);
+		return -ENOMEM;
+	}
+	old = get_fs();
+	set_fs(KERNEL_DS);
+	for (;;) {
+		if (used == cap) {
+			char *bigger;
+			size_t ncap = cap * 2;
+
+			if (ncap > 8u * 1024 * 1024)	/* tetto di sicurezza */
+				break;
+			bigger = vmalloc(ncap);
+			if (!bigger)
+				break;
+			memcpy(bigger, ksbuf, used);
+			vfree(ksbuf);
+			ksbuf = bigger;
+			cap = ncap;
+		}
+		n = vfs_read(f, ksbuf + used, cap - used, &pos);
+		if (n <= 0)
+			break;
+		used += n;
+	}
+	set_fs(old);
+	filp_close(f, NULL);
+	kslen = used;
+	if (!kslen) {
+		vfree(ksbuf);
+		ksbuf = NULL;
+		return -EIO;
+	}
+	return 0;
+}
+
+static void wd_kallsyms_free(void)
+{
+	if (ksbuf) {
+		vfree(ksbuf);
+		ksbuf = NULL;
+		kslen = 0;
+	}
+}
+
+/* Cerca `name` nel buffer. Confronto sul nome intero: la riga e'
+ * "addr tipo nome", quindi si salta ai due spazi e si confronta fino a fine
+ * token, altrimenti "phy_reg_write" beccherebbe "phy_reg_write_array". */
+static unsigned long wd_kallsyms_find(const char *name)
+{
+	size_t nlen = strlen(name);
+	const char *p = ksbuf, *end;
+
+	if (!ksbuf)
+		return 0;
+	end = ksbuf + kslen;
+	while (p < end) {
+		const char *eol = memchr(p, '\n', end - p);
+		const char *s1, *s2, *nm, *ne;
+		size_t got = eol ? (size_t)(eol - p) : (size_t)(end - p);
+
+		s1 = memchr(p, ' ', got);
+		if (!s1)
+			goto next;
+		s2 = memchr(s1 + 1, ' ', got - (s1 + 1 - p));
+		if (!s2)
+			goto next;
+		nm = s2 + 1;
+		ne = nm;
+		while (ne < p + got && *ne != '\t' && *ne != ' ')
+			ne++;
+		if ((size_t)(ne - nm) == nlen && !strncmp(nm, name, nlen))
+			return simple_strtoul(p, NULL, 16);
+next:
+		if (!eol)
+			break;
+		p = eol + 1;
+	}
+	return 0;
+}
+
 /* Risoluzione simbolo: prima l'override 'syms', poi kallsyms_lookup_name --
  * chiamata per indirizzo se e' stato passato 'klookup', altrimenti per nome
  * dove il simbolo e' linkabile (kernel con l'export). */
@@ -166,6 +282,9 @@ static unsigned long resolve_sym(const char *name)
 		return a;
 	if (klookup)
 		return ((kln_fn_t)klookup)(name);
+	a = wd_kallsyms_find(name);
+	if (a)
+		return a;
 #ifndef WLDIAG_NO_KALLSYMS
 	a = kallsyms_lookup_name(name);
 #endif
@@ -945,11 +1064,134 @@ static const struct file_operations wd_fops = {
 	.poll = wd_poll,
 	.llseek = no_llseek,
 };
-static struct miscdevice wd_misc = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "wl_diag",
-	.fops = &wd_fops,
-};
+/* La cattura si legge da /proc/wl_diag.
+ *
+ * Prima era un misc device, e su questo userspace non c'e' udev: il nodo andava
+ * creato a mano leggendo il minor da /proc/misc, due comandi prima di poter
+ * leggere un record e il punto in cui si sbagliava. Una entry in /proc non ha
+ * bisogno di nessun nodo: `cat /proc/wl_diag` funziona appena il modulo e'
+ * caricato.
+ *
+ * create_proc_entry piu' l'assegnazione di proc_fops e' la forma giusta su
+ * questo kernel; proc_create arriva dopo. NB: `pde->owner` non lo tocchiamo: e'
+ * deprecato proprio in questa finestra di versioni e il refcount del modulo lo
+ * tiene .owner dentro wd_fops. */
+static struct proc_dir_entry *wd_pde;
+
+static int wd_proc_add(void)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+	wd_pde = create_proc_entry("wl_diag", S_IRUSR, NULL);
+	if (wd_pde)
+		wd_pde->proc_fops = &wd_fops;
+#else
+	/* create_proc_entry e' via dal 3.10. Dal 5.6 proc_create vuole
+	 * struct proc_ops e non file_operations: se serve arrivare fin la',
+	 * qui va una seconda struttura, non una conversione. */
+	wd_pde = proc_create("wl_diag", S_IRUSR, NULL, &wd_fops);
+#endif
+	if (!wd_pde) {
+		pr_err("wl_diag: /proc/wl_diag non creata\n");
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+static void wd_proc_del(void)
+{
+	if (wd_pde) {
+		remove_proc_entry("wl_diag", NULL);
+		wd_pde = NULL;
+	}
+}
+
+/* Stampa in dmesg il base pointer dei dati privati di ogni interfaccia wl, con
+ * il nome e l'unit. Serve come punto di partenza per camminare la catena
+ * (wl+0x8 -> wlc, wlc+0x130 -> wlc_hw, wlc_hw+0x90 -> band, band+0x24 -> pi sul
+ * blob 6.30) senza doverla cercare a mano ogni volta.
+ *
+ * Il riconoscimento e' su netdev_ops: le due strutture sono simboli globali del
+ * driver wl, quindi si risolvono come tutto il resto. `wl_dslcpe_netdev_ops` sta
+ * in .bss (riempita a runtime) e `wl_netdev_ops` in .rodata: proviamo entrambe,
+ * perche' quale delle due sia in uso dipende dalla build del blob.
+ *
+ * Solo log: non tocca la fifo e non entra nel percorso caldo. */
+static void wd_dump_privs(void)
+{
+	const void *ops[2];
+	struct net_device *dev;
+	int n = 0, found = 0;
+
+	ops[0] = (const void *)resolve_sym("wl_dslcpe_netdev_ops");
+	ops[1] = (const void *)resolve_sym("wl_netdev_ops");
+	if (!ops[0] && !ops[1]) {
+		pr_info("wl_diag: netdev_ops di wl non risolte, niente base pointer\n");
+		return;
+	}
+
+	rtnl_lock();
+	for_each_netdev(&init_net, dev) {
+		for (n = 0; n < 2; n++) {
+			if (!ops[n] || dev->netdev_ops != ops[n])
+				continue;
+			pr_info("wl_diag: %s: priv=%p (netdev=%p, ops=%s)\n",
+				dev->name, netdev_priv(dev), dev,
+				n ? "wl_netdev_ops" : "wl_dslcpe_netdev_ops");
+			found++;
+			break;
+		}
+	}
+	rtnl_unlock();
+
+	if (!found)
+		pr_info("wl_diag: nessuna interfaccia wl trovata (wl caricato?)\n");
+}
+
+/* Scrittura singola in memoria kernel, per armare a mano un flag del driver wl.
+ *
+ * Nasce per `hw_up` in pub: il percorso di down del blob non lo azzera, quindi
+ * `wl down; wl up` rifa' solo un init parziale. Azzerandolo, il successivo up
+ * passa da hw_up() -> wlc_phy_por_inform() e il PHY si reinizializza per intero,
+ * tabelle statiche e rcal/rccal compresi. Farlo dal kernel e non via /dev/mem
+ * non e' pignoleria: su MIPS /dev/mem mappa non-cached e la scrittura potrebbe
+ * non essere coerente con la vista KSEG0 cached che usa il driver.
+ *
+ * Formato: poke=<hexaddr>:<byte>, una sola volta, applicata in wd_init dopo
+ * l'arm. Stampa il valore prima e dopo, cosi' si vede se ha preso. Solo un byte
+ * di proposito: tutti i flag che ci interessano sono bool. */
+static char *poke;
+module_param(poke, charp, 0444);
+MODULE_PARM_DESC(poke, "scrivi un byte in memoria kernel: '<hexaddr>:<valore>'");
+
+static void wd_do_poke(void)
+{
+	unsigned long addr;
+	unsigned int val;
+	const char *colon;
+	u8 *p, before;
+
+	if (!poke || !*poke)
+		return;
+	colon = strchr(poke, ':');
+	if (!colon) {
+		pr_warn("wl_diag: poke: manca ':' in '%s'\n", poke);
+		return;
+	}
+	addr = simple_strtoul(poke, NULL, 16);
+	val = simple_strtoul(colon + 1, NULL, 0);
+	if (!addr || val > 0xff) {
+		pr_warn("wl_diag: poke: '%s' non valido\n", poke);
+		return;
+	}
+	/* Nessun modo di validare l'indirizzo: e' un attrezzo da banco e chi lo
+	 * usa ha appena letto quel byte con dumpmem. Un indirizzo sbagliato qui
+	 * corrompe il kernel, ed e' per questo che stampa cosa ha trovato. */
+	p = (u8 *)addr;
+	before = *p;
+	*p = (u8)val;
+	pr_info("wl_diag: poke %p: 0x%02x -> 0x%02x (riletto 0x%02x)\n",
+		p, before, (u8)val, *p);
+}
 
 /* ---- init/exit -------------------------------------------------------- */
 static int eligible[NHOOK];   /* indici agganciabili */
@@ -958,6 +1200,12 @@ static int n_elig;
 static int __init wd_init(void)
 {
 	int i, err;
+
+	/* Carica /proc/kallsyms una volta: da qui resolve_sym() se la cava da sola
+	 * e `insmod wl_diag.ko arm=1` basta. Se non si apre non e' fatale: syms= e
+	 * klookup= restano. */
+	if (!syms && !klookup)
+		wd_kallsyms_slurp();
 
 	parse_skipphyrd();
 
@@ -1018,13 +1266,16 @@ static int __init wd_init(void)
 		return -ENODEV;
 	}
 
-	err = misc_register(&wd_misc);
-	if (err)
+	err = wd_proc_add();
+	if (err) {
+		wd_kallsyms_free();
 		return err;
+	}
 
 	if (!arm) {
 		pr_info("wl_diag: DRY-RUN (%d hook pianificati). insmod con arm=1 per applicare.\n",
 			n_elig);
+		wd_kallsyms_free();
 		return 0;
 	}
 
@@ -1092,7 +1343,10 @@ static int __init wd_init(void)
 		patch_entry(eligible[i]);
 		hooks[eligible[i]].armed = true;
 	}
-	pr_info("wl_diag: ARMATO (%d hook) -> /dev/wl_diag\n", n_elig);
+	pr_info("wl_diag: ARMATO (%d hook) -> /proc/wl_diag\n", n_elig);
+	wd_dump_privs();
+	wd_do_poke();
+	wd_kallsyms_free();	/* i simboli sono risolti, il buffer non serve piu' */
 	return 0;
 }
 
@@ -1125,7 +1379,7 @@ static void __exit wd_exit(void)
 		module_put(target_mod);
 		mod_ref_held = false;
 	}
-	misc_deregister(&wd_misc);
+	wd_proc_del();
 	pr_info("wl_diag: scaricato (persi: %d, filtrati: %d)\n",
 		atomic_read(&drops), atomic_read(&filtered));
 }

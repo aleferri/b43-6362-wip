@@ -71,6 +71,40 @@ dentro `b43_nphy_op_prepare_structs` la becca.
 ./reverse-tools/check_patch_gating.py --tree ~/src/linux patches/b43/*.patch
 ```
 
+Con l'albero pulito quel comando **non valuta 0009 e 0012**: le due hanno bisogno
+della loro catena (0002 -> 0004 -> 0009) e lo strumento le liquida con
+`(patch non applicabile)`, che il contatore finale non conta. Per averne il
+verdetto si applicano prima le dipendenze:
+
+```sh
+cd ~/src/linux && for n in 0002 0004; do git apply .../patches/b43/$n-*.patch; done
+check_patch_gating.py --tree ~/src/linux patches/b43/0009-*.patch   # poi 0009 per 0012
+```
+
+Cosi' fatto: `0009` e `0012` aggiungono ciascuna una funzione nuova piu' una riga
+in `b43_phy_initn`, dentro `if ((dev->phy.rev >= 3) && ...`.
+
 ## Non proponibile ora: HT
 
 Vedi `ht20-mimo-plan.md`. Prima M0-M2, e con i report in mano.
+
+## Una nota sullo strumento
+
+`reverse-tools/check_patch_gating.py` si fidava dei numeri di riga negli `@@`
+della patch. `patch(1)` pero' rilocalizza gli hunk quando l'albero non e'
+esattamente quello su cui la patch e' stata fatta, e lo fa in silenzio perche' lo
+invochiamo con `--silent`: su una patch multi-hunk l'errore si accumula e le righe
+aggiunte finiscono attribuite alla funzione sbagliata. Che e' il modo peggiore di
+sbagliare per uno strumento come questo, perche' il nome che stampa esiste.
+
+Ora i numeri vengono dal diff fra il contenuto prima e dopo. Tre verdetti della
+serie sono cambiati, e sono tutti e tre correzioni:
+
+| patch | prima | ora |
+|---|---|---|
+| `0004` | solo `b43_phy_initn`, riga 6031 | `b43_nphy_papd_tables_init` funzione nuova **piu'** `b43_phy_initn` alla riga 6101 |
+| `0005` | `b43_nphy_workarounds_rev3plus` (3138-3344) | `b43_nphy_workarounds_rev7plus` (2693-3135), che e' dove le righe stanno |
+| `0012` | `b43_chantab_phy_upload` NON GATEATA | `b43_nphy_papd_cal` funzione nuova, `b43_phy_initn` gateata |
+
+Restano due `NON GATEATA`, entrambe di `0010`, e sono giuste: quella patch e' un
+fix di mainline per ogni N-PHY e non deve essere gateata.

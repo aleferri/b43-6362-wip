@@ -1,4 +1,4 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: fix the IPA 2 GHz bias registers on radio 2057 rev 8
 
@@ -8,9 +8,9 @@ each pair, on different cores. The core offset between the two cores of
 this radio is 0x85, so the counterpart of IPA2G_IMAIN_CORE1 is
 IPA2G_IMAIN_CORE0 at 0x63, not 0x5F.
 
-An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362
-(N-PHY rev 8, radio 2057 rev 8) writes, at the same point of the init and
-in both of the two init sequences it contains:
+An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362 (N-PHY
+rev 8, radio 2057 rev 8) writes, at the same point of the init and in both
+of the two init sequences it contains:
 
 	0x63 = 0x14	IPA2G_IMAIN_CORE0
 	0xE8 = 0x14	IPA2G_IMAIN_CORE1
@@ -26,11 +26,17 @@ wrong there too, and whoever gets to look at it should not have to reason
 about rev 8 at the same time.
 
 Both cases keep the 20 MHz and 40 MHz arms separate. The 40 MHz values are
-unchanged in both, and carry a TODO: the vendor driver does not use 40 MHz in
-2.4 GHz on the board the capture comes from, so checking them needs a device
-that runs 40 MHz, not more work on this one.
+unchanged in both, and carry a TODO: the vendor driver does not use 40 MHz
+in 2.4 GHz on the board the capture comes from, so checking them needs a
+device that runs 40 MHz, not more work on this one.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Verified: records #605-#607, from "PHY.WR   addr=0x032f val=0x0003"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows ipa-bias
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c

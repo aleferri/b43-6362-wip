@@ -62,6 +62,20 @@ def longest_run(vops, tops):
     return best
 
 
+# Le regioni del primo ciclo della cattura. Servono a dire *dove* il port e il
+# vendore divergono su tutta la run, che e' una domanda diversa da quella delle
+# finestre: le finestre coprono le fasi che qualcuno ha guardato, le regioni
+# coprono tutto, comprese quelle che nessuno ha ancora attribuito.
+REGIONS = [
+    (132, 10961, 'init vero e proprio'),
+    (10962, 14092, 'cal PAPD (a4)'),
+    (14093, 15920, 'cal RX IQ, ingresso'),
+    (15921, 22246, 'cal RX IQ, sweep di gain'),
+    (22247, 23771, 'seconda cal RSSI'),
+    (23772, 26100, 'coda'),
+]
+
+
 def find_anchor(tops, anchor, nth):
     """L'indice dell'occorrenza `nth` dell'ancora, o -1.
 
@@ -131,6 +145,18 @@ WINDOWS = [
          what='bias IPA 2 GHz, patches/b43/0005'),
     # Filtri digitali TX dell'init: tre gruppi di 15 coefficienti su 0x186,
     # 0x195 e 0x2c5, le prime tre righe di tbl_tx_filter_coef_rev4.
+    # L'unica finestra su una cattura diversa: il download delle tabelle statiche
+    # esiste solo in un init a freddo, che la opinit-* non e'.
+    dict(name='static-tables', rng='535:1958',
+         capture='full-init-ch1-bw20.decoded',
+         anchor='PHY.WR addr=0x72 val=0x3400',
+         flow=('initpor', '1'),
+         what='tabella statica 13 dell\'init a freddo, 1424 op'),
+    dict(name='static-tables-2', rng='1959:2764',
+         capture='full-init-ch1-bw20.decoded',
+         anchor='PHY.WR addr=0x72 val=0x4800',
+         flow=('initpor', '1'),
+         what='tabella statica 18, 806 op'),
     dict(name='txdigi-filts', rng='289:348', test_len=45,
          anchor='PHY.WR addr=0x186 val=0xfe87',
          flow=('init', '1'),
@@ -159,11 +185,19 @@ WINDOWS = [
          what='coefficienti di moltiplicazione RSSI',
          allow=('PHY.RD', 'RAD.RD', 'RAD.MOD', 'PHY.WR addr=0x1d',
                 'PHY.WR addr=0x1c', 'PHY.MOD'),
-         known='i nove coefficienti combaciano da quando il flow init modella '
-               'l\'init a freddo separatamente (0x1b8 = 0x3f e gli altri otto '
-               '0x3e, come il vendore). Le 3 op mancanti sono PHY.RD su 0x73, '
-               'la porta dati delle tabelle: i piani la escludono di proposito '
-               '(gen_readplans.py, TABLE_PORT) e il port legge il suo specchio.'),
+         known='i nove valori combaciano col vendore da quando la parentesi di '
+               'abs() e\' al suo posto (patches/mainline, cal RSSI): 0x1b8 = 0x3f '
+               'e otto 0x3e. Quello che resta non e\' un valore: il vendore scrive '
+               'gli otto di fila in 16 op, il port ne mette ~140 perche\' scrive '
+               'ogni coefficiente due volte, zero e poi il valore, e intercala le '
+               'read e gli override RF. Allargando test_len a 200 gli otto 0x3e si '
+               'appaiano per multiinsieme, ma entrano 37 op del port che il '
+               'vendore in questa finestra non ha: le due finestre non sono '
+               'commensurabili. Questa fase vuole un confronto sul VALORE FINALE '
+               'dei nove registri, che e\' un\'asserzione che questo strumento non '
+               'fa. Restano fuori anche due table-read del vendore, TBL.RD id=0x7 '
+               'off=0x110 (il salvataggio del tx gain originale, che 0014 non '
+               'porta) e TBL.RD id=0xf off=0x50.'),
     # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
     # passano e non devono: b43 la cal PAPD non ce l'ha. Sono qui pronte per
     # quando la si porta, cosi' si verifica una fase per volta.
@@ -210,6 +244,12 @@ def merged_vendor(vendor):
 
 
 def run(vendor, win, verbose):
+    # Una finestra puo' dichiarare la propria cattura con `capture`: le finestre
+    # nate contro l'init a caldo (opinit-*) non si possono ancorare a fasi che
+    # solo un init a freddo contiene, come il download delle tabelle statiche.
+    if win.get('capture'):
+        vendor = os.path.join(HERE, '..', 'router-data', 'dsl-3580l',
+                              win['capture'])
     out = os.path.join('/tmp', 'phase_%s.out' % win['name'])
     flow, chan = win['flow']
     with open(out, 'w') as fh:
@@ -269,6 +309,9 @@ def main():
     ap.add_argument('--only', help='una sola finestra, per nome')
     ap.add_argument('-v', '--verbose', action='store_true',
                     help='stampa le differenze, e la diagnosi per multiinsieme')
+    ap.add_argument('--flow', default='init',
+                    help='il flow da far girare (init, initcal, full, ...)')
+    ap.add_argument('--channel', default='1')
     ap.add_argument('--global-run', nargs=2, metavar=('DA', 'A'),
                     help='la run piu\' lunga fra TUTTA la finestra vendore '
                          'indicata e tutto l\'output del flow init: dice fin '
@@ -286,22 +329,37 @@ def main():
         vops = CMP.load_vendor(vendor, (lo, hi))
         out = '/tmp/phase_globalrun.out'
         with open(out, 'w') as fh:
-            subprocess.run([os.path.join(HERE, 'nphy_trace'), 'init',
-                            'dsl3580l', '1'], stdout=fh,
+            subprocess.run([os.path.join(HERE, 'nphy_trace'), args.flow,
+                            'dsl3580l', args.channel], stdout=fh,
                            stderr=subprocess.DEVNULL)
         tops = CMP.load_test(out)
         import difflib
         sm = difflib.SequenceMatcher(None, vops, tops, autojunk=False)
         blocks = [b for b in sm.get_matching_blocks() if b.size]
+        matched = set()
+        for b in blocks:
+            matched.update(range(b.a, b.a + b.size))
         blocks.sort(key=lambda b: -b.size)
-        print('vendore %d op, port %d op' % (len(vops), len(tops)))
+        print('flow %s, vendore %d op, port %d op' % (args.flow, len(vops),
+                                                     len(tops)))
         print('run piu\' lunghe (op consecutive che combaciano):')
         for b in blocks[:8]:
             print('  %4d op   vendore @%-6d port @%-6d   prima: %s'
                   % (b.size, b.a, b.b, vops[b.a][:58]))
-        tot = sum(b.size for b in blocks)
+        tot = len(matched)
         print('\ntotale op in comune: %d su %d del vendore (%.0f%%), in %d blocchi'
               % (tot, len(vops), 100.0 * tot / max(1, len(vops)), len(blocks)))
+        print('\nper regione (il numero di record se lo porta dietro l\'op, '
+              'vedi CMP.Op):')
+        print('  %-34s %-16s %6s %8s' % ('regione', 'record', 'op', 'appaiate'))
+        for rlo, rhi, name in REGIONS:
+            idx = [i for i, o in enumerate(vops) if rlo <= o.ep <= rhi]
+            if not idx:
+                continue
+            m = sum(1 for i in idx if i in matched)
+            print('  %-34s %-16s %6d %5d %3.0f%%'
+                  % (name, '#%d-%d' % (rlo, rhi), len(idx), m,
+                     100.0 * m / len(idx)))
         return 0
 
     bad = known = pending = 0

@@ -48,8 +48,8 @@ trovarla.
 ## Cosa NON è la cal
 
 **#14093-15920 non è un secondo giro di `wlc_phy_a4`.** Ricomincia con lo stesso
-prologo (`0x1e7`, array, `0x8f`/`0xa5`), e per questo prima l'avevo scritto come
-"rounds di raffinamento", ma la tabella scalare non c'è, e `a4` la scrive sempre.
+prologo (`0x1e7`, array, `0x8f`/`0xa5`), ma la tabella scalare non c'è, e `a4` la
+scrive sempre.
 Quella regione legge la tabella 15 (IQLOCAL) 13 volte e la scrive 7, tocca 26 e
 27, e suona un tono a **2000 kHz ampiezza 181** (#15508, periodo 10 campioni).
 **Non è attribuita**: né ad `a4` né a un'altra funzione precisa di brcmsmac.
@@ -166,17 +166,13 @@ non due.
 Le finestre `sampleplay-tssi` e `sampleplay-iqlo` di `phase_compare.py` reggono
 il risultato: 322/322 entrambe con la patch, 2/322 la seconda senza.
 
-## Perché non ho portato il resto in questa sessione
+## Perche' il resto non si porta a pezzi
 
-Il cuore resta `a3_nphy` più `a2_nphy` per due core: non si spezza in pezzi
-verificabili singolarmente, o c'è il passo di cal completo o non si verifica
-niente. E `papd_cal_setup`, che nella scaletta è il punto 1 perché è tutto
-scritture, sono 250 righe: verificabile non vuol dire piccolo, e finché la
-ricerca di gain non c'è non ha un chiamante, quindi come patch a sé sarebbe
-codice morto. L'offset epsilon e la tabella dei campioni invece erano calcoli isolati
-con valori catturati da confrontare, e per quelli si è potuto chiudere subito.
+Il cuore e' `a3_nphy` piu' `a2_nphy` per due core, e non si spezza in parti
+verificabili singolarmente: o c'e' il passo di cal completo o non si verifica niente.
+E `papd_cal_setup`, che nella scaletta e' il punto 1 perche' e' tutto scritture, sono
+250 righe — verificabile non vuol dire piccolo, e finche' la ricerca di gain non c'e'
+non ha un chiamante, quindi come patch a se' sarebbe codice morto.
 
-La mappa qui sopra è il lavoro che serviva comunque prima di scrivere una riga —
-e la sua prima versione aveva la colonna brcmsmac traslata di una funzione, con
-`a3` e `a4` scambiati, che è la ragione per cui la sezione sull'ordine di lavoro
-è cambiata.
+L'offset epsilon e la tabella dei campioni erano invece calcoli isolati con valori
+catturati da confrontare, ed e' per quello che si sono chiusi.

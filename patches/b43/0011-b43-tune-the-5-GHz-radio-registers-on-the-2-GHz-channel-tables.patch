@@ -1,39 +1,47 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: tune the 5 GHz radio registers on the 2 GHz channel
  tables for radio 2057 rev 8
 
-b43 carries two shapes of rev 7+ channel table: the full one, and a 2 GHz-only
-one that drops the ten 5 GHz tuning fields to save space. Dropping the fields
-also dropped their writes, so a channel switch on a board that uses a 2 GHz
-table leaves LOGEN_MX5G_TUNE, LOGEN_INDBUF5G_TUNE, PGA_BOOST_TUNE, and the
-TXMIX5G, PAD5G and LNA5G registers of both cores holding whatever the previous
-channel left there.
+b43 carries two shapes of rev 7+ channel table: the full one, and a 2
+GHz-only one that drops the ten 5 GHz tuning fields to save space. Dropping
+the fields also dropped their writes, so a channel switch on a board that
+uses a 2 GHz table leaves LOGEN_MX5G_TUNE, LOGEN_INDBUF5G_TUNE,
+PGA_BOOST_TUNE, and the TXMIX5G, PAD5G and LNA5G registers of both cores
+holding whatever the previous channel left there.
 
-They are not left alone by the hardware's own drivers. brcmsmac keeps one table
-for both bands, and in chan_info_nphyrev8_2057_rev8 every 2 GHz row holds zero
-in those ten columns, so it writes ten zeroes on each switch. An MMIO capture of
-wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057 rev 8) does the same: each
-of the ten is written, with the value zero, at all 31 channel switches in the
-capture, across five channels and two interface cycles.
+They are not left alone by the hardware's own drivers. brcmsmac keeps one
+table for both bands, and in chan_info_nphyrev8_2057_rev8 every 2 GHz row
+holds zero in those ten columns, so it writes ten zeroes on each switch. An
+MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057 rev 8)
+does the same: each of the ten is written, with the value zero, at all 31
+channel switches in the capture, across five channels and two interface
+cycles.
 
-The order matters and is not the obvious one - the ten are interleaved with the
-2 GHz writes, not appended: 0x43 right after 0x41, 0x4a after 0x47, the three
-core-0 registers between PAD2G and LNA2G. That is the order b43's own full-table
-path already uses, and the order used here.
+The order matters and is not the obvious one - the ten are interleaved with
+the 2 GHz writes, not appended: 0x43 right after 0x41, 0x4a after 0x47, the
+three core-0 registers between PAD2G and LNA2G. That is the order b43's own
+full-table path already uses, and the order used here.
 
-Gated on radio 2057 rev 8, the only combination the capture covers. Two other
-boards take the 2 GHz path, phy rev 8 with radio rev 5 and phy rev 17 with radio
-rev 14; brcmsmac has no 2 GHz rows for either radio, so there is nothing to
-compare them against and they keep their current behaviour.
+Gated on radio 2057 rev 8, the only combination the capture covers. Two
+other boards take the 2 GHz path, phy rev 8 with radio rev 5 and phy rev 17
+with radio rev 14; brcmsmac has no 2 GHz rows for either radio, so there is
+nothing to compare them against and they keep their current behaviour.
 
-With this the channel switch to channel 6 reproduces the capture with no missing
-operation: the first 33 of the window's 39 match position by position, and the
-remainder are the same operations with the same values three positions out,
-because the harness records three MMIO accesses the vendor tracer does not.
-Before, 11 of 39 matched and ten operations were missing.
+With this the channel switch to channel 6 reproduces the capture with no
+missing operation: the first 33 of the window's 39 match position by
+position, and the remainder are the same operations with the same values
+three positions out, because the harness records three MMIO accesses the
+vendor tracer does not. Before, 11 of 39 matched and ten operations were
+missing.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Verified: records #34940-#34990, from "RAD.WR   addr=0x0016 val=0x0058"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows chanswitch-ch6
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c

@@ -1,4 +1,4 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: fix the N-PHY sample table generation
 
@@ -16,9 +16,9 @@ The phase step is computed as
 into a u16, while cordic_calc_iq() takes whole degrees and scales its
 argument itself. The pre-scaling by 2^16 is therefore not needed, and it
 also makes the result a multiple of 65536 whenever (freq * 36) / bw is a
-multiple of 100 - which holds for every frequency the driver asks for:
-2500 and 5000 kHz from the TX IQ/LO calibration, 4000 kHz from the idle
-TSSI measurement and from the rev 2 RX IQ calibration. So rot truncates to
+multiple of 100 - which holds for every frequency the driver asks for: 2500
+and 5000 kHz from the TX IQ/LO calibration, 4000 kHz from the idle TSSI
+measurement and from the rev 2 RX IQ calibration. So rot truncates to
 exactly 0, the angle never advances, and all len samples come out equal.
 What should be a tone is a DC level.
 
@@ -26,10 +26,10 @@ The second is a precedence slip in the packing:
 
 	data[i] = (samples[i].i & 0x3FF << 10);
 
-<< binds tighter than &, so this masks with 0x3FF << 10 instead of
-shifting the masked value into place. For the amplitudes actually used the
-in-phase field lands in the low ten bits and is masked away to zero;
-negative values leave the sign extension behind instead.
+<< binds tighter than &, so this masks with 0x3FF << 10 instead of shifting
+the masked value into place. For the amplitudes actually used the in-phase
+field lands in the low ten bits and is masked away to zero; negative values
+leave the sign extension behind instead.
 
 Neither slip is visible without the other fixed, which is why this is one
 patch. Against an MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8,
@@ -44,7 +44,16 @@ calibration plays:
 The zero-amplitude tone the idle TSSI measurement plays is 160 zero words
 either way, and stays identical to the capture.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23018
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23057
+Verified: records #1288-#1609, from "TBL.WR   id=0x0011 off=0x0000 len=160"
+Verified: records #8638-#8959, from "TBL.WR   id=0x0011 off=0x0000 len=160"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows sampleplay-tssi, sampleplay-iqlo
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c
@@ -69,14 +78,11 @@ Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
  	struct cordic_iq *samples;
  
  	bw = b43_is_40mhz(dev) ? 40 : 20;
-@@ -1554,11 +1555,14 @@
+@@ -1554,11 +1555,11 @@
  		b43err(dev->wl, "allocation for samples generation failed\n");
  		return 0;
  	}
 -	rot = (((freq * 36) / bw) << 16) / 100;
-+	/* Per-sample phase step, in whole degrees: cordic_calc_iq() scales its
-+	 * argument itself.
-+	 */
 +	rot = ((freq * 36) / bw) / 100;
  	angle = 0;
  

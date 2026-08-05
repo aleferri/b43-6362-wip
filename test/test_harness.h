@@ -16,11 +16,14 @@
 #include <stdio.h>
 #include "b43.h"
 
-void b43_test_plan_phy_reads(u16 addr, const u16 *results, int cap);
+void b43_test_plan_phy_reads(u16 addr, const u16 *results,
+				   const u32 *recs, int cap);
 /* Plan per cella di tabella: indipendente dalla posizione nella coda 0x000f. */
 void b43_test_plan_table_cell(u16 id, u16 off, const u16 *vals, int n);
-void b43_test_plan_radio_reads(u16 addr, const u16 *results, int cap);
-void b43_test_plan_mmio_reads(u16 addr, const u16 *results, int cap);
+void b43_test_plan_radio_reads(u16 addr, const u16 *results,
+				   const u32 *recs, int cap);
+void b43_test_plan_mmio_reads(u16 addr, const u16 *results,
+				   const u32 *recs, int cap);
 void b43_test_plans_reset(void);
 void b43_test_plans_report(FILE *f);
 

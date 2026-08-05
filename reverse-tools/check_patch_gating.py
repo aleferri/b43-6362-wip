@@ -30,6 +30,7 @@ puo' essere il nack.
 
 import argparse
 import os
+import difflib
 import re
 import shutil
 import subprocess
@@ -78,6 +79,27 @@ def added_lines(patch_path):
         elif line.startswith(' ') or line == '':
             new_line += 1
     return per_file
+
+
+def added_after_apply(before, after):
+    """I numeri di riga del file NUOVO che la patch ha aggiunto.
+
+    Non si possono prendere dagli `@@`: `patch(1)` rilocalizza gli hunk quando
+    l'albero non e' esattamente quello su cui la patch e' stata fatta, e da quel
+    momento i numeri dell'header sono sbagliati -- in silenzio, perche' lo
+    invochiamo con --silent. Su una patch multi-hunk l'errore si accumula e le
+    righe finiscono attribuite alla funzione sbagliata, che e' il modo peggiore di
+    sbagliare per uno strumento come questo: il nome che stampa esiste.
+
+    Diffare il contenuto prima/dopo da' le posizioni vere qualunque cosa abbia
+    fatto patch(1).
+    """
+    sm = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    nums = []
+    for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
+        if tag in ('insert', 'replace'):
+            nums.extend(range(j1 + 1, j2 + 1))
+    return nums
 
 
 def strip(text):
@@ -129,6 +151,7 @@ def gate_for(lines, span, target):
 def check(tree, patch_path):
     per_file = added_lines(patch_path)
     verdicts = []
+    before = {}
     with tempfile.TemporaryDirectory() as tmp:
         for rel in per_file:
             src = os.path.join(tree, rel)
@@ -138,6 +161,8 @@ def check(tree, patch_path):
                 shutil.copy2(src, dst)
             else:
                 open(dst, 'w').close()
+            with open(dst, encoding='utf-8', errors='replace') as fh:
+                before[rel] = fh.readlines()
         # patch(1) e non git apply: la directory temporanea non e' un repo, e
         # git apply fuori da un work tree rifiuta i path.
         res = subprocess.run(['patch', '-p1', '--forward', '--silent', '-i',
@@ -149,9 +174,10 @@ def check(tree, patch_path):
                     else (res.stderr.strip() or res.stdout.strip())[:90])
             return [('(patch non applicabile)', None, hint)]
 
-        for rel, nums in per_file.items():
+        for rel in per_file:
             path = os.path.join(tmp, rel)
             lines, owner = cfuncs.index_functions(path)
+            nums = added_after_apply(before[rel], lines)
             spans = cfuncs.function_ranges(path)
             seen = set()
             for n in nums:
@@ -170,8 +196,16 @@ def check(tree, patch_path):
                     continue
                 # Funzione aggiunta per intero dalla patch: il gate, se c'e',
                 # sta nel chiamante. Non e' un allarme.
+                #
+                # Il confronto guarda solo le righe con del contenuto: righe
+                # vuote e righe di sola graffa sono identiche a decine di altre
+                # nel file, quindi il diff le appaia altrove e non finiscono fra
+                # le aggiunte. Pretendere il sottoinsieme completo dello span
+                # farebbe passare per "non gateata" ogni funzione nuova.
                 span_lines = set(range(spans[fn][0], spans[fn][1] + 1))
-                if span_lines <= set(nums):
+                span_lines = {n for n in span_lines
+                              if lines[n - 1].strip() not in ('', '{', '}')}
+                if span_lines and span_lines <= set(nums):
                     verdicts.append((rel, fn,
                                      'funzione nuova, il gate sta nel chiamante'))
                     continue

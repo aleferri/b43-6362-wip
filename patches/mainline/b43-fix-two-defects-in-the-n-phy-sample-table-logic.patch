@@ -1,0 +1,73 @@
+From d043973c97878dce4d2ff8d3f0d950a901ff4ec6 Mon Sep 17 00:00:00 2001
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Wed, 5 Aug 2026 13:07:01 +0200
+Subject: [PATCH] b43: fix two defects in the N-PHY sample table logic
+
+In b43_nphy_load_samples(), shift has more priority than and, so
+samples[i].i & 0x3FF << 10 masks with 0x3FF << 10 instead of shifting the
+masked value into place. The in-phase component of a sample sits in the
+low ten bits, so it is masked to zero. brcmsmac packs the same table as
+((buf[t].i & 0x3ff) << 10) | (buf[t].q & 0x3ff), in wlc_phy_loadsampletable_nphy()
+
+In b43_nphy_gen_load_samples(), cordic_calc_iq() call CORDIC_FIXED(theta)
+as the first op, so the pre-scaling of rot by 2^16 is wrong.
+For reference brcmsmac computes the step as ((f_kHz * 36) / phy_bw) / 100
+into an s32 and passes it in unscaled. The wrong scaling and the double
+CORDIC_FIXED() result in wrong values. Moving angle and rot to s32 is just
+for consistency with brcmsmac and not strictly related to the fix.
+
+With both fixes, the test run of TX IQ/LO calibration generated with 2500 kHz
+amplitude, 250 tone, matches all 160 words of the linked capture of
+wl 6.30.102.7 on a BCM6362: records #8638-#8959, from "TBL.WR   id=0x0011 off=0x0000 len=160".
+The zero-amplitude tone the idle TSSI measurement plays, records
+#1288-#1609, is 160 zero words either way and stays identical.
+
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23018
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23057
+Assisted-by: claude:claude-Opus-5.0
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+ drivers/net/wireless/broadcom/b43/phy_n.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
+index 22359bd9d..7af85e189 100644
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -1515,7 +1515,7 @@ static int b43_nphy_load_samples(struct b43_wldev *dev,
+ 		b43_nphy_stay_in_carrier_search(dev, 1);
+ 
+ 	for (i = 0; i < len; i++) {
+-		data[i] = (samples[i].i & 0x3FF << 10);
++		data[i] = (samples[i].i & 0x3FF) << 10;
+ 		data[i] |= samples[i].q & 0x3FF;
+ 	}
+ 	b43_ntab_write_bulk(dev, B43_NTAB32(17, 0), len, data);
+@@ -1531,7 +1531,8 @@ static u16 b43_nphy_gen_load_samples(struct b43_wldev *dev, u32 freq, u16 max,
+ 					bool test)
+ {
+ 	int i;
+-	u16 bw, len, rot, angle;
++	u16 bw, len;
++	s32 rot, angle;
+ 	struct cordic_iq *samples;
+ 
+ 	bw = b43_is_40mhz(dev) ? 40 : 20;
+@@ -1554,11 +1555,11 @@ static u16 b43_nphy_gen_load_samples(struct b43_wldev *dev, u32 freq, u16 max,
+ 		b43err(dev->wl, "allocation for samples generation failed\n");
+ 		return 0;
+ 	}
+-	rot = (((freq * 36) / bw) << 16) / 100;
++	rot = ((freq * 36) / bw) / 100;
+ 	angle = 0;
+ 
+ 	for (i = 0; i < len; i++) {
+-		samples[i] = cordic_calc_iq(CORDIC_FIXED(angle));
++		samples[i] = cordic_calc_iq(angle);
+ 		angle += rot;
+ 		samples[i].q = CORDIC_FLOAT(samples[i].q * max);
+ 		samples[i].i = CORDIC_FLOAT(samples[i].i * max);
+-- 
+2.43.0
+

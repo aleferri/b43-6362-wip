@@ -1,0 +1,59 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: fix the rounding of the negative RSSI cal offsets
+
+b43_nphy_rev3_rssi_cal() rounds the fine digital offset by adding half
+the poll count before dividing by it. In the negative branch the closing
+parenthesis of abs() is in the wrong place, so the 4 is added to the
+negative value inside abs() instead of to its magnitude:
+
+	offset[j] = -(abs(offset[j] + 4) / 8);
+
+For every offset below -4 that rounds towards zero instead of away from
+it, and the result is one LSB short. brcmsmac takes the absolute value
+first, adds NPHY_RSSICAL_NPOLL / 2, divides, and negates at the end, and
+the same file already gets it right twice: in the coarse stage of this
+very function and in b43_nphy_rev2_rssi_cal().
+
+An MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057
+rev 8) writes 0x3f to the NB RSSI multiplication coefficient and 0x3e to
+the other eight. Before this change the driver computes 0x3f for all
+nine; after it, all nine match the capture bit for bit.
+
+This is not specific to radio 2057 rev 8: the expression is shared by
+every N-PHY rev 3 and later, so it is deliberately not gated.
+
+Verified: records #3723-#3740, from "PHY.WR   addr=0x01b8 val=0x003f"
+Link: https://github.com/aleferri/b43-6362-wip/blob/c366cad/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n22596
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -2246,7 +2246,7 @@ static void b43_nphy_rev3_rssi_cal(struct b43_wldev *dev)
+ 				if (j / 2 == core) {
+ 					offset[j] = 232 - poll_results[j];
+ 					if (offset[j] < 0)
+-						offset[j] = -(abs(offset[j] + 4) / 8);
++						offset[j] = -((abs(offset[j]) + 4) / 8);
+ 					else
+ 						offset[j] = (offset[j] + 4) / 8;
+ 					b43_nphy_scale_offset_rssi(dev, 0,
+
+Note per il repo, non per la mailing list:
+
+  - **Non gateata**, come `0010`: e' un refuso di precedenza in un'espressione
+    condivisa da ogni N-PHY rev 3+, e gatearla su rev 8 lascerebbe il difetto
+    dov'e' per tutti gli altri.
+  - Misura: harness in `test/`, flow `init`. I nove coefficienti passano da nove
+    `0x3f` a `0x1b8 = 0x3f` piu' otto `0x3e`, identici alla cattura. Serve
+    `readplans_init.h` rigenerato con `--max-len 512`: col troncamento a 64 la
+    cal mediava lo specchio e il difetto non era visibile.
+  - La finestra `rssi-cal` resta 1/16 e non e' questo: il port scrive ogni
+    coefficiente **due volte** (prima zero, poi il valore) e intercala le read,
+    il vendore scrive gli otto di fila. I valori combaciano, l'ordine no, e
+    quella finestra e' posizionale.
+  - Va spedita come `[PATCH]` a se', in un thread suo, con le altre due di
+    `patches/mainline/`.
+  - NON provata su hardware.

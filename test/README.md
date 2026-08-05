@@ -188,14 +188,16 @@ tutte:
 |---|---|---|---|
 | gain-control (`0008`+`0001`) | 87 | **87/87** | **ok** |
 | papd-comp (`0003`) | 16 | **16/16** | **ok** |
-| papd-tables (`0004`) | 5 | **5/5** | **ok** |
+| papd-tables (`0004`+`0012`) | 774 | 260/774 | mancano 256, in più 256: il vendore scrive le due tabelle epsilon con 64 scritture singole dove b43 fa un bulk di 64, e salva/azzera il bit 15 di `0x01`, che è di `wlc_phy_a4` |
 | ipa-bias (`0005`) | 3 | **3/3** | **ok** |
+| static-tables (`initpor`) | 1424 | **1424/1424** | **ok** |
+| static-tables-2 (`initpor`) | 806 | **806/806** | **ok** |
 | sampleplay-tssi | 322 | **322/322** | **ok** |
 | sampleplay-iqlo (`0010`) | 322 | **322/322** | **ok** |
 | txdigi-filts | 60 | 45/60 | mancano 15, e sono **idempotenti**: il vendore riscrive `0x195`-`0x1a3` con gli stessi valori |
 | chanswitch-ch6 (`0011`) | 39 | 33/39 | **nessuna op mancante**; la coda è sfasata di tre per gli MMIO che il vendore non registra |
 | tssi-setup | 19 | 5/19 | mancano 4, in più 15: il `0x17b` di troppo e lo sfasamento |
-| rssi-cal | 16 | 1/16 | mancano 15: i valori vengono dalla cal, che l'harness non fa |
+| rssi-cal | 16 | 11/16 | mancano 5, in più 3: i nove coefficienti combaciano, le mancanti sono `PHY.RD` su `0x73`, che i piani escludono di proposito |
 | papd-digifilt, papd-calsetup | - | - | fasi della cal PAPD non portate: l'ancora non c'è, ed è lo stato atteso |
 
 La colonna **run** è la sequenza consecutiva più lunga che combacia, su quante op
@@ -233,13 +235,15 @@ scritti **in mezzo** alla sequenza (0x43 dopo 0x41, 0x4a dopo 0x47), non in coda
 
 C'è anche `--global-run DA A`, che non scegli una fase a mano: prende tutta la
 finestra del vendore e tutto l'output del flow, e riporta le run più lunghe. Sul
-primo init: **1540 op consecutive** (dal caricamento della TX gain table in poi),
-poi 323, 266, 172, e in totale 3342 op in comune su 23126 in 332 blocchi. È la
-misura più onesta di dove sta il port: copre pezzi, e i pezzi sono contigui.
+primo init (`--global-run 132 26100`, flow `init`): **1543 op consecutive** (dal
+caricamento della TX gain table in poi), poi 323, 266, 260, e in totale 4434 op
+in comune su 22951 in 466 blocchi. Col flow `full` sono 5398 su 22951, in 677
+blocchi. È la misura più onesta di dove sta il port: copre pezzi, e i pezzi sono
+contigui.
 
-Il passo che avevo saltato: `merge_retvals.py` sulla cattura prima di
-confrontare. Senza, le 11049 righe `RETVAL` entrano nel diff come op a sé e
-sfasano tutto. `phase_compare.py` lo fa da solo.
+Serve `merge_retvals.py` sulla cattura prima di confrontare: senza, le 11049 righe
+`RETVAL` entrano nel diff come op a sé e sfasano tutto. `phase_compare.py` lo fa da
+solo.
 
 ### coverage.py — copertura per insiemi
 
@@ -248,19 +252,17 @@ Non è posizionale: serve a dire *quanto* manca e a trovare le voci al contrario
 non a dire se l'ordine è giusto. Utile per orientarsi, debole come garanzia.
 
 Le celle si contano **espandendo le table-op**: un'op di lunghezza N copre N
-celle. Contarla come una sola sottostimava il port, che scrive in bulk dove il
-vendore scrive cella per cella — le percentuali di questa tabella sono quindi
-diverse da quelle che avevo scritto prima del fix, ed è cambiata la misura, non
-il port.
+celle. Contarla come una sola sottostima il port, che scrive in bulk dove il vendore
+scrive cella per cella.
 
 Contro il primo init della cattura (record 132-26100), flow `full`:
 
 | | mainline | +`0001`..`0003` | +`0004` | +`0005` | serie intera |
 |---|---|---|---|---|---|
 | registri PHY | 175/218 (80%) | 186/218 (85%) | 186/218 (85%) | 186/218 (85%) | **190/218 (87%)** |
-| registri radio | 39/54 (72%) | 39/54 (72%) | 39/54 (72%) | **40/54 (74%)** | 40/54 (74%) |
+| registri radio | 39/54 (72%) | 39/54 (72%) | 39/54 (72%) | 40/54 (74%) | **50/54 (93%)** |
 | celle di tabella | 878/1987 (44%) | 1190/1987 (60%) | 1446/1987 (73%) | 1446/1987 (73%) | 1446/1987 (73%) |
-| op emesse | 14488 | 15598 | 16118 | 16118 | 16121 |
+| op emesse | 14490 | 15597 | 16117 | 16117 | 16131 |
 
 I quattro registri PHY in più dell'ultima colonna sono le soglie CRS di `0008`.
 **`0010` non muove nulla in questa tabella**, e non è un difetto della patch: le
@@ -285,8 +287,9 @@ Il confronto è **sulle celle e sui registri toccati, non posizionale**: dove il
 vendore scrive 64 celle una per una e il port ne fa una bulk, lo stato della
 tabella è lo stesso e la sequenza di op no.
 
-I registri SHM restano a 0/677 e non è un difetto: le scrive il core di b43, che
-non compiliamo — qui c'è solo il PHY.
+Dei 677 offset SHM che il vendore tocca il port ne scrive due, e `coverage.py`
+non li confronta: sono `o708`/`o70e`, con l'encoding diverso spiegato sotto. Gli
+altri 675 li scrive il core di b43, che non compiliamo — qui c'è solo il PHY.
 
 Cosa resta fuori, e perché:
 
@@ -295,8 +298,10 @@ Cosa resta fuori, e perché:
 - **tabelle 31, 32, 33, 34**, cioè epsilon e scalare del PAPD: b43 accendeva il
   motore PAPD senza inizializzare le tabelle che legge. Chiuso da
   `patches/b43/0004`.
-- **i registri di gain 0x1d7-0x1e1, 0x9a-0x9d, 0x129-0x12b** e gli altri 32
-  ancora scoperti: da attribuire, non ancora guardati.
+- **i registri di gain 0x9a-0x9d, 0x129-0x12b, 0x1df, 0x1e1** e gli altri 28
+  ancora scoperti (`--details` li elenca): da attribuire, non ancora guardati.
+  I quattro radio che restano sono `0x17d`/`0x17e`/`0x19d`/`0x19e`, i
+  `TXRXCOUPLE_2G` del setup della cal PAPD, che non è portato.
 ## Piani di lettura, e cosa NON spiegano
 
 `readplans_init.h` è generato da `reverse-tools/gen_readplans.py`: appaia ogni
@@ -311,11 +316,76 @@ servono a leggere una tabella, e il valore giusto è quello che la tabella
 contiene. Con dentro anche loro, il piano di 0x73 veniva consumato 185 volte e
 falsava tutti i `b43_ntab_read`.
 
+**I piani sono una coda per indirizzo, e non sanno da che punto della cattura
+vengono i valori.** Il port consuma il piano di un indirizzo nell'ordine in cui
+lo legge, quindi basta che faccia una read in meno del vendore prima di una fase
+perche' tutti i valori di quella fase arrivino sfasati di uno. Non e' un problema
+di capienza: misurato, **zero piani in overrun** sia con `0014` sia senza, tutti
+i 149 hanno entry di scorta. Il conto dei consumi cambia (0x8f passa da 1/28 a
+23/28 con `0014`), la posizione no.
+
+Da qui viene la cal RSSI: il vendore calcola `0x1b8 = 0x3f` e otto `0x3e`, il
+port nove `0x3f`. La finestra `rssi-cal` dava 11/16 per un motivo che non era
+quello scritto qui: il secondo init prendeva la strada del **restore** e
+riscriveva la cache calcolata dal primo init, che i valori giusti li aveva
+azzeccati. Con `0014` il primo init ricalcola quella cache e la finestra crolla a
+1/16 — ma anche prima non stava misurando una cal, stava misurando una copia. Ora
+il flow azzera le chanspec di cal fra i due init, cosi' il secondo rifa' le cal
+come la cattura, e la finestra dice il vero: 1/16, un LSB di differenza.
+
+## Piani posizionali: il meccanismo c'e', la vittoria no
+
+Le entry dei piani ora si portano dietro il **numero di record** della cattura da
+cui vengono (`gen_readplans.py` lo emette in un secondo array), e `plan_get()`
+serve la prima entry che viene dal cursore in poi invece della prossima in coda.
+Quando per un indirizzo non c'e' nessuna entry dal cursore in avanti, la read
+cade sul mirror e il contatore lo dice: prima al suo posto usciva uno zero, che e'
+la bugia piu' silenziosa possibile.
+
+Con `B43_TEST_PLANDBG=1` ogni hit e ogni miss escono con il record servito e il
+cursore. E' quello che ha trovato il difetto vero, che non era la posizione:
+**`gen_readplans.py` troncava ogni piano a 64 valori** (`--max-len`, default 64).
+Il port legge `0x219` e `0x21a` 161 volte a testa nella cal RSSI, il vendore 152
+volte nella sola regione della seconda cal e 324 in tutta la cattura: con 64 entry
+il piano finiva subito e le altre 97 read per indirizzo — **le 194 "fuori
+posizione"**, tutte su questi due registri — leggevano il mirror. La cal mediava
+mezza cattura e mezzo specchio.
+
+Rigenerato con `--max-len 512`, i due piani hanno 162 entry, il port ne consuma
+161, e i contatori vanno a **zero fuori posizione e zero saltate**. Ora i valori
+che la cal RSSI media vengono davvero dalla cattura.
+
+E con i valori letti giusti l'LSB che restava si e' rivelato **un difetto di
+mainline**, non un limite dell'harness: in `b43_nphy_rev3_rssi_cal()` il ramo
+negativo dell'arrotondamento scrive `-(abs(offset[j] + 4) / 8)`, con la parentesi
+di `abs()` nel posto sbagliato, quindi il 4 finisce dentro il valore negativo
+invece che sul suo modulo e ogni offset sotto -4 arrotonda verso lo zero. brcmsmac
+prende il modulo, aggiunge `NPHY_RSSICAL_NPOLL / 2`, divide e nega alla fine, e lo
+stesso file la scrive giusta due volte: nella fase coarse di questa funzione e in
+`b43_nphy_rev2_rssi_cal()`. Corretta la parentesi, i nove coefficienti diventano
+`0x1b8 = 0x3f` piu' otto `0x3e`, **identici alla cattura**:
+`patches/mainline/b43-fix-the-rounding-of-the-negative-rssi-cal-offsets.patch`.
+
+La finestra `rssi-cal` resta comunque **1/16**, e la strada del multiinsieme e'
+stata provata e non funziona: il vendore fa 16 op, il port ~140 (scrive ogni
+coefficiente due volte, zero e poi il valore, e intercala read e override RF).
+Allargando `test_len` a 200 gli otto `0x3e` si appaiano — **ed e' la prova che i
+valori sono giusti** — ma entrano 37 op del port che il vendore in quella finestra
+non ha, e il verdetto peggiora invece di dire il vero: le due finestre non sono
+commensurabili.
+
+Quindi questa fase non si chiude con questo strumento. Vuole un confronto sul
+**valore finale** dei registri — dopo la fase, `0x1a4` vale quello che vale nella
+cattura — che e' un'asserzione diversa dal confronto di sequenze di op, e oggi non
+c'e'. Restano fuori anche due table-read del vendore che il port non fa,
+`TBL.RD id=0x7 off=0x110` (il salvataggio del tx gain originale, che `0014` non
+porta) e `TBL.RD id=0xf off=0x50`.
+
 **E adesso il punto onesto: i piani non spostano la copertura.** Con e senza, il
 flow `full` emette 14490 e 14488 op, e registri e celle coperte sono identici. 72
 indirizzi su 149 consumano il loro piano, quindi vengono usati; semplicemente le
-fasi che mancano non mancano per colpa di un valore letto sbagliato. È una mia
-ipotesi che cade: l'avevo scritta due volte come "il prossimo lavoro ovvio".
+fasi che mancano non mancano per colpa di un valore letto sbagliato: i piani di
+lettura non sono la spiegazione, benché lo sembrino.
 
 Quello che resta fuori è **strutturale**: early return e gate di revisione dentro
 il driver, non stato dell'hardware. I piani restano perché costano nulla, rendono
@@ -346,3 +416,10 @@ e lo dice.
 la calibrazione con `perical = 0`: è la tabella IQLOCAL scritta dalla cal, che il
 vendore all'init non fa. Nel flow `init`, quello che imita il vendore, la lista al
 contrario è **vuota**.
+
+### Finestre su una cattura diversa
+
+Una finestra puo' dichiarare `capture='<file>'` e viene confrontata contro quella
+invece che contro il `--vendor` passato in riga di comando. Serve per le fasi che una
+cattura non contiene: `static-tables` e `static-tables-2` stanno solo in un init **a
+freddo**, e la `opinit-*` e' a caldo.
