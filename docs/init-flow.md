@@ -84,11 +84,23 @@ Sistemati, il trace ora apre con le stesse quattro scritture AFE della cattura
 
 | dove | op | di chi | cosa |
 |---|---|---|---|
-| init del radio | **342** | solo port | b43 carica tutte le 412 voci di `r2057_rev8_init`; il vendore, a caldo, scrive **70 registri distinti** (77 scritture), e tutti e 70 sono un sottoinsieme dei 412 |
-| p@37-557 | **520** | solo port | `TBL.WR id=0x20 0x22 0x1f 0x21`, le tabelle scalare ed epsilon del PAPD: `patches/b43/0004` le scrive in `b43_phy_initn`, il vendore dentro `wlc_phy_a4` (#10966-#11740) |
+| init del radio | **~300** | solo port | b43 scrive 488 op su 412 registri radio distinti in tutto l'init; il vendore, in tutto il primo init, ne scrive **193 su 90 distinti** |
+| tabelle PAPD | — | **chiuso da `0012`** | erano 520 op nel posto sbagliato: `0004` le scriveva in `b43_phy_initn`, ora stanno nella cal come nella cattura |
 | v@578-751 | 173 | solo vendore | tabella 8, object memory, 45 letture PHY: non attribuito |
 
-Sul primo: non è un artefatto del tracer. `PHY.ARRW` è solo un marcatore e le op
+Sul primo, prima una correzione a me stesso: la prima volta l'avevo misurato su
+una finestra di record (60-400) che **mescola fasi diverse** — l'upload della
+tabella di init, il `radio_2057_setup` e il primo cambio canale — e da lì avevo
+scritto "70 registri contro 412, tutti sottoinsieme". Il "sottoinsieme" era
+sbagliato: 32 di quei 70 hanno un valore **diverso** da quello della tabella di
+b43, che è la firma di scritture che vengono da un'altra fase, non dall'upload.
+
+Il numero che regge è quello su tutto l'init: 193 scritture radio su 90 registri
+distinti dal lato vendore, 488 su 412 dal lato port. La conclusione qualitativa
+non cambia — b43 scrive molti più registri radio — ma il conto esatto di quali e
+in quale fase è da rifare per fase, non su una finestra a occhio.
+
+E non è un artefatto del tracer. `PHY.ARRW` è solo un marcatore e le op
 che ne discendono sono tutte nel trace (`docs/blob-inventory.md`), e comunque
 `phy_reg_write_array` scrive registri **PHY**, non radio: le scritture radio
 passano da `write_radio_reg`, che è agganciato. Quindi il vendore scrive davvero

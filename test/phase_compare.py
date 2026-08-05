@@ -114,10 +114,17 @@ WINDOWS = [
          anchor='TBL.WR id=0x1a off=0x240 len=1',
          flow=('init', '1'),
          what='compensazione PAPD, patches/b43/0003'),
-    dict(name='papd-tables', rng='10966:10970',
+    dict(name='papd-tables', rng='10966:11740',
          anchor='TBL.WR id=0x20 off=0x0 len=64',
          flow=('init', '1'),
-         what='tabelle scalare ed epsilon, patches/b43/0004'),
+         what='tabelle scalare ed epsilon della cal, patches/b43/0004 e 0012',
+         known='le prime 260 op combaciano: sono le due tabelle scalare, 32 e '
+               '34, 64 valori ciascuna. Poi due cose. Il vendore salva e azzera '
+               'il bit 15 di 0x01 (lo spur), che e\' di wlc_phy_a4 e non e\' '
+               'ancora portato. E scrive le due tabelle epsilon con 64 '
+               'scritture singole dove b43 fa un bulk di 64: stesse celle, '
+               'stessi valori, forma diversa, da cui i 256 mancanti e i 256 in '
+               'piu\'.'),
     dict(name='ipa-bias', rng='605:607',
          anchor='PHY.WR addr=0x32f val=0x3',
          flow=('init', '1'),

@@ -25,6 +25,9 @@
   campioni;
   `0011` scrive i dieci registri 5 GHz che la tabella di canale 2 GHz non
   portava, intercalati come nella cattura — gateata su radio rev 8;
+  `0012` sposta l'inizializzazione delle tabelle PAPD da `b43_phy_initn` alla cal,
+  che e' dove il vendore e brcmsmac la fanno, e ci mette il primo pezzo di
+  `b43_nphy_papd_cal()`;
   `0006` misura il rumore di fondo su N-PHY, che non veniva misurato affatto —
   gateata sul tipo di PHY e non sulla revisione, quindi anche lei esce dal
   recinto del nostro radio.
