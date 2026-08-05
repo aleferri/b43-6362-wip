@@ -6,14 +6,14 @@ Document the "brcm,bcm6362-wlan-bus-axi" node consumed by the bcma host
 driver added in the previous patch.
 
 The node describes two register windows: the ChipCommon block of the WLAN
-backplane, from which bcma scans the EROM, and the SoC-level control
-window through which the host driver gates the macro and synthesizes the
+backplane, from which bcma scans the EROM, and the SoC-level control window
+through which the host driver gates the macro and synthesizes the
 BCMA_IOCTL / BCMA_RESET_CTL accesses for the wrapper-less cores. Clock,
 resets and power domain are the SoC-level gating the boot loader leaves
 untouched.
 
-The node is a bus with a "ranges" translation for the enumerated cores
-and an interrupt nexus mapping the 802.11 core window to the peripheral
+The node is a bus with a "ranges" translation for the enumerated cores and
+an interrupt nexus mapping the 802.11 core window to the peripheral
 interrupt controller.
 
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>

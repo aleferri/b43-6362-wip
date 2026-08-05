@@ -123,5 +123,11 @@ se non ci avessimo provato.
 - un giro completo dei canali 1-13: qui ce ne sono cinque (1, 2, 5, 6, 10) e su
   quelli nulla dipende dal canale oltre alla chantab, ma 13 e 14 restano da
   vedere (spuravoid, per esempio, che qui non compare mai).
-- la stessa init con `skipphyrd` vuoto e i `RETVAL` attivi, per avere i valori
-  letti nei punti di decisione.
+- l'init a freddo **di nuovo, senza il buco**: quello che c'è
+  (`full-init-ch1-bw20.decoded`, 81397 record) perde 65285 record fra `#32769` e
+  `#98055` per overflow della fifo, quindi solo `#2-32769` è confrontabile
+  posizionalmente. Il verbale dice come rifarla.
+
+I valori letti nei punti di decisione ci sono già: `skipphyrd` era vuoto in
+entrambe le catture e i `RETVAL` sono attivi (11049 qui, 11795 nella cattura a
+freddo), da cui i piani di lettura dell'harness — 2089 read appaiate su 2089.

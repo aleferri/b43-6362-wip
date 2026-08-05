@@ -1,4 +1,4 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: program the PAPD compensation table on radio 2057 rev 8
 
@@ -6,24 +6,30 @@ b43_nphy_tx_gain_table_upload() bails out for phy rev 7+ right after
 fetching the RF power offset table, leaving the PAPD compensation table
 (tables 26 and 27 at offset 576, 128 entries each) untouched.
 
-An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362
-(N-PHY rev 8, radio 2057 rev 8) shows it writing all 256 of those cells
-during init, one 32-bit entry at a time, with the value taken from the RF
-power offset table indexed by the pad gain of the corresponding TX gain
-table entry. That is what the loop below already computes, so let radio
-2057 rev 8 reach it.
+An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362 (N-PHY
+rev 8, radio 2057 rev 8) shows it writing all 256 of those cells during
+init, one 32-bit entry at a time, with the value taken from the RF power
+offset table indexed by the pad gain of the corresponding TX gain table
+entry. That is what the loop below already computes, so let radio 2057 rev
+8 reach it.
 
 Every value the loop produces matches the capture, all 256 of them, so the
 computation and the table it indexes are both right for this radio.
 
-Other rev 7+ radios keep the current behaviour: their offsets have not
-been checked against hardware, and writing a wrong compensation table is
-worse than writing none.
+Other rev 7+ radios keep the current behaviour: their offsets have not been
+checked against hardware, and writing a wrong compensation table is worse
+than writing none.
 
 Depends on the RF power offset values from the previous patch: with the
 ones currently in tree, 246 of the 256 cells come out wrong.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Verified: records #2688-#2703, from "TBL.WR   id=0x001a off=0x0240 len=1"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows papd-comp
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
 index 22359bd..a5e9479 100644

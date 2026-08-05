@@ -3,8 +3,10 @@
 Serve per rispondere a una domanda che torna sempre: *quando succede cosa, e da
 che parte*. Le colonne sono misurate, non ricostruite a memoria:
 
-- **port**: numero di riga nell'output di `./nphy_trace init dsl3580l 1`
-  (13223 righe in totale con la serie `0001..0011` applicata);
+- **port**: numero di riga nell'output di `./nphy_trace init dsl3580l 1`. **I
+  numeri di questa colonna sono da rigenerare**: vengono dal trace da 13223 op
+  dell'harness che modellava sempre l'init a freddo (vedi sotto), non da quello di
+  adesso, che con la serie `0001..0013` fa 5079 op;
 - **cattura**: numero di record in `opinit-ch1-ch6-bw20.decoded`, primo init;
 - **brcmsmac**: la funzione, trovata con `reverse-tools/cfuncs.py`.
 
@@ -16,18 +18,22 @@ spiegava da sola il grosso del disallineamento.
 
 **b43 e brcmsmac hanno la stessa distinzione fra init a freddo e init a caldo.**
 `dev->phy.do_full_init` in b43 è `pi->phy_init_por` in brcmsmac, stessa
-semantica: vero all'attach (`main.c:5462`) e dopo `b43_phy_exit()`, azzerato da
+semantica: vero all'attach (`main.c:5407`) e dopo `b43_phy_exit()`, azzerato da
 `b43_phy_init()` appena `ops->init()` è andata bene (`phy_common.c:105`). Dietro
 quel flag stanno, in b43, il download delle tabelle statiche (quattro siti in
 `tables_nphy.c`, con i commenti `/* Static tables */` e `/* Volatile tables */`
-già scritti) e `b43_radio_2057_rcal`/`rccal` (`phy_n.c:1053`). In brcmsmac stanno
-`wlc_phy_static_table_download_nphy` (`phy_n.c:14206`) e gli stessi rcal.
+già scritti) e `b43_radio_2057_rcal`/`rccal` (`phy_n.c:1026`). In brcmsmac sta
+`wlc_phy_static_table_download_nphy` (`phy_n.c:14178`), chiamata dietro il
+`phy_init_por` di `wlc_phy_tbl_init_nphy` (`phy_n.c:14206`), e gli stessi rcal.
 
 **La cattura non è un init a freddo.** `PHY.WR addr=0x72 val=0x2800`, l'apertura
 della tabella 10 con cui il download statico comincia, non compare in nessuno dei
-due init dei 70796 record; le aperture di tabella sono 950 e 1226 contro le ~2400
-di un download completo. Quando il tracer è partito, il driver del vendore aveva
-già fatto il suo init a freddo.
+due init dei 70796 record — zero occorrenze qui, due in `full-init-ch1-bw20`. È
+quel marcatore a distinguerli, **non il numero di aperture di tabella**: sono 950
+e 953 nei due init a caldo e 935 nella parte contigua dell'init a freddo, perché
+il download statico apre poco e scrive in bulk. Si vede nelle scritture, non nelle
+aperture: 47566 `PHY.WR` nella cattura a freddo contro 38616 qui. Quando il tracer
+è partito, il driver del vendore aveva già fatto il suo init a freddo.
 
 **L'harness invece lo modellava sempre a freddo**, con `do_full_init = true`
 inchiodato in `main.c`. Da qui 8320 op di prefisso che nella cattura non ci sono e
@@ -56,8 +62,7 @@ blocchi inseriti. I blocchi sono tre.
 ### Il primo blocco non era del core: erano due stub vuoti nostri
 
 Le prime ~84 op del vendore — AFE `0xa6 0x8f 0xa7 0xa5`, init table del radio,
-primo cambio canale — le avevo attribuite "al core di b43, che l'harness non
-compila". Sbagliato: sono tutte in codice **già compilato**, e l'harness non le
+primo cambio canale — sono tutte in codice **già compilato**, e l'harness non le
 chiamava.
 
 `b43_phy_init()` (`phy_common.c:83`) fa, in quest'ordine:
@@ -84,21 +89,40 @@ Sistemati, il trace ora apre con le stesse quattro scritture AFE della cattura
 
 | dove | op | di chi | cosa |
 |---|---|---|---|
-| init del radio | **~300** | solo port | b43 scrive 488 op su 412 registri radio distinti in tutto l'init; il vendore, in tutto il primo init, ne scrive **193 su 90 distinti** |
+| init del radio | ~300 | solo port | b43 scrive 488 op su 412 registri radio; il vendore 193 su 90. **Non e' un buco**: le 412 voci sono deliberate e lo stub da 54 impianta il radio, vedi `gap-inventory.md` 4h |
 | tabelle PAPD | — | **chiuso da `0012`** | erano 520 op nel posto sbagliato: `0004` le scriveva in `b43_phy_initn`, ora stanno nella cal come nella cattura |
 | v@578-751 | 173 | solo vendore | tabella 8, object memory, 45 letture PHY: non attribuito |
 
-Sul primo, prima una correzione a me stesso: la prima volta l'avevo misurato su
-una finestra di record (60-400) che **mescola fasi diverse** — l'upload della
-tabella di init, il `radio_2057_setup` e il primo cambio canale — e da lì avevo
-scritto "70 registri contro 412, tutti sottoinsieme". Il "sottoinsieme" era
-sbagliato: 32 di quei 70 hanno un valore **diverso** da quello della tabella di
-b43, che è la firma di scritture che vengono da un'altra fase, non dall'upload.
+Sul primo, il conto va fatto **per fase**: una finestra di record scelta a occhio
+come 60-400 mescola l'upload della tabella di init, il `radio_2057_setup` e il primo
+cambio canale, e ne esce che 32 registri su 70 hanno un valore diverso da quello
+della tabella — la firma di scritture che vengono da un'altra fase.
 
 Il numero che regge è quello su tutto l'init: 193 scritture radio su 90 registri
 distinti dal lato vendore, 488 su 412 dal lato port. La conclusione qualitativa
 non cambia — b43 scrive molti più registri radio — ma il conto esatto di quali e
 in quale fase è da rifare per fase, non su una finestra a occhio.
+
+### L'init del radio, contato per fase
+
+Delimitando la fase come si deve — tutto ciò che sta **prima del primo
+`CHANSPEC`**, cioè #132, che è dove `b43_switch_channel()` prende il posto
+dell'init del radio — il conto è pulito e dice una cosa sola:
+
+| | valore |
+|---|---|
+| scritture radio del vendore nella fase | **45** |
+| registri distinti | **43** |
+| di cui col valore *identico* alla tabella di b43 | **41** |
+| col valore diverso | 4 (`0x164`, `0x2e`, `0xce`, `0x11`) |
+| registri fuori dalla tabella di b43 | **0** |
+| voci che b43 scrive | **412** |
+
+Quindi non è una fase diversa e non sono registri diversi: è **lo stesso
+sottoinsieme**, 43 registri su 412, con 41 valori su 45 identici. b43 ne scrive
+412. I 4 valori diversi sono la prossima cosa da guardare — `RAD.MOD` esiste nella
+cattura, quindi almeno alcuni potrebbero essere read-modify-write resi come WR dal
+decoder, e va verificato prima di trarne conclusioni.
 
 E non è un artefatto del tracer. `PHY.ARRW` è solo un marcatore e le op
 che ne discendono sono tutte nel trace (`docs/blob-inventory.md`), e comunque
@@ -126,8 +150,8 @@ la 1 non basta, serve la 2.
 
 ## Il flusso, fase per fase
 
-`b43_phy_initn()` sta in `phy_n.c:6130-6345`, `wlc_phy_init_nphy()` in
-`brcmsmac/phy/phy_n.c:19197-19548`. Le due funzioni hanno la **stessa forma**: b43
+`b43_phy_initn()` sta in `phy_n.c:5976-6186`, `wlc_phy_init_nphy()` in
+`brcmsmac/phy/phy_n.c:19196-19548`. Le due funzioni hanno la **stessa forma**: b43
 è un port di quella, chiamata per chiamata.
 
 | # | fase | b43 | port | cattura | brcmsmac | stato |
@@ -148,7 +172,7 @@ la 1 non basta, serve la 2.
 | 14 | tx power ctl setup | `b43_nphy_tx_power_ctl_setup` | | | `wlc_phy_txpwrctrl_pwr_setup_nphy` | ok |
 | 15 | tx gain table + **compensazione PAPD** | `b43_nphy_tx_gain_table_upload` | 9938 | #2688-#2703 | `wlc_phy_get_ipa_gaintbl_nphy` | **`0003`**, 16/16 |
 | 16 | cal RSSI | `b43_nphy_rssi_cal` | 11069 | fino a #3719 | `wlc_phy_rssi_cal_nphy` | polling sfasato, 4bis/4ter |
-| 17 | coefficienti RSSI | `b43_nphy_scale_offset_rssi` | 11417 | #3723-#3740 | idem | 1/16 |
+| 17 | coefficienti RSSI | `b43_nphy_scale_offset_rssi` | 11417 | #3723-#3740 | idem | 11/16 |
 | 18 | cal TX IQ/LO | `b43_nphy_cal_tx_iq_lo` | solo `initcal` | #8527-#8638 | `wlc_phy_cal_txiqlo_nphy` | **non nel flow `init`** |
 | 19 | **cal PAPD** | *non esiste* | — | #10962-#14092 | `wlc_phy_a4` | `papd-cal-map.md` |
 | 20 | regione non attribuita | — | — | #14093-#15920 | ? | non attribuita |
@@ -223,3 +247,77 @@ quel punto, quindi con la 1 l'init non si allinea mai. Serve la 2 — spostarle
 nella cal e rendere la cal raggiungibile dall'init — e il fatto che sia anche
 l'unica strada verso la cal PAPD non è una coincidenza: è lo stesso ramo
 `perical`.
+
+## Quanto siamo lontani dalla run del vendore, per regione
+
+    ./phase_compare.py --vendor router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded \
+                       --global-run 132 26100 --flow full --channel 6
+
+| regione | record | op | appaiate | |
+|---|---|---|---|---|
+| init vero e proprio | #132-10961 | 9692 | 3488 | 36% |
+| cal PAPD (`a4`) | #10962-14092 | 2662 | 694 | 26% |
+| non attribuita | #14093-15920 | 1698 | 84 | 5% |
+| **non attribuita, upload di tabella** | #15921-22246 | 5812 | 514 | **9%** |
+| seconda cal RSSI | #22247-23771 | 960 | **0** | **0%** |
+| coda | #23772-26100 | 2127 | 618 | 29% |
+
+Totale: 5398 op su 22951, il 24%. Col flow `init` da solo sono 4425, il 19%.
+
+Le percentuali sono **un limite inferiore**: il confronto è posizionale, quindi
+un'op presente con lo stesso valore ma in un altro punto conta come non appaiata,
+ed è la ragione per cui esistono le finestre con `equiv='multiset'`.
+
+Le finestre verdi e il 36% dell'init non sono in contraddizione: le finestre
+coprono fasi precise, e nell'init c'è molto che non sta in nessuna finestra.
+
+La regione da guardare è **#15921-22246**, la più grande e la meno esplorata, più
+grande della cal PAPD. È dominata da upload di tabella: 93 `TBL.WR` il cui payload
+sono ~5000 op sui registri `0x72`/`0x73`/`0x74`, sulle tabelle 15 (IQLOCAL), 26 e
+27 (gain e potenza del tx power control) e 17. Più `0x129` 118 volte. Nessuno l'ha
+ancora attribuita.
+
+E la seconda cal RSSI è a **zero**: di quelle 960 op il port non ne azzecca
+nessuna, non una parte. È il tipo di numero che dice "questa fase non esiste", non
+"questa fase è sfasata".
+
+### Perche' la ripartizione va presa da `--global-run`
+
+`CMP.load_vendor()` scarta le righe di bookkeeping, le ombre delle `SI.COREREG` e le
+ombre read-modify-write, quindi **l'indice nella lista di op non e' il numero di
+record**. Ricostruire la corrispondenza a mano da' un allineamento che va alla deriva:
+fino a 230 op di scarto per regione, con la seconda cal RSSI che risulta al 5% invece
+che a zero.
+
+`compare.py` ha `Op`, una sottoclasse di `str` che si porta dietro il numero di record
+attraverso tutta la normalizzazione, ed e' `--global-run` a stampare la tabella. Il
+totale non dipende da quella corrispondenza, la ripartizione si'.
+
+## L'init a freddo, ora confrontabile
+
+`router-data/dsl-3580l/full-init-ch1-bw20.decoded` e' un init a freddo, quindi il
+flow `initpor` dell'harness ha finalmente un riferimento. La parte utilizzabile della
+cattura sono i record **#2-#32769**, contigui, prima del buco da overflow.
+
+    cd test && ./nphy_trace initpor dsl3580l 1 > /tmp/por.out
+    # confronto con difflib fra /tmp/por.out e i record #2-#32769
+
+| | |
+|---|---|
+| op del vendore, #2-#32769 | 32056 |
+| op del flow `initpor` | 13468 |
+| in comune | **7200 (22%)** in 330 blocchi |
+
+E il **download delle tabelle statiche combacia**, che e' la cosa che prima non aveva
+alcun riscontro: run di **1424** e **806** op consecutive aperte da
+`PHY.WR addr=0x72 val=0x3400` e `val=0x4800`, piu' 258 su `val=0x6840`. Sono le
+tabelle N-PHY scritte una dietro l'altra con gli stessi valori nello stesso ordine.
+
+Il 22% complessivo non va letto come "il port sbaglia il 78%": il vendore in un init
+a freddo emette 32056 op contro le 13468 del port, e la differenza sono in buona parte
+fasi che b43 non ha — la cal PAPD, `rcal`/`rccal`, e la cal RSSI che nel port non gira.
+Il confronto per fase resta quello delle finestre di `phase_compare.py`.
+
+Nota per chi rifa' la misura: le finestre di `phase_compare.py` sono ancorate alla
+cattura `opinit-*`, che e' a caldo. Per confrontare `initpor` serve passare l'altra
+cattura a mano, e una finestra per il download statico non c'e' ancora.

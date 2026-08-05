@@ -2,17 +2,16 @@ From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Fri, 12 Jun 2026 09:38:25 +0000
 Subject: [PATCH] bcma: add host driver for BCM6362 integrated WLAN backplane
 
-The BCM6362 (and the related BCM63268) integrates a 2.4 GHz
-Broadcom WLAN macro on a dedicated AXI/OCP backplane reachable
-through bcma. The boot loader leaves the macro under clock gating
-and reset, and the backplane sits as a big-endian peripheral on
-the big-endian MIPS CPU. The cores bcma needs to gate also lack
-per-core DMP wrappers - their BCMA_IOCTL and BCMA_RESET_CTL
-accesses must be synthesized through a SoC-level control register
-window adjacent to the backplane.
+The BCM6362 (and the related BCM63268) integrates a 2.4 GHz Broadcom WLAN
+macro on a dedicated AXI/OCP backplane reachable through bcma. The boot
+loader leaves the macro under clock gating and reset, and the backplane
+sits as a big-endian peripheral on the big-endian MIPS CPU. The cores bcma
+needs to gate also lack per-core DMP wrappers - their BCMA_IOCTL and
+BCMA_RESET_CTL accesses must be synthesized through a SoC-level control
+register window adjacent to the backplane.
 
-Add drivers/bcma/host_soc_brcm6362_wlan.c, a dedicated bcma host
-driver that:
+Add drivers/bcma/host_soc_brcm6362_wlan.c, a dedicated bcma host driver
+that:
 
   - Maps the ChipCommon block and the WLAN control window from
     the DT "ccb" and "wlan-ctrl" reg names.
@@ -28,12 +27,12 @@ driver that:
     during scan.
 
 The driver registers itself from bcma_modinit() via the
-bcma_host_soc_brcm6362_wlan_register_driver() hook, matching the
-pattern used by host_pci and host_soc. The new file is linked
-into bcma.ko; no separate module is created.
+bcma_host_soc_brcm6362_wlan_register_driver() hook, matching the pattern
+used by host_pci and host_soc. The new file is linked into bcma.ko; no
+separate module is created.
 
-The driver matches on the new "brcm,bcm6362-wlan-bus-axi" DT
-compatible, whose binding is added by the following patch. The generic bcma_host_soc
+The driver matches on the new "brcm,bcm6362-wlan-bus-axi" DT compatible,
+whose binding is added by the following patch. The generic bcma_host_soc
 driver is unchanged and continues to serve the BCM47xx family.
 
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>

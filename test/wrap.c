@@ -67,23 +67,51 @@ struct plan {
 	enum plan_kind kind;
 	u16 addr;
 	const u16 *vals;
+	const u32 *recs;	/* il record della cattura da cui viene ogni valore */
 	int cap;
 	int iter;
+	int skipped;		/* entry saltate perche' precedono il cursore */
+	int misses;		/* read senza nessuna entry dal cursore in poi */
 };
+
+/* Cursore sul numero di record della cattura. Le read del port sono una
+ * SOTTOSEQUENZA di quelle del vendore -- il port ne fa meno, non altre -- quindi
+ * l'ordine globale e' l'informazione che riallinea. Con un contatore per
+ * indirizzo basta una read in meno prima di una fase per sfasare tutti i valori
+ * di quella fase.
+ */
+static u32 plan_pos;
+
+/* B43_TEST_PLANDBG=1 stampa ogni hit e ogni miss con il record servito e il
+ * cursore: e' il solo modo di vedere quale read porta il cursore avanti.
+ */
+static int plan_dbg = -1;
+
+
+static const char *plan_kind_name(enum plan_kind k)
+{
+	static const char *n[] = { "PHY", "RAD", "MMIO" };
+
+	return n[k];
+}
 
 #define MAX_PLANS 1024
 static struct plan plans[MAX_PLANS];
 static int nr_plans;
 
-static void plan_add(enum plan_kind kind, u16 addr, const u16 *vals, int cap)
+static void plan_add(enum plan_kind kind, u16 addr, const u16 *vals,
+		     const u32 *recs, int cap)
 {
 	int i;
 
 	for (i = 0; i < nr_plans; i++) {
 		if (plans[i].kind == kind && plans[i].addr == addr) {
 			plans[i].vals = vals;
+			plans[i].recs = recs;
 			plans[i].cap = cap;
 			plans[i].iter = 0;
+			plans[i].skipped = 0;
+			plans[i].misses = 0;
 			return;
 		}
 	}
@@ -91,27 +119,28 @@ static void plan_add(enum plan_kind kind, u16 addr, const u16 *vals, int cap)
 		b43_test_log("ERR", "troppi piani di lettura");
 		return;
 	}
-	plans[nr_plans++] = (struct plan){ kind, addr, vals, cap, 0 };
+	plans[nr_plans++] = (struct plan){ kind, addr, vals, recs, cap, 0, 0, 0 };
 }
 
-void b43_test_plan_phy_reads(u16 addr, const u16 *v, int cap)
+void b43_test_plan_phy_reads(u16 addr, const u16 *v, const u32 *r, int cap)
 {
-	plan_add(PLAN_PHY, addr, v, cap);
+	plan_add(PLAN_PHY, addr, v, r, cap);
 }
 
-void b43_test_plan_radio_reads(u16 addr, const u16 *v, int cap)
+void b43_test_plan_radio_reads(u16 addr, const u16 *v, const u32 *r, int cap)
 {
-	plan_add(PLAN_RADIO, addr, v, cap);
+	plan_add(PLAN_RADIO, addr, v, r, cap);
 }
 
-void b43_test_plan_mmio_reads(u16 addr, const u16 *v, int cap)
+void b43_test_plan_mmio_reads(u16 addr, const u16 *v, const u32 *r, int cap)
 {
-	plan_add(PLAN_MMIO, addr, v, cap);
+	plan_add(PLAN_MMIO, addr, v, r, cap);
 }
 
 void b43_test_plans_reset(void)
 {
 	nr_plans = 0;
+	plan_pos = 0;
 }
 
 void b43_test_plans_report(FILE *f)
@@ -120,9 +149,11 @@ void b43_test_plans_report(FILE *f)
 	int i;
 
 	for (i = 0; i < nr_plans; i++)
-		fprintf(f, "piano %-4s 0x%04x: consumati %d/%d\n",
+		fprintf(f, "piano %-4s 0x%04x: consumati %d/%d, saltate %d, "
+			"fuori posizione %d\n",
 			names[plans[i].kind], plans[i].addr,
-			plans[i].iter, plans[i].cap);
+			plans[i].iter, plans[i].cap, plans[i].skipped,
+			plans[i].misses);
 }
 
 /* Ritorna true e riempie val se un piano copre questo indirizzo. */
@@ -130,12 +161,41 @@ static bool plan_get(enum plan_kind kind, u16 addr, u16 *val)
 {
 	int i;
 
+	if (plan_dbg < 0)
+		plan_dbg = getenv("B43_TEST_PLANDBG") ? 1 : 0;
+
 	for (i = 0; i < nr_plans; i++) {
+		int j;
+
 		if (plans[i].kind != kind || plans[i].addr != addr)
 			continue;
-		*val = plans[i].iter < plans[i].cap ?
-			plans[i].vals[plans[i].iter] : 0;
-		plans[i].iter++;
+
+		/* La prima entry che nella cattura viene dal cursore in poi. */
+		for (j = plans[i].iter; j < plans[i].cap; j++)
+			if (plans[i].recs[j] >= plan_pos)
+				break;
+		plans[i].skipped += j - plans[i].iter;
+		plans[i].iter = j;
+		if (j == plans[i].cap) {
+			/* Niente da servire: il mirror e' meno bugiardo di uno
+			 * zero, e il contatore lo rende visibile.
+			 */
+			plans[i].misses++;
+			if (plan_dbg)
+				fprintf(stderr, "planmiss %s 0x%04x cursore %u "
+					"ultima %u\n", plan_kind_name(kind), addr,
+					plan_pos,
+					plans[i].cap ?
+					plans[i].recs[plans[i].cap - 1] : 0);
+			return false;
+		}
+		*val = plans[i].vals[j];
+		if (plan_dbg)
+			fprintf(stderr, "planhit %s 0x%04x rec %u cursore %u\n",
+				plan_kind_name(kind), addr, plans[i].recs[j],
+				plan_pos);
+		plan_pos = plans[i].recs[j] + 1;
+		plans[i].iter = j + 1;
 		return true;
 	}
 	return false;

@@ -36,7 +36,7 @@ TABLE_PORT = {0x72, 0x73, 0x74}
 
 def collect(path, lo, hi, max_len, skip=()):
     pending = {}          # seq del record di read -> (kind, addr)
-    plans = OrderedDict()  # (kind, addr) -> [valori]
+    plans = OrderedDict()  # (kind, addr) -> [(record, valore)]
     reads = 0
     matched = 0
 
@@ -75,7 +75,7 @@ def collect(path, lo, hi, max_len, skip=()):
             matched += 1
             vals = plans.setdefault(key, [])
             if len(vals) < max_len:
-                vals.append(val & 0xFFFF)
+                vals.append((ref, val & 0xFFFF))
 
     return plans, reads, matched
 
@@ -89,8 +89,11 @@ def emit(plans, name, source, reads, matched, out):
       ' *   read con RETVAL appaiato: %d su %d\n'
       ' *   indirizzi con un piano: %d\n'
       ' *\n'
-      ' * Ogni array e\' la sequenza di valori che l\'hardware ha restituito per\n'
-      ' * quell\'indirizzo, nell\'ordine in cui e\' stato letto nella cattura.\n'
+      ' * Per ogni indirizzo, i valori che l\'hardware ha restituito e il numero di\n'
+      ' * record della cattura da cui ciascuno viene. Il numero di record serve a\n'
+      ' * servire le read del port in ordine di cattura invece che a srotolare una\n'
+      ' * coda: il port ne fa meno del vendore, e senza la posizione ogni fase che\n'
+      ' * dipende da una lettura calcola su valori di un\'altra fase.\n'
       ' */\n' % (source, matched, reads, len(plans)))
     p('#ifndef _READPLANS_%s_H\n#define _READPLANS_%s_H\n\n'
       % (name.upper(), name.upper()))
@@ -101,8 +104,12 @@ def emit(plans, name, source, reads, matched, out):
         sym = 'plan_%s_%s_%03x' % (name, kind, addr)
         names[(kind, addr)] = sym
         p('static const u16 %s[] = {' % sym)
-        for j, v in enumerate(vals):
+        for j, (_, v) in enumerate(vals):
             p('%s0x%04x,' % ('\n\t' if j % 8 == 0 else ' ', v))
+        p('\n};\n')
+        p('static const u32 %s_rec[] = {' % sym)
+        for j, (r, _) in enumerate(vals):
+            p('%s%d,' % ('\n\t' if j % 8 == 0 else ' ', r))
         p('\n};\n')
 
     p('\nstatic inline void b43_test_load_readplans(void)\n{\n')
@@ -110,7 +117,8 @@ def emit(plans, name, source, reads, matched, out):
         fn = {'phy': 'b43_test_plan_phy_reads',
               'radio': 'b43_test_plan_radio_reads',
               'mmio': 'b43_test_plan_mmio_reads'}[kind]
-        p('\t%s(0x%04x, %s, ARRAY_SIZE_TEST(%s));\n' % (fn, addr, sym, sym))
+        p('\t%s(0x%04x, %s, %s_rec, ARRAY_SIZE_TEST(%s));\n'
+          % (fn, addr, sym, sym, sym))
     p('}\n\n#endif\n')
 
 

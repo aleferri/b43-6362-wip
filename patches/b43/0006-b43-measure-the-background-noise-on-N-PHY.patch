@@ -1,4 +1,4 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: measure the background noise on N-PHY
 
@@ -23,7 +23,7 @@ path for every N-PHY revision, and the capture only covers rev 8. The
 change is still bounded for the untested ones, since what they report today
 is a value that is never measured at all.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/b43.h
 +++ b/drivers/net/wireless/broadcom/b43/b43.h

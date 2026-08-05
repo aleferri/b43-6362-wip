@@ -1,35 +1,43 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: initialise the PAPD tables from the calibration, not from
  PHY init
 
 The scalar and epsilon tables the PAPD engine reads were being written from
-b43_phy_initn(). That is not where the hardware's own driver writes them. In an
-MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057 rev 8), the
-scalar table appears exactly twice in 70796 records, once per interface init, and
-both times inside the PAPD calibration - never during the PHY init. Same for the
-two epsilon tables.
+b43_phy_initn(). That is not where the hardware's own driver writes them.
+In an MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057
+rev 8), the scalar table appears exactly twice in 70796 records, once per
+interface init, and both times inside the PAPD calibration - never during
+the PHY init. Same for the two epsilon tables.
 
 brcmsmac agrees: wlc_phy_a4(), its PAPD calibration, writes all four, and
 wlc_phy_init_nphy() writes none of them.
 
 So put them behind a b43_nphy_papd_cal(), which is where the rest of the
 calibration will go, and call it where brcmsmac calls wlc_phy_a4(): from
-wlc_phy_cal_perical_nphy_run()'s position between the TX IQ/LO and the RX IQ
-calibrations, and from the periodic-calibration branch of the init, which is the
-one b43 takes by default since b43_nphy_op_prepare_structs() sets perical to 2 -
-PHY_PERICAL_MPHASE - and which was an empty statement with a TODO.
+wlc_phy_cal_perical_nphy_run()'s position between the TX IQ/LO and the RX
+IQ calibrations, and from the periodic-calibration branch of the init,
+which is the one b43 takes by default since b43_nphy_op_prepare_structs()
+sets perical to 2 - PHY_PERICAL_MPHASE - and which was an empty statement
+with a TODO.
 
-The revision test moves into the new function, so nothing changes for any radio
-other than 2057 rev 8, and nothing changes for a non-IPA board.
+The revision test moves into the new function, so nothing changes for any
+radio other than 2057 rev 8, and nothing changes for a non-IPA board.
 
-Against the capture this is worth 1030 more operations in common over the whole
-init, 3404 to 4434, and the offset between the two sequences drops from 738 to
-218 because the block is no longer in the wrong place. The scalar tables now match
-for 260 consecutive operations starting at the capture's #10966, inside the
-calibration, where before they matched nothing.
+Against the capture this is worth 1030 more operations in common over the
+whole init, 3404 to 4434, and the offset between the two sequences drops
+from 738 to 218 because the block is no longer in the wrong place. The
+scalar tables now match for 260 consecutive operations starting at the
+capture's #10966, inside the calibration, where before they matched
+nothing.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Verified: records #10966-#11740, from "TBL.WR   id=0x0020 off=0x0000 len=64"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py, windows papd-tables
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c

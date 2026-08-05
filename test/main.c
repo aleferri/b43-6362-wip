@@ -256,6 +256,18 @@ static int flow_init(void)
 	fprintf(stderr, "--- init a freddo fatto e non tracciato, ora quello "
 			"che la cattura contiene ---\n");
 
+	/* La cattura e' un init a caldo che rifa' le calibrazioni: legge e
+	 * ricalcola i coefficienti RSSI invece di riscriverli dalla cache. Il
+	 * primo init qui sopra lascia le chanspec di cal valorizzate, e con
+	 * quelle il secondo init prende la strada del restore, che scrive la
+	 * cache del primo. Azzerarle e' cio' che rende il secondo init lo stesso
+	 * init che la cattura contiene.
+	 */
+	dev.phy.n->rssical_chanspec_2G.center_freq = 0;
+	dev.phy.n->rssical_chanspec_5G.center_freq = 0;
+	dev.phy.n->iqcal_chanspec_2G.center_freq = 0;
+	dev.phy.n->iqcal_chanspec_5G.center_freq = 0;
+
 	b43_test_plans_reset();
 	if (!getenv("B43_TEST_NOPLANS"))
 		b43_test_load_readplans();

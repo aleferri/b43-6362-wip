@@ -232,6 +232,20 @@ def drop_rmw_shadows(ops):
     return out
 
 
+class Op(str):
+    """Un'op che si porta dietro il numero di record da cui viene.
+
+    E' una str a tutti gli effetti -- i filtri la riappendono cosi' com'e' e
+    difflib la confronta per uguaglianza -- quindi non cambia niente per chi la
+    usa. Serve solo per poter dire, DOPO, da quale record veniva un'op: fra il
+    file e la lista finale ci sono drop_shadow_ops e drop_rmw_shadows, che ne
+    scartano parecchie, quindi l'indice nella lista non e' il numero di record e
+    ricostruire la corrispondenza a posteriori vuol dire sbagliarla.
+    """
+
+    __slots__ = ('ep',)
+
+
 def load_vendor(path, ep_range):
     lo, hi = ep_range or (0, 10**9)
     out = []
@@ -244,7 +258,9 @@ def load_vendor(path, ep_range):
             continue
         if VENDOR_BOOKKEEPING.match(m.group(1).strip()):
             continue
-        out.append(normalize_op(m.group(1)))
+        op = Op(normalize_op(m.group(1)))
+        op.ep = ep
+        out.append(op)
     return drop_rmw_shadows(drop_shadow_ops(out))
 
 def load_test(path):

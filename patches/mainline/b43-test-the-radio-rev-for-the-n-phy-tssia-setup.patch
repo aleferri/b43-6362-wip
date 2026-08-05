@@ -1,0 +1,53 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Tue, 4 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: gate the N-PHY TSSIA setup on the radio rev, not the PHY rev
+
+Both TSSIA writes in b43_nphy_ipa_internal_tssi_setup() sit inside a
+dev->phy.rev >= 7 branch and are guarded by phy->rev != 5, which can
+therefore never be false. brcmsmac guards them on pi->pubpi.radiorev != 5,
+and radio 2057 is only reached from phy rev 7 upwards, so the two revisions
+were transposed; b43 gets it right elsewhere, in b43_radio_2057_setup().
+
+In the 5 GHz branch that also collapsed two nested conditions into one.
+brcmsmac decides whether to write from the radio revision and which value
+to write from the PHY revision, 0x31 on phy rev 7 and 0x1 otherwise, so as
+written b43 can never produce 0x31 there.
+
+Untested: this changes what a radio 2057 rev 5 board programs, and what a
+phy rev 7 board programs in 5 GHz, and I have neither. It is just what the
+brcmsmac driver does.
+
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n17071
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n17089
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -3857,7 +3857,7 @@
+ 			if (b43_current_band(dev->wl) == NL80211_BAND_2GHZ) {
+ 				b43_radio_write(dev, r + 0x5, 0x5);
+ 				b43_radio_write(dev, r + 0x9, 0xE);
+-				if (phy->rev != 5)
++				if (phy->radio_rev != 5)
+ 					b43_radio_write(dev, r + 0xA, 0);
+ 				if (phy->rev != 7)
+ 					b43_radio_write(dev, r + 0xB, 1);
+@@ -3867,10 +3867,13 @@
+ 				b43_radio_write(dev, r + 0x5, 0x9);
+ 				b43_radio_write(dev, r + 0x9, 0xC);
+ 				b43_radio_write(dev, r + 0xB, 0x0);
+-				if (phy->rev != 5)
+-					b43_radio_write(dev, r + 0xA, 1);
+-				else
+-					b43_radio_write(dev, r + 0xA, 0x31);
++				if (phy->radio_rev != 5) {
++					if (phy->rev != 7)
++						b43_radio_write(dev, r + 0xA, 1);
++					else
++						b43_radio_write(dev, r + 0xA,
++								0x31);
++				}
+ 			}
+ 			b43_radio_write(dev, r + 0x6, 0);
+ 			b43_radio_write(dev, r + 0x7, 0);

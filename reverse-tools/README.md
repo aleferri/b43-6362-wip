@@ -12,7 +12,8 @@ decodifica delle tracce del driver `wl`.
   `docs/gap-inventory.md`. Dà indizi: una voce `assente` può essere legittima,
   va letta a mano.
 - **brcmsmac_xref.py** — elenca le funzioni brcmsmac che discriminano radiorev 8
-  o `NREV_IS(phy_rev, 8)`, con la riga di partenza. Genera
+  o `NREV_IS(phy_rev, 8)`, con la riga del primo match dentro la funzione (non
+  quella in cui la funzione comincia). Genera
   `docs/brcmsmac-xref.md`.
 - **cfuncs.py** — localizzazione riga→funzione per sorgenti in stile kernel,
   usata dai due sopra. Non è un parser C: euristica a profondità di graffe.
@@ -55,14 +56,6 @@ decodifica delle tracce del driver `wl`.
 Entrambe sono tarate su N-PHY: vedi la sezione "Riposizionamento su N-PHY" nella
 loro README per l'elenco delle differenze rispetto alla copia AC-PHY di
 `b43-ac-wip`, tutte verificate sul blob di questa board.
-
-- **gen_syms.py** — costruisce la riga `syms=` per l'insmod da un
-  `/proc/kallsyms` copiato dal device. La lista `WANTED` deve combaciare con gli
-  `hooks[]` del modulo: se divergono, il tracer ha buchi silenziosi.
-- **csanity.py** — controlli su file C senza compilatore (commenti non chiusi,
-  parentesi sbilanciate, dichiarazione dopo statement per i target C90). Da
-  passare sui `wl_diag.c` **prima** di buildare sul router. Non usarlo sul
-  codice destinato a mainline: là la regola C90 segnalerebbe casi legittimi.
 
 ## Pipeline di decodifica
 

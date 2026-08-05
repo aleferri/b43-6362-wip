@@ -1,4 +1,4 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: program the PAPD epsilon offset on radio 2057 rev 8
 
@@ -20,7 +20,14 @@ The pad gain delta table is the one the previous patches already carry, so
 the formula is evaluated rather than its result hardcoded: when the gain
 search arrives, only the index has to come from it.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+
+Verified: records #286-#288, from "PHY.MOD  addr=0x0298 val=0xf400 mask=0xff80"
+Verified: records #13842-#13847, from "PHY.MOD  addr=0x0298 val=0xf400 mask=0xff80"
+Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/phy_n.h
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.h

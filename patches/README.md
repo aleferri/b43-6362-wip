@@ -1,43 +1,27 @@
 # patches
 
-- `bcma/` — la serie per l'enumerazione del backplane WLAN del 6362, destinata a
-  mainline. `0001` e `0002` sono le patch già funzionanti sul target bmips del
-  fork OpenWrt (là numerate 801 e 803), qui con il placeholder `__DIFFSTAT__`
-  rimosso e il rimando al binding corretto; `0003` è il binding DT, che alla
-  serie mancava e che **non è ancora passato sotto `dt_binding_check`**.
-- `openwrt/` — fix sul target bmips che non hanno senso upstream.
-- `b43/` — le nuove patch b43, **in quest'ordine**:
-  `0001` gain control per radio 2057 rev 8;
-  `0002` gli offset di potenza corretti (i valori in mainline sbagliano 123 celle
-  su 128, vedi `docs/rf-pwr-offset-rev8.md`);
-  `0003` abilita la compensazione PAPD, che consuma la tabella di `0002` — con i
-  valori vecchi scriverebbe 246 celle su 256 sbagliate;
-  `0004` inizializza le tabelle epsilon e scalare che il motore PAPD legge;
-  `0005` corregge i registri di bias IPA 2 GHz, che erano quelli sbagliati;
-  `0007` marca con un TODO la voce morta della tabella override RF (`0x7b`);
-  `0008` programma le soglie di carrier sense, che nessuno scriveva;
-  `0009` calcola l'offset epsilon del PAPD, che b43 scriveva a zero (24 dB di
-  differenza) — dopo `0002`, da cui prende la tabella;
-  `0010` sistema la generazione della tabella dei campioni, che non produceva un
-  tono: passo di fase troncato a zero in una `u16` e componente in fase buttata
-  via da una precedenza sbagliata. **Non è gateata su questo radio**: è un
-  difetto di mainline su ogni N-PHY, e riguarda tutte le calibrazioni che suonano
-  campioni;
-  `0011` scrive i dieci registri 5 GHz che la tabella di canale 2 GHz non
-  portava, intercalati come nella cattura — gateata su radio rev 8;
-  `0012` sposta l'inizializzazione delle tabelle PAPD da `b43_phy_initn` alla cal,
-  che e' dove il vendore e brcmsmac la fanno, e ci mette il primo pezzo di
-  `b43_nphy_papd_cal()`;
-  `0006` misura il rumore di fondo su N-PHY, che non veniva misurato affatto —
-  gateata sul tipo di PHY e non sulla revisione, quindi anche lei esce dal
-  recinto del nostro radio.
-  Tutte riproducono la cattura nell'harness (`test/phase_compare.py`) e
-  **nessuna** ha girato su hardware. Le sette già merged sono in
-  `docs/upstream-status.md`.
+Ogni patch porta la propria **provenienza in trailer**, con `Link:` per ogni URL,
+uno per riga, che e' il nome che il tooling del kernel conosce:
 
-`0010` non porta un `Fixes:`: il tree si prende con `--depth 1`
-(`scripts/fetch-upstream-state.sh`), quindi non c'è la storia da cui ricavare lo
-sha del commit che ha introdotto i due refusi. Va aggiunto prima di mandarla.
+    Link: https://git.kernel.org/.../brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23018
+    Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/router-data/...decoded
+    Link: https://github.com/aleferri/b43-6362-wip/blob/e916c8a/test/phase_compare.py
 
-Le patch si applicano con `git am`. Non contengono `Fixes:` verso commit non
-merged e non vanno riordinate senza rigenerare i rimandi fra i messaggi.
+Il sorgente del kernel va su **git.kernel.org e pinnato allo sha**: senza `?id=`
+l'URL punta a master e il numero di riga smette di essere quella riga al primo
+commit che tocca il file sopra.
+
+La cattura ha il suo `Link:`, ma **l'intervallo di record e la prima op stanno nel
+corpo**, non in un'ancora: quel file e' 4,4 MB e 70796 righe, GitHub non lo rende e
+`#L8638-L8959` finisce su un prompt di download. L'op va citata **con la spaziatura
+del file**, non normalizzata come la stampano gli strumenti, o `grep -F` non la
+trova.
+
+`b43/0006` non ha citazioni, e resta senza: misura una cosa che il vendore in quella
+cattura non fa.
+
+`mainline/` sono **due patch separate**, non una serie, per difetti di mainline
+indipendenti da questo hardware: vanno inviate per prime e in due thread distinti,
+vedi `patches/mainline/README.md`. `b43/` e' la serie di questo lavoro, e si applica
+come un blocco; `b43/0010` porta le stesse due modifiche della prima patch mainline
+e uscira' quando quella entra.

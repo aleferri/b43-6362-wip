@@ -1,10 +1,10 @@
-From: Alessio Ferri <alessio.ferri.3012@gmail.com>
+From: Alessio Ferri <alessio.ferri@mythread.it>
 Date: Tue, 4 Aug 2026 00:00:00 +0000
 Subject: [PATCH] b43: mark the unused RF control override field on N-PHY rev 7+
 
 The rev 7+ RF control override table has an entry for field 0x0800, which
-drives PHY registers 0x07B and 0x07E, the RX gain 1 and 2 controls. No
-code path in the driver ever passes that field.
+drives PHY registers 0x07B and 0x07E, the RX gain 1 and 2 controls. No code
+path in the driver ever passes that field.
 
 An MMIO capture of the proprietary wl driver 6.30.102.7 on a BCM6362 shows
 it writing both registers during calibration, twelve times each. What b43
@@ -14,7 +14,11 @@ person does not have to rediscover that the entry is dead.
 
 Comment only.
 
-Signed-off-by: Alessio Ferri <alessio.ferri.3012@gmail.com>
+
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n16165
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
 --- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
 +++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c

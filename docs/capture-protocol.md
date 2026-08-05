@@ -7,12 +7,17 @@ posizionale, è quasi inutile.
 ## Prima di premere insmod
 
 1. `arm=0` (default): il modulo logga solo il piano di patch. Leggerlo. Se un
-   simbolo non è stato risolto, va risolto ora, non dopo.
-2. `gen_syms.py` sul `/proc/kallsyms` copiato dal device costruisce la riga
-   `syms=`. La lista attesa è quella in `docs/blob-inventory.md`: se manca
-   `and_radio_reg` o `or_radio_reg`, quel blob usa nomi diversi e il tracer ha
-   un buco silenzioso.
-3. Annotare versione del blob, board, canale, banda, e se il radio è l'integrato
+   simbolo non è stato risolto, va risolto ora, non dopo. I nomi attesi sono
+   quelli in `docs/blob-inventory.md`: se manca `and_radio_reg` o `or_radio_reg`,
+   quel blob usa nomi diversi e il tracer ha un buco silenzioso.
+2. `insmod wl_diag.ko arm=1` basta: il modulo si cerca i simboli in
+   `/proc/kallsyms` da sé. `syms=` e `klookup=` restano come ripiego se un blob
+   usa nomi che la lista non prevede.
+3. La cattura si legge da **`/proc/wl_diag`**, che esiste appena il modulo è
+   caricato: `cat /proc/wl_diag | nc <host> 5555`. La pipe deve **drenare** prima
+   di far partire la sequenza, non essere solo lanciata: la fifo tiene 32768
+   record e un init a freddo ne emette più del doppio.
+4. Annotare versione del blob, board, canale, banda, e se il radio è l'integrato
    (`0x14e4:0x435f` sul backplane) o una scheda PCIe.
 
 ## Cosa catturare, in che ordine
