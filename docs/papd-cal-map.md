@@ -166,6 +166,86 @@ non due.
 Le finestre `sampleplay-tssi` e `sampleplay-iqlo` di `phase_compare.py` reggono
 il risultato: 322/322 entrambe con la patch, 2/322 la seconda senza.
 
+## Contro quale cattura si verifica, e con che tolleranza
+
+La cal **non si verifica su `opinit-*`**: quella e' un init a caldo e la cattura
+della cal la contiene per intero solo nella **cattura a freddo**,
+`full-init-ch1-bw20.decoded`, nella sua parte contigua `#2-32769`. Misurato:
+3499 read appaiate su 3499, e i piani si generano con
+
+```sh
+./reverse-tools/gen_readplans.py router-data/dsl-3580l/full-init-ch1-bw20.decoded \
+    --range 2 32769 --name full --max-len 512 > test/readplans_full.h
+```
+
+che da' **148 piani**. Il `--max-len 512` non e' opzionale: col default a 64 i
+piani degli indirizzi che una cal rilegge decine di volte si troncano e la cal
+media lo specchio (vedi `test/README.md`).
+
+**Tolleranza sui valori che dipendono da rccal.** Fra un init completo e uno
+parziale i valori di rccal cambiano di poche unita', e si e' visto anche su altri
+device: non e' un difetto del port ne' della cattura. Quindi per le grandezze che
+ne discendono il criterio non e' l'uguaglianza bit per bit ma la **magnitudo**:
+una formula che produce il valore atteso **entro +-2** e' probabilmente la formula
+giusta, e va trattata come tale invece di essere inseguita. L'uguaglianza esatta
+resta il criterio per tutto il resto — tabelle, registri programmati da costanti,
+coefficienti che non passano da rccal.
+
+La cal PAPD nella cattura a freddo comincia a **#18662** (la tabella scalare) e i
+suoi toni sono a #19534 e #21806.
+
+## Il piano per `a2` e `a3`, con i nomi e la dimensione misurata
+
+### I nomi
+
+| brcmsmac | b43 | da dove viene il nome |
+|---|---|---|
+| `wlc_phy_a3_nphy` | `b43_nphy_papd_cal_gain_ctrl()` | dal blob: `wlc_phy_papd_cal_gctrl_nphy`. E' la ricerca dell'indice di gain, **legge** la tabella epsilon in un loop di 20 passi |
+| `wlc_phy_a2_nphy` | `b43_nphy_papd_cal_epsilon()` | **nome nostro, non del vendore**: il blob non la identifica (`blob-inventory.md`). Calcola l'epsilon e lo **scrive** via `set_bbmult`. Va detto nel commento sopra la funzione, o fra sei mesi qualcuno lo cerca in brcmsmac e non lo trova |
+| `wlc_phy_a4` | `b43_nphy_papd_cal()` | il nome che `0012` ha gia' introdotto: resta il livello alto, le due qui sopra ci stanno sotto |
+
+### Quanto e', misurato e non stimato
+
+Le due funzioni sono 279 + 147 righe, e la loro chiusura di dipendenze e'
+**quattordici chiamate distinte**:
+
+| chiamata | quante | equivalente b43 |
+|---|---|---|
+| `mod_phy_reg`, `write_phy_reg`, `read_phy_reg` | 38 | `b43_phy_maskset` / `b43_phy_write` / `b43_phy_read` |
+| `wlc_phy_table_read_nphy`, `_write_nphy` | 4 | `b43_ntab_read_bulk`, `b43_ntab_write_bulk` |
+| `wlc_phy_rfctrl_override_nphy`, `_rev7`, `_1tomany` | 9 | `b43_nphy_rf_ctl_override`, `_rev7`, `_one_to_many` — ci sono tutte e tre |
+| `wlc_phy_get_tx_gain_nphy` | 1 | `b43_nphy_get_tx_gains` |
+| `wlc_phy_ipa_set_bbmult_nphy` | 2 | **da verificare** |
+| `wlc_phy_papd_decode_epsilon` | 2 | **da verificare** |
+| `wlc_phy_a1_nphy` | 2 | **un altro nome offuscato, da identificare** |
+
+Quindi non e' un blocco isolato: poggia quasi tutto su roba che b43 ha. Le
+incognite sono **tre funzioni**. Un pomeriggio di lavoro, e chi riprende non deve
+rifare questa conta.
+
+### L'ordine, e perche' e' questo
+
+1. **Separare i piani di lettura per cattura.** `main.c` ne carica uno solo, da
+   `opinit-*`. Un init a freddo va servito coi valori della cattura a freddo, e
+   `a2`/`a3` si verificano solo la'. Senza questo passo il codice della cal
+   calcola su valori di un'altra cattura e sembra sbagliato quando non lo e'.
+   La modifica e' piccola — il loader dei piani prende il nome dal `--name` di
+   `gen_readplans.py`, e il flow scegle il set — ed e' gia' stata scritta e poi
+   ritirata perche' misurata su un albero senza le patch: **va rimisurata su un
+   controllo giusto**.
+2. **Le finestre su `#18662` in avanti**, contro `full-init-ch1-bw20.decoded`.
+   Il meccanismo `capture=` esiste e funziona (`static-tables`, 1424/1424).
+3. **Poi il codice**, un passo di cal per volta, col criterio del +-2 sui valori
+   che passano da rccal (sezione sopra).
+
+### La regola del controllo
+
+Prima di credere a qualsiasi numero di questa fase: `git -C ~/src/linux diff
+--stat`. Deve dire **27 inserzioni** su `phy_n.c` con `0001..0014` e la patch
+mainline della cal RSSI applicate, e `--global-run 132 26100` sul flow `init`
+deve dare **5953 op su 22951, 26%, 721 blocchi**. Se non torna, l'albero e'
+spoglio e ogni misura della cal e' rumore: e' la trappola 1, e ci si ricasca.
+
 ## Perche' il resto non si porta a pezzi
 
 Il cuore e' `a3_nphy` piu' `a2_nphy` per due core, e non si spezza in parti
