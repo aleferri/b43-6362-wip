@@ -139,8 +139,8 @@ dietro `if (b43_nphy_cal_rx_iq(...) == 0)`, quindi **non viene mai salvata una
 calibrazione** — vale per la sequenza di `0014` come per il ramo `perical != 2`.
 
 Non e' portabile a pezzi come le tabelle: e' un loop guidato dalle letture, come
-`a2`/`a3`. Prima di scriverla serve la mappa della fase, come si e' fatto per la
-cal PAPD in `papd-cal-map.md`.
+`a2`/`a3`. La mappa della fase c'e', fatta come quella della cal PAPD:
+`docs/rxiq-cal-map.md`.
 
 ### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5 — CHIUSA
 
