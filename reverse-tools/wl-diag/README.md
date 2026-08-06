@@ -1,5 +1,42 @@
 # wl-diag — tracer inline-detour per il driver `wl`
 
+## La famiglia `wlc_bmac_*`, che e' dove passano gli accessi al core d11
+
+La famiglia degli accessor e' grande — in brcmsmac sono **66** `brcms_b_*`, che
+sono gli stessi rinominati — e qui se ne agganciavano **dieci**. Le mancanti non
+erano innocue: sono la ragione per cui tre classi di op del port
+risultavano non confrontabili e finivano in deroga in `test/phase_compare.py`.
+Aggiunte sette, con l'op corrispondente:
+
+| accessor | op | perche' serve |
+|---|---|---|
+| `wlc_bmac_read_shm` / `write_shm` / `set_shm` | `SHM.RD` / `SHM.WR` / `SHM.SET` | prendono un offset in **byte** nella regione SHARED, che e' lo stesso livello di `b43_shm_{read,write}16`. Con `write_objmem16` da solo si confrontava un indirizzo di parola con selettore di spazio contro un offset in byte — rumore — e i **677 offset SHM** che il vendore tocca restavano fuori dal confronto |
+| `wlc_bmac_core_phy_clk` | `PHY.CLK` | una delle due deroghe che restavano: finche' non era agganciata, "zero occorrenze" non diceva se venisse chiamata (brcmsmac: `brcms_b_core_phy_clk`, `main.c:722`) |
+| `wlc_bmac_switch_macfreq` | `MAC.FREQ` | l'altra (brcmsmac: `brcms_b_switch_macfreq`, `main.c:2096`) |
+| `wlc_bmac_suspend_mac_and_wait` / `enable_mac` | `MAC.SUSP` / `MAC.EN` | delimitano tutto: la finestra che si misura **finisce col MAC abilitato che trasmette**, e quel confine oggi si indovina |
+
+Il criterio per le prossime: si aggancia l'**accessor**, al livello a cui b43 ha
+la sua API. Dove l'accesso non passa da un accessor resta non osservabile, e la
+deroga in `test/phase_compare.py` si dichiara contro quello: `psm_phy_hdr_param`
+(0x492) in brcmsmac si scrive con un `bcma_write16` diretto dentro
+`wlc_phy_chanspec_nphy_setup`, e un tracer che aggancia funzioni non lo vede.
+
+## Il perimetro, che non e' una nota di stile
+
+Qui si agganciano **accessor**: funzioni che leggono e scrivono registri e memoria
+condivisa, cioe' l'interfaccia verso l'hardware. Quello che ne esce e' una traccia
+di cosa fa il chip, e il comportamento si ricostruisce a posteriori da quella.
+
+Per un giro c'e' stata una variante che marcava l'ingresso di sette funzioni del
+PHY, comoda per delimitare le fasi, ed e' stata **togliere di proposito**: marcare
+le funzioni interne di un driver di terzi produce una mappa della sua struttura,
+che e' una cosa diversa dall'osservare l'hardware e molto piu' facile da
+contestare.
+Se un confine di fase serve, si ricava dalle op degli accessor — e con
+`MAC.SUSP`/`MAC.EN` adesso ce n'e' uno esplicito dove prima si indovinava.
+
+Vale solo per **catture nuove**: quelle esistenti non li guadagnano.
+
 > **Quale delle due directory.** `wl-diag-2630/` e' per il kernel 2.6.30 della
 > DSL-3580L: coda a ring manuale, `pr_warn` via shim, niente `raw_spinlock`, e la
 > cattura si legge da `/proc/wl_diag`. `wl-diag/` vuole **>= 2.6.33** (kfifo

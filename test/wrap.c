@@ -146,8 +146,22 @@ void b43_test_plan_mmio_reads(u16 addr, const u16 *v, const u32 *r, int cap)
 
 void b43_test_plans_reset(void)
 {
+	const char *from = getenv("B43_TEST_PLAN_FROM");
+
 	nr_plans = 0;
-	plan_pos = 0;
+	/* Il cursore parte da dove dice B43_TEST_PLAN_FROM, cioe' dal primo record
+	 * della regione sotto misura.
+	 *
+	 * Serve perche' il cursore e' uno, globale e monotono: una sola read che il
+	 * port fa dove il vendore non la fa lo porta in avanti di migliaia di
+	 * record, e da li' tutto quello che il vendore ha letto prima diventa
+	 * irraggiungibile. Misurato sulla run intera: 593 hit contro 1815 miss, e
+	 * il primo hit e' PHY 0x7a servito dal record 14999. Dentro una regione
+	 * contigua il problema non c'e', perche' l'ordine delle read e' lo stesso:
+	 * posizionare il cursore all'ingresso della regione e' quello che rende i
+	 * piani utili invece che decorativi.
+	 */
+	plan_pos = from ? (u32)strtoul(from, NULL, 0) : 0;
 }
 
 void b43_test_plans_report(FILE *f)
@@ -222,12 +236,95 @@ void b43_test_mirror_radio_set(u16 reg, u16 val)
 
 /* ---------------- registri PHY ---------------- */
 
+/* Mirror delle TABELLE, non dei registri.
+ *
+ * Serviva: mirror_phy tiene i registri, e una lettura di tabella passa dalla
+ * porta dati 0x73, quindi senza questo il port si riprendeva **l'ultima cella
+ * scritta da qualunque parte** invece di quella che aveva chiesto. Si vedeva
+ * sulla banda del filtro passa-basso, che la cal PAPD rilegge da 7/0x154: il
+ * port aveva appena azzerato le tabelle epsilon, quindi leggeva 0 dove il
+ * vendore legge 0x2c64. Non era ne' un difetto del driver ne' un problema dei
+ * piani di lettura, ed e' stato attribuito a entrambi prima di essere guardato.
+ *
+ * I piani non c'entrano e non devono: per una cella di tabella il valore giusto
+ * e' quello che la tabella contiene, che e' la stessa ragione per cui 0x72,
+ * 0x73 e 0x74 stanno fuori dai piani.
+ */
+#define TBL_MIRROR_IDS	64
+#define TBL_MIRROR_OFFS	1024
+
+static u32 tbl_mirror[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
+static u8 tbl_written[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
+
+static void tbl_mirror_set(u32 offset, u32 value)
+{
+	u16 id = (offset & 0x0000FC00) >> 10, off = offset & 0x000003FF;
+
+	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS) {
+		tbl_mirror[id][off] = value;
+		tbl_written[id][off] = 1;
+	}
+}
+
+/* Le tre larghezze che b43_ntab_* distingue stanno nei bit alti dell'offset,
+ * come in tables_nphy.c: 8, 16 o 32 bit per cella.
+ */
+static void tbl_mirror_set_bulk(u32 offset, unsigned int nr, const void *data)
+{
+	const u8 *d8 = data;
+	const u16 *d16 = data;
+	const u32 *d32 = data;
+	unsigned int i;
+
+	for (i = 0; i < nr; i++) {
+		u32 v;
+
+		switch (offset & B43_NTAB_TYPEMASK) {
+		case B43_NTAB_8BIT:
+			v = d8[i];
+			break;
+		case B43_NTAB_16BIT:
+			v = d16[i];
+			break;
+		default:
+			v = d32[i];
+			break;
+		}
+		tbl_mirror_set(offset + i, v);
+	}
+}
+
+/* La cella indirizzata dall'ultima scrittura su 0x72, che porta (id << 10) | off
+ * per ogni larghezza di tabella: 0x3c57 e' 15/0x57, 0x1d54 e' 7/0x154.
+ * `high` distingue la porta 0x74 (word alta di una cella a 32 bit) da 0x73.
+ */
+int tbl_port_get(int high, u16 *val)
+{
+	u32 sel = mirror_phy[0x72];
+	u32 cell;
+	u16 id = (sel & 0xFC00) >> 10, off = sel & 0x3FF;
+
+	if (id >= TBL_MIRROR_IDS || off >= TBL_MIRROR_OFFS)
+		return 0;
+	if (!tbl_written[id][off])
+		return 0;
+	cell = tbl_mirror[id][off];
+	*val = high ? (cell >> 16) : (cell & 0xFFFF);
+	return 1;
+}
+
 u16 b43_phy_read(struct b43_wldev *dev, u16 reg)
 {
 	u16 val;
 
-	if (!plan_get(PLAN_PHY, reg, &val))
+	if ((reg == 0x73 || reg == 0x74) && tbl_port_get(reg == 0x74, &val)) {
+		/* La porta dati di una tabella: il valore giusto e' la cella
+		 * indirizzata, non l'ultima cosa scritta sul registro. I piani
+		 * qui non entrano di proposito, ed e' la stessa ragione.
+		 */
+	} else if (!plan_get(PLAN_PHY, reg, &val)) {
 		val = reg < MIRROR_PHY_SZ ? mirror_phy[reg] : 0;
+	}
 	fprintf(trace(), "cpu0 PHY.RD   addr=0x%04x val=0x%04x\n", reg, val);
 	return val;
 }
@@ -502,86 +599,16 @@ static u16 ntab_off(u32 offset)
 	return offset & 0x000003FF;
 }
 
-/* Mirror delle TABELLE, non dei registri.
- *
- * Serviva: mirror_phy tiene i registri, e una lettura di tabella passa dalla
- * porta dati 0x73, quindi senza questo il port si riprendeva **l'ultima cella
- * scritta da qualunque parte** invece di quella che aveva chiesto. Si vedeva
- * sulla banda del filtro passa-basso, che la cal PAPD rilegge da 7/0x154: il
- * port aveva appena azzerato le tabelle epsilon, quindi leggeva 0 dove il
- * vendore legge 0x2c64. Non era ne' un difetto del driver ne' un problema dei
- * piani di lettura, ed e' stato attribuito a entrambi prima di essere guardato.
- *
- * I piani non c'entrano e non devono: per una cella di tabella il valore giusto
- * e' quello che la tabella contiene, che e' la stessa ragione per cui 0x72,
- * 0x73 e 0x74 stanno fuori dai piani.
- */
-#define TBL_MIRROR_IDS	64
-#define TBL_MIRROR_OFFS	1024
-
-static u32 tbl_mirror[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
-static u8 tbl_written[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
-
-static void tbl_mirror_set(u32 offset, u32 value)
-{
-	u16 id = ntab_id(offset), off = ntab_off(offset);
-
-	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS) {
-		tbl_mirror[id][off] = value;
-		tbl_written[id][off] = 1;
-	}
-}
-
-static int tbl_mirror_get(u32 offset, u32 *value)
-{
-	u16 id = ntab_id(offset), off = ntab_off(offset);
-
-	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS && tbl_written[id][off]) {
-		*value = tbl_mirror[id][off];
-		return 1;
-	}
-	return 0;
-}
-
-/* Le tre larghezze che b43_ntab_* distingue stanno nei bit alti dell'offset,
- * come in tables_nphy.c: 8, 16 o 32 bit per cella.
- */
-static void tbl_mirror_set_bulk(u32 offset, unsigned int nr, const void *data)
-{
-	const u8 *d8 = data;
-	const u16 *d16 = data;
-	const u32 *d32 = data;
-	unsigned int i;
-
-	for (i = 0; i < nr; i++) {
-		u32 v;
-
-		switch (offset & B43_NTAB_TYPEMASK) {
-		case B43_NTAB_8BIT:
-			v = d8[i];
-			break;
-		case B43_NTAB_16BIT:
-			v = d16[i];
-			break;
-		default:
-			v = d32[i];
-			break;
-		}
-		tbl_mirror_set(offset + i, v);
-	}
-}
-
 u32 __wrap_b43_ntab_read(struct b43_wldev *dev, u32 offset)
 {
-	u32 val, cell;
-
 	fprintf(trace(), "cpu0 TBL.RD   id=0x%04x off=0x%04x len=1\n",
 		ntab_id(offset), ntab_off(offset));
-	/* La __real_ gira comunque: e' lei che emette le op sulla porta. */
-	val = __real_b43_ntab_read(dev, offset);
-	if (tbl_mirror_get(offset, &cell))
-		return cell;
-	return val;
+	/* Il valore lo serve la porta dati, in b43_phy_read: vedi tbl_port_get.
+	 * Servirlo qui invece che li' aggiustava il valore che il driver usa e
+	 * lasciava nel trace la lettura del registro col mirror sbagliato, cioe'
+	 * un buco che sembrava un difetto del port e non lo era.
+	 */
+	return __real_b43_ntab_read(dev, offset);
 }
 
 void __wrap_b43_ntab_read_bulk(struct b43_wldev *dev, u32 offset,

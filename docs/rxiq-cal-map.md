@@ -12,14 +12,31 @@ Cattura di riferimento: `opinit-ch1-ch6-bw20.decoded`, primo `up` a canale 1.
 ## I confini
 
 La regione sta fra la fine di `wlc_phy_a4` (#14092) e l'inizio della seconda cal
-RSSI (#22247). Non e' delimitata a occhio: le due op che la chiudono sono le
-**scritture di lunghezza 2 sulla tabella 7 a `off=0x110`**, cioe' le due voci di
-tx gain dei due core insieme, a **#14983** e **#21136**. Tutte le altre scritture
-su quella tabella nella regione sono `len=1`, un core per volta.
+RSSI (#22247). Non e' delimitata a occhio: le op che la chiudono sono quelle di
+**lunghezza 2 sulla tabella 7 a `off=0x110`**, cioe' le due voci di tx gain dei due
+core insieme, a **#14977**, **#14983** e **#21136**. Tutte le altre scritture su
+quella tabella nella regione sono `len=1`, un core per volta.
 
-**SALAME**: che quelle due `len=2` siano il salvataggio e il ripristino del gain
-attorno allo sweep e' la lettura piu' naturale della posizione e della lunghezza,
-non una cosa che ho verificato sui valori.
+Erano tre e non due, e non sono salvataggio e ripristino: la lettura giusta si
+ricava da `wlc_phy_cal_rxiq_nphy_rev3` (`phy_n.c:27304`) e la cattura la conferma
+op per op.
+
+| record | op | cosa e' |
+|---|---|---|
+| #14977 | `TBL.RD len=2` | `gain_save`, il tx gain dei due core prima di toccare niente |
+| #14983 | `TBL.WR len=2`, `0x4077` su entrambi | `cal_gain`, cioe' l'uscita di `wlc_phy_iqcal_gainparams_nphy` per i due core |
+| #21136 | `TBL.WR len=2` | il ripristino di `gain_save`, in coda alla funzione |
+
+Quindi **#14983 non e' un salvataggio**: e' la scrittura del gain di calibrazione,
+e il salvataggio e' la read a #14977 — che b43 sa fare, perche'
+`b43_nphy_iq_cal_gain_params()` c'e' gia'.
+
+Anche il preambolo torna, e serve per posizionare il guscio: **#14966-14969** su
+`0x01` e' il `BBConfig` letto e riscritto col bit 15 azzerato, **#14970-14976** e'
+`wlc_phy_stay_in_carriersearch_nphy(pi, true)`. La fase quindi non comincia a
+#14093 come dice il confine di `REGIONS`: comincia a **#14966**, e cio' che sta in
+mezzo e' la coda di `wlc_phy_txpwr_index_nphy` della cal PAPD (`CLAUDE.md`,
+"Prossimo passo" 4).
 
 ## Le funzioni di brcmsmac
 
@@ -42,15 +59,30 @@ intero perche' sono tutte table-op:
 
     TBL.RD  id=0x07 off=0x110|0x111 len=1   il tx gain corrente del core
     TBL.RD  id=0x0f off=0x57 / 0x50 / 0x55  coefficienti IQLOCAL
-    TBL.WR  id=0x1a off=0x40 len=84         upload gain core 0
-    TBL.WR  id=0x1b off=0x40 len=84         upload gain core 1
-    TBL.RD  id=0x1a|0x1b off=0x??de len=1   rilettura di controllo
+    TBL.WR  id=0x1a off=0x40 len=84         84 zeri, core 0
+    TBL.WR  id=0x1b off=0x40 len=84         84 zeri, core 1
+    TBL.RD  id=0x1a|0x1b off=0x??ca len=1   il tx gain all'indice scelto
     TBL.WR  id=0x07 off=0x110|0x111 len=1   il tx gain scelto
     TBL.RD  + TBL.WR id=0x0f off=0x57       read-modify-write dei coefficienti
     TBL.RD  + TBL.WR id=0x0f off=0x5f
-    TBL.RD  id=0x1a off=0x15e, 0x1de, 0x25e tre celle a passo 0x80
-    TBL.WR  id=0x1a off=0x40 len=84         ri-upload
+    TBL.RD  id=0x1a off=0x14a, 0x1ca, 0x24a tre celle a passo 0x80
+    TBL.WR  id=0x1a off=0x40 len=84         di nuovo 84 zeri
     TBL.WR  id=0x1b off=0x40 len=84
+
+**L'unita' e' una funzione, e ha un nome**: `wlc_phy_txpwr_index_nphy`
+(`phy_n.c:28295`) con **indice 10**. Le quattro read sono le quattro tabelle che
+l'indice seleziona, a 128 celle di distanza l'una dall'altra: il gain a `192+10 =
+0xca`, la compensazione IQ a `320+10 = 0x14a`, quella dell'oscillatore locale a
+`448+10 = 0x1ca`, l'offset di potenza RF a `576+10 = 0x24a`. La stessa funzione con
+**indice 30** e' la coda della cal PAPD, e da' `0xde`/`0x15e`/`0x1de`/`0x25e`.
+
+E i `len=84` **non sono un upload di gain**, come diceva questa sezione: sono
+`wlc_phy_txpwrctrl_enable_nphy` che spegne il controllo di potenza azzerando 84
+celle per core, due volte per chiamata — 84 `PHY.WR 0x73 val=0x0000` di fila,
+verificate a #15240-15280, seguite da `AND 0x1e7 clr 0xe000` (`TXPCTL_CMD`) e dalle
+due `OR 0x100` su `0x8f`/`0xa5`. **b43 quel codice ce l'ha gia'**, in
+`b43_nphy_tx_power_ctrl()`, ed e' il motivo per cui il blocco da 172 op a #13921
+appaiava anche prima che ci fosse la cal RX IQ.
 
 I due core si distinguono dall'offset sulla tabella 7: **`0x110` e' il core 0,
 `0x111` il core 1**, e la cattura alterna.
@@ -76,6 +108,23 @@ Le prime tre iterazioni non suonano un tono e stanno nella regione che
 `phase_compare.py` chiama `cal RX IQ, ingresso` (#14093-15920); dalla quarta in
 poi ogni iterazione ha il suo tono, ed e' il `cal RX IQ, sweep di gain`
 (#15921-22246). Il tono e' lo stesso stimolo della cal PAPD: tabella 17, 160 word.
+
+## Cosa e' portato, e cosa no
+
+`patches/b43/0018`: il guscio di `wlc_phy_cal_rxiq_nphy_rev3`,
+`b43_nphy_txpwr_index()` e lo sweep. `up-ch1` da 5791 a **11552 op su 22951**, tre
+iterazioni per core come la cattura, ognuna come run di 85, 103, 85 e 420 op
+appaiate; `0019`, il gain di pre-calibrazione, lo porta a **12363**. Resta fuori la **misura**: il tono al tipo di cal chiesto e
+`b43_nphy_calc_rx_iq_comp()`, che b43 ha gia'. Finche' manca, la funzione torna
+errore e nessuna cal viene salvata.
+
+Due cose che il port non fa, dichiarate:
+
+- il ramo 5 GHz dello sweep, perche' quattro dei suoi sei gradini chiedono un tx
+  gain fisso costruito con un valore che b43 non tiene (la riga che lo salverebbe
+  sta dentro un `#if 0`). Il chiamante e' ristretto a 2 GHz per questo.
+- il ramo a indice negativo di `txpwr_index`, che rigioca stato che in b43 nessuno
+  legge.
 
 ## Cosa vuol dire per il port
 

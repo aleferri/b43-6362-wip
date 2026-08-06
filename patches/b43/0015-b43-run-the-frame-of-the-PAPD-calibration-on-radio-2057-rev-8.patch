@@ -45,23 +45,22 @@ Checked as one contiguous region rather than per function, because the
 harness's read plans are positional and only serve the value the hardware
 gave if the port makes the same reads in the same order. Of the 2486
 operations wl 6.30.102.7 issues between the scalar table and the filters
-at the end, 1819 are in blocks common to both sequences, in the same order
-and with the same values read back, the first of them 791 long. The two
+at the end, 1830 are in blocks common to both sequences, in the same order
+and with the same values read back, the first of them 847 long. The two
 gaps that are left, 349 and 276 operations, are the gain index search for
 the two cores.
 
 The same shape comes out of a second, independent capture, the one of a
-cold init: the same 1819 operations in blocks, the same first block of 791,
+cold init: the same 1830 operations in blocks, the same first block of 847,
 and gaps of 920 and 930 where that one runs a full gain search instead of a
 soft one.
 
-One gap of four operations is a value and not a sequence: the baseband
-multipliers. The vendor reads 0x2c2c out of table 15 offset 87 on the way
-in and the port reads a zero, because b43 never writes that cell - the
-vendor writes it 70 times in the capture, first at #1219, long before the
-calibration - so the cleanup hands back a zero as well. It is the next
-thing to chase and it is not this patch's: the frame reads, saves and
-restores what is there, which is what it is supposed to do.
+Two gaps are values and not sequences, and both are on registers nothing
+writes: the transmit/receive coupling attenuation of the two cores, which
+the vendor reads as 0xaa and the port as a zero. That value is the chip's
+own default - it is in neither driver's radio table, and the vendor never
+writes it either - so the only place it exists is the capture. The third is
+the read of radio 0x81 described above.
 
 One operation of the vendor's has no counterpart: a read of radio 0x81,
 TR2G_CONFIG1_CORE0_NU, which it makes once per core inside the setup,
@@ -77,10 +76,58 @@ Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/dr
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n24242
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n24496
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n14735
-Link: https://github.com/aleferri/b43-6362-wip/blob/a54f82b/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/04e05f5/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/04e05f5/test/phase_compare.py, region papd-cal
+
+While the frame is going in, name the two registers the channel measurement
+reads. On N-PHY rev 8 the addresses 0x1C9 and 0x1CA are not the GPIO output
+latches the existing names say: the capture reads them 3400 times in 70796
+records and writes them never, and what comes back is a pair of
+sign-extended 6 bit fields with one of them noise around zero. The old
+names stay for the revisions that do use them as output latches; the new
+ones sit beside them.
+
+The measurement itself, 100 samples of one core then 100 of the other
+inside the same eight register save and restore that frames
+b43_nphy_poll_rssi(), is here but has no caller, and that is a measured
+result rather than an omission: putting it at the end of the channel switch
+costs 74 operations of the window this patch is verified against, because
+the vendor driver does not take the measurement while an interface comes
+up. It takes it on the channel switches of a scan. So it belongs above the
+PHY, and this is not the patch that finds out where.
 
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.h
++++ b/drivers/net/wireless/broadcom/b43/phy_n.h
+@@ -604,6 +604,15 @@
+ #define B43_NPHY_DSSSCCK_GAINSL			B43_PHY_N(0x1C8) /* DSSS/CCK gain settle length */
+ #define B43_NPHY_GPIO_LOOUT			B43_PHY_N(0x1C9) /* GPIO low out */
+ #define B43_NPHY_GPIO_HIOUT			B43_PHY_N(0x1CA) /* GPIO high out */
++/* The same two addresses carry a per-core measurement readback on N-PHY rev 8,
++ * not an output latch: in an MMIO capture of wl 6.30.102.7 on a BCM6362 they are
++ * read 3400 times in 70796 records and written zero times, and what comes back
++ * is a pair of sign-extended 6 bit fields, one of them noise around zero. The
++ * RSSI readback of the calibration is elsewhere and is used as well, 0x219 and
++ * 0x21A below, 648 reads in the same capture.
++ */
++#define B43_NPHY_REV8_MEAS_C1			B43_PHY_N(0x1C9) /* Measurement core 1 */
++#define B43_NPHY_REV8_MEAS_C2			B43_PHY_N(0x1CA) /* Measurement core 2 */
+ #define B43_NPHY_CRS_CHECK			B43_PHY_N(0x1CB) /* CRS check */
+ #define B43_NPHY_ML_LOGSS_RAT			B43_PHY_N(0x1CC) /* ML/logss ratio */
+ #define B43_NPHY_DUPSCALE			B43_PHY_N(0x1CD) /* Dup scale */
+@@ -937,6 +946,11 @@ struct b43_phy_n_pwr_ctl_info {
+ };
+ 
+ struct b43_phy_n {
++	/* The per-core measurement the channel switch takes, four sign-extended
++	 * 6 bit fields packed as the RSSI poll packs them. What the vendor
++	 * driver computes from it is not known, so nothing acts on it yet.
++	 */
++	s32 chan_meas;
+ 	u8 antsel_type;
+ 	u8 cal_orig_pwr_idx[2];
+ 	u8 measure_hold;
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c
 @@ -51,6 +51,21 @@ struct nphy_iq_est {
@@ -367,3 +414,67 @@ Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
  }
  
  /* The offset the PAPD engine applies to the epsilon table. brcmsmac computes it
+@@ -6823,6 +7065,63 @@ static void b43_nphy_op_switch_analog(struct b43_wldev *dev, bool on)
+ 	}
+ }
+ 
++/* The measurement the vendor driver takes on every channel it visits, on N-PHY
++ * rev 8: 100 samples of one core and then 100 of the other, inside the same
++ * eight register save and restore that frames b43_nphy_poll_rssi(). It is not
++ * that function - that one interleaves the two cores and reads the calibration's
++ * RSSI registers, which this radio uses too, elsewhere.
++ *
++ * The result goes into nphy->chan_meas and nothing reads it. That is deliberate:
++ * the capture says what is measured and how, and does not say what is computed
++ * from it, so inventing a consumer would be worse than leaving the value there
++ * for the code that identifies it.
++ *
++ * NOTHING CALLS THIS YET, and the call site is a measured question rather than an
++ * open one. Calling it at the end of the channel switch costs 74 operations of
++ * the window that compares an interface coming up against the capture, because
++ * the vendor driver does not take this measurement while bringing the interface
++ * up: it takes it on the channel switches of a scan, after the point that window
++ * ends. So it is not part of switch_channel, and where it does belong is above
++ * the PHY, in the code that drives a scan dwell.
++ */
++static void b43_nphy_rev8_chan_meas(struct b43_wldev *dev)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	static const u16 save_regs[] = {
++		B43_NPHY_AFECTL_OVER1, B43_NPHY_AFECTL_OVER,
++		B43_NPHY_AFECTL_C1, B43_NPHY_AFECTL_C2,
++		B43_NPHY_TXF_40CO_B1S0, B43_NPHY_TXF_40CO_B32S1,
++		B43_NPHY_RFCTL_LUT_TRSW_UP1, B43_NPHY_RFCTL_LUT_TRSW_UP2,
++	};
++	static const u16 meas_regs[] = {
++		B43_NPHY_REV8_MEAS_C1, B43_NPHY_REV8_MEAS_C2,
++	};
++	u16 saved[ARRAY_SIZE(save_regs)];
++	s32 buf[4] = { 0 };
++	unsigned int i, core;
++	u16 val;
++
++	for (i = 0; i < ARRAY_SIZE(save_regs); i++)
++		saved[i] = b43_phy_read(dev, save_regs[i]);
++
++	b43_nphy_rssi_select(dev, 5, N_RSSI_NB);
++
++	for (core = 0; core < ARRAY_SIZE(meas_regs); core++) {
++		for (i = 0; i < 100; i++) {
++			val = b43_phy_read(dev, meas_regs[core]);
++			buf[2 * core] += ((s8)((val & 0x3F) << 2)) >> 2;
++			buf[2 * core + 1] +=
++				((s8)(((val >> 8) & 0x3F) << 2)) >> 2;
++		}
++	}
++
++	nphy->chan_meas = (buf[0] & 0xFF) << 24 | (buf[1] & 0xFF) << 16 |
++			  (buf[2] & 0xFF) << 8 | (buf[3] & 0xFF);
++
++	for (i = 0; i < ARRAY_SIZE(save_regs); i++)
++		b43_phy_write(dev, save_regs[i], saved[i]);
++}
++
+ static int b43_nphy_op_switch_channel(struct b43_wldev *dev,
+ 				      unsigned int new_channel)
+ {

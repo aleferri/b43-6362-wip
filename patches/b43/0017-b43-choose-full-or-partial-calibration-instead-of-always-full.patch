@@ -1,0 +1,58 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: choose full or partial calibration instead of always full
+
+The periodic calibration sequence the previous patch reaches from the PHY
+init asks for a full TX IQ/LO calibration every time. brcmsmac decides:
+wlc_phy_cal_perical_nphy_run() calibrates fully when the channel is not the
+one the calibration last ran on and partially when it is, which is the same
+test b43_nphy_restore_cal() already makes before it reuses the stored
+coefficients. Make the same choice from the same state.
+
+The type the RX IQ calibration is asked for stays 2, the full one, and that
+is not an oversight: brcmsmac asks for 2 on the first calibration after an
+association and 0 afterwards, and b43 tracks nothing equivalent. Of the two
+constants 2 is the conservative one, since 0 skips most of the work.
+
+There is no operation count to show for this against the capture, and the
+reason is worth stating: both captures are of an interface coming up on a
+channel nothing has calibrated yet, so the test comes out full in both and
+the sequence does not change. What changes is the second and later times,
+which no capture covers. It goes in because the constant was wrong, not
+because it moves a number.
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n25386
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -6151,7 +6531,27 @@ static void b43_nphy_papd_epsilon_offset(struct b43_wldev *dev)
+ static void b43_nphy_cal_perical_phyinit(struct b43_wldev *dev,
+ 					 struct nphy_txgains target)
+ {
+-	if (!b43_nphy_cal_tx_iq_lo(dev, target, true, false)) {
++	struct b43_phy_n *nphy = dev->phy.n;
++	bool full;
++
++	/* Full or partial is not a constant: brcmsmac calibrates fully when the
++	 * channel is not the one the TX IQ/LO calibration last ran on, and
++	 * partially when it is, which is the same test b43_nphy_restore_cal()
++	 * makes before reusing the coefficients. Passing a constant true made
++	 * every channel look uncalibrated.
++	 *
++	 * The type the RX IQ calibration gets stays 2, the full one. brcmsmac
++	 * asks for 2 on the first calibration after an association and 0
++	 * afterwards, and b43 does not track that: 2 is the conservative half of
++	 * the choice, since 0 skips most of the calibration.
++	 */
++	full = !nphy->txiqlocal_coeffsvalid ||
++	       nphy->txiqlocal_chanspec.center_freq !=
++	       dev->phy.chandef->chan->center_freq ||
++	       nphy->txiqlocal_chanspec.channel_type !=
++	       cfg80211_get_chandef_type(dev->phy.chandef);
++
++	if (!b43_nphy_cal_tx_iq_lo(dev, target, full, false)) {
+ 		b43_nphy_papd_cal(dev);
+ 		if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0)
+ 			b43_nphy_save_cal(dev);

@@ -261,16 +261,18 @@ l'hardware ha dato solo se il port fa le stesse read nello stesso ordine del
 vendore; dentro una regione contigua quella condizione e' vera per costruzione, e
 allora i valori tornano da soli senza posizionare niente per chiamata.
 
-Misurato: la regione `papd-cal` (`CONTIG` in `phase_compare.py`, #10966-13918)
-copre **2486 op del vendore e 1819 stanno in blocchi comuni nello stesso ordine e
-con gli stessi valori letti, 73%**, il primo blocco da **791 op**. La struttura:
+Misurato dentro l'unica finestra, `up-ch1` (#132-26100): nell'intervallo della cal
+i blocchi contigui sono a **#10966 (847 op)**, #11822 (334), #12784 (145), #12936
+(334), #13752 (90), #13856 (48), #13921 (172). Le region per fase, `papd-cal` e
+`papd-cal-freddo`, sono esistite due sessioni e sono state togliere: una fase presa
+da sola non dice niente su cio' che le arriva addosso da prima. La struttura:
 
 | da | op contigue | cosa |
 |---|---|---|
-| #10966 | 791 | tabelle scalare, reset RX, epsilon cella per cella, filtri |
-| — | buco di 4 | il **bbmult**: vedi sotto |
-| #11764 | 52 | override RF del setup, banda del filtro compresa |
+| #10966 | 847 | tabelle scalare, reset RX, epsilon cella per cella, filtri, bbmult, banda del filtro, override RF |
 | — | buco di 1 | `RAD.RD 0x81`, non spiegata |
+| #11822 | 5 | mod AFE |
+| — | buco di 3 | le **atten del coupler**: vedi sotto |
 | #11822 | 334 | mod AFE, coupler, il tono da 160 word |
 | — | **buco di 349** | `a3`/`a2`, core 0 |
 | #12792 | 74 | i 17 override spenti della cleanup |
@@ -296,22 +298,44 @@ Quindi:
 3. **Poi il codice**, un passo di cal per volta, col criterio del +-2 sui valori
    che passano da rccal (sezione sopra), **contro la regione `papd-cal-freddo`**.
 
-### Il bbmult: b43 non scrive mai 15/87
+### Il bbmult: era un difetto dell'harness, non del port
 
-Trovato dal confronto sui valori letti, appena l'harness ha smesso di stampare
-`val=UNDEFINED`. Il vendore in ingresso alla cal legge **`0x2c2c`** dalla cella 87
-della tabella 15 e il port legge **`0`**: quella cella nella cattura il vendore la
-scrive **70 volte**, la prima a **#1219**, molto prima della cal, e b43 non la
-scrive mai — le sue scritture sulla tabella 15 stanno su 0-17 e 32-49, la ladder
-della cal TX IQ/LO. Conseguenza a valle: la cleanup ripristina uno zero.
+Per una sessione questa voce ha detto che b43 non scrive mai la cella 87 della
+tabella 15 e che quindi la cleanup ripristina uno zero. **TONNO**: il port ci
+scrive `0x2c2c`, lo stesso valore del vendore, quattro volte prima della cal.
 
-E' il buco di 4 op del primo blocco, ed e' il prossimo da inseguire. Non e' del
-guscio: il guscio legge, salva e ripristina quello che trova.
+Il buco era nel mirror delle tabelle, aggiunto male: serviva la cella al valore di
+ritorno di `b43_ntab_read` ma **non alla porta dati**, e nel trace la riga che si
+confronta e' la `PHY.RD` di `0x73`, che continuava a dare il mirror del registro.
+Cioe' il driver leggeva la cosa giusta e la misura diceva di no. Sistemato con
+`tbl_port_get()` in `wrap.c`: `0x73` e `0x74` servono la cella indirizzata
+dall'ultima scrittura su `0x72`, che porta `(id << 10) | off` per ogni larghezza.
+
+La lezione, che e' la seconda volta in questa fase: **quando una read non torna,
+guardare l'harness prima del driver**. Le due volte prima ho dato la colpa ai piani
+di lettura e alla cattura sbagliata.
+
+### Le atten del coupler: le sa solo la cattura
+
+Restano due buchi di valore, `RAD.RD 0x17d` e `0x19d`: il vendore legge `0xaa`, il
+port `0`. Quei due registri **non sono in `r2057_rev8_init`** e nessuno dei due
+driver li scrive: `0xaa` e' il default del chip, e l'unico posto dove esiste e' la
+cattura. Il piano ce l'ha, `{0xaa, 0xaa, 0xaa}` ai record 11828, 12946, 15083.
+
+**Chiuso dai seed, non dai piani.** `reverse-tools/gen_seed.py` semina gli
+indirizzi il cui primo accesso nella cattura e' una read, cioe' i default del chip,
+e `0x17d`/`0x19d` a `0xaa` sono esattamente quello. Il criterio non e' "mai
+scritto": la cal le scrive, ma dopo averle lette.
+
+Resta il knob `B43_TEST_PLAN_FROM`, spento: posizionare il cursore all'ingresso di
+una regione **misurato peggiorava** (1830 → 1816, primo blocco 847 → 843), perche'
+i piani servivano valori dove il mirror era giusto. La domanda aperta e' quale read
+sfasa il piano, non se posizionare il cursore.
 
 ### La stessa fase in due catture indipendenti
 
 `papd-cal-freddo` (#18662-24096 di `full-init-ch1-bw20.decoded`) da' **3727 op del
-vendore e le stesse 1819 in blocchi, 49%**, con lo stesso primo blocco da 791. Il
+vendore e le stesse 1830 in blocchi, 49%**, con lo stesso primo blocco da 847. Il
 denominatore e' piu' grande perche' quella e' una cal completa: i due buchi di
 `a3`/`a2` sono **920 e 930** op invece di 349 e 276.
 

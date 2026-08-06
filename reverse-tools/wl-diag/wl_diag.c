@@ -110,8 +110,25 @@ enum wldiag_op {
 	OP_OTP_INIT, OP_OTP_RDW, OP_OTP_RDR,		/* 32,33,34 (append) */
 	OP_RADIO_AND, OP_RADIO_OR,			/* 35,36 (append) */
 	OP_PMU_SPURAVOID, OP_PHY_ARRW,			/* 37,38 (append) */
+	OP_SHM_R, OP_SHM_W, OP_SHM_SET,			/* 39,40,41 (append) */
+	OP_MAC_SUSPEND, OP_MAC_ENABLE,			/* 42,43 (append) */
+	OP_PHY_CLK, OP_MAC_FREQ,			/* 44,45 (append) */
 	OP_DROP = 255,
 };
+/* NOTA sul perimetro, e non e' una nota di stile.
+ *
+ * Qui si agganciano **accessor**: funzioni che leggono e scrivono registri e
+ * memoria condivisa, cioe' l'interfaccia verso l'hardware. Quello che ne esce e'
+ * una traccia di cosa fa il chip, da cui il comportamento si ricostruisce a
+ * posteriori.
+ *
+ * C'e' stata per un giro una variante che marcava l'ingresso di sette funzioni
+ * del PHY (`OP_FN`), utile per delimitare le fasi, ed e' stata **togliere di
+ * proposito**: marcare le funzioni interne produce una mappa della struttura del
+ * driver del vendore, che e' una cosa diversa dall'osservare l'hardware e molto
+ * piu' facile da contestare. Se un confine di fase serve, si ricava dalle op
+ * degli accessor.
+ */
 struct wldiag_rec {
 	u64 ts_ns; u32 seq; u32 addr; u32 val; u32 aux;
 	u8 op; u8 cpu; u16 _pad;
@@ -259,6 +276,32 @@ static struct hook hooks[] = {
 	 * record PMU: su questo SoC il clocking non passa dal PMU bcma. L'hook
 	 * resta perche' non costa nulla, ma non aspettarsi record da qui. */
 	{ "si_pmu_spuravoid",   OP_PMU_SPURAVOID, 1, 2, 0 },
+	/* La famiglia bmac, che e' dove passano davvero gli accessi al core d11.
+	 * Nel blob ce ne sono **137** e qui se ne agganciavano dieci, e le mancanti
+	 * non erano innocue: sono la ragione per cui tre classi di op del port
+	 * risultavano non confrontabili e stavano in deroga.
+	 *
+	 * `read_shm`/`write_shm` prendono un offset in **byte** nella regione
+	 * SHARED, che e' lo stesso livello di `b43_shm_{read,write}16`: con
+	 * `write_objmem16` da solo si confrontava un indirizzo di parola con un
+	 * selettore di spazio contro un offset in byte, cioe' rumore, e i 677
+	 * offset SHM che il vendore tocca restavano fuori dal confronto.
+	 *
+	 * `core_phy_clk` e `switch_macfreq` sono le due che mancavano per togliere
+	 * le ultime deroghe: finche' non erano agganciate, "zero occorrenze" non
+	 * diceva se `wl` le chiamasse.
+	 *
+	 * `suspend_mac_and_wait`/`enable_mac` delimitano tutto: la finestra che si
+	 * misura finisce col MAC abilitato che trasmette, e quel confine oggi si
+	 * indovina.
+	 */
+	{ "wlc_bmac_read_shm",  OP_SHM_R,     1, 0, 0, .retcap = true },
+	{ "wlc_bmac_write_shm", OP_SHM_W,     1, 2, 0 },
+	{ "wlc_bmac_set_shm",   OP_SHM_SET,   1, 2, 3 },
+	{ "wlc_bmac_suspend_mac_and_wait", OP_MAC_SUSPEND, 0, 0, 0 },
+	{ "wlc_bmac_enable_mac",           OP_MAC_ENABLE,  0, 0, 0 },
+	{ "wlc_bmac_core_phy_clk",         OP_PHY_CLK,     0, 1, 0 },
+	{ "wlc_bmac_switch_macfreq",       OP_MAC_FREQ,    0, 1, 0 },
 	/* si_corereg(sih, coreidx, regoff, mask, val): accesso generico a un
 	 * registro di un core del backplane. addr=regoff(a2), aux=coreidx(a1).
 	 * val (a4, 5o arg) e' sullo stack in o32 -> catturato via nargx (record
