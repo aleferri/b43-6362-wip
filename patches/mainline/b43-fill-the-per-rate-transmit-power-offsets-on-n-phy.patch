@@ -15,22 +15,14 @@ cell: the PPR this driver already builds in b43_nphy_op_recalc_txpower()
 holds CCK, OFDM, OFDM CDD and the four MCS groups in exactly the order the
 rate indices want them, so it is one pass over __all_rates.
 
-Measured against an MMIO capture of wl 6.30.102.7 on a BCM6362, with the
-per-rate power offsets of the board loaded into the harness from its NVRAM
-(ofdm2gpo=0x44444444, mcs2gpo=0x6666, cck2gpo=0): of the 84 cells the
-vendor driver writes, 64 now match where none did.
-
-The 20 that remain are the whole SISO column, off by a constant 6 quarter-dB
-- the vendor has 0x02 where this has 0x08 - and where that comes from is not
-established. What is established is that it is not this patch and not the
-SROM chain: the multiplier, the field unpacking and the definition of the
-offset are identical in brcmsmac, the SROM value is the same in the board's
-NVRAM and in a dump of its SPROM, the SROM revision is 8 so the reference
-does not take its rev-9 early return, and the three columns fed from the MCS
-rates are exact through the same code. The vendor driver also writes that
-table 96 times across the capture with byte-identical contents every time,
-so what the capture shows there is a remembered value and not a computation
-- which is why chasing the arithmetic did not converge.
+Measured against MMIO captures of wl 6.30.102.7 and wl 7.14 on two boards,
+with the per-rate power offsets loaded into the harness from their NVRAM: on
+its own this fills the table with values computed from the SPROM alone, which
+is not what the vendor driver programs - 4 of the 84 entries agree on one
+board and none would on the other. What decides those entries is a pair of
+ceilings, one per number of transmit chains, and that is a separate patch
+because the ceilings are measured on one radio while this is not: an array
+with no writer is wrong everywhere.
 
 Not tested on hardware, like everything else in this series. What it
 changes on a device is real though, and worth saying: rates that were all

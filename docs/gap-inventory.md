@@ -191,13 +191,61 @@ mancante**, non contro il conteggio.
 
 Aggiunti i quattro hook (`wlc_bmac_read_objmem`, `write_objmem`, `copyto_objmem`,
 `copyfrom_objmem`, dai simboli del blob: 236, 160, 160, 156 byte; i `wlapi_*`
-omonimi sono trampolini da 16 byte e non si agganciano). **Serve una cattura nuova**:
-nelle due che abbiamo quelle scritture non sono osservabili.
+omonimi sono trampolini da 16 byte e non si agganciano).
+
+**E quali esistono dipende dalla build**, misurato su tre artefatti:
+
+| simbolo | `wl.ko` vd630 | blob D6220 (7.14) | blob 3580L (6.30) |
+|---|---|---|---|
+| `read_objmem` / `write_objmem` | **assenti** | assenti | presenti (236 / 160) |
+| `read_objmem16` / `write_objmem16` | **assenti** | presenti | assenti |
+| `copyto_objmem` | **568 B** | 160 | 160 |
+| `copyfrom_objmem` | **612 B** | 156 | — |
+| `wl_netdev_ops` / `wl_dslcpe_netdev_ops` | **nessun simbolo** | 136 | 80 |
+
+Sulla vd630 gli accessor a parola singola sono **inlinati**, e la size lo dice:
+`copyto_objmem` e' 568 byte la' contro 160 nel blob, cioe' se l'e' mangiata. Quindi su
+quel device **l'unico accesso osservabile alla object memory e' il bulk**, e una
+cattura che non mostra scritture a parola singola non dice niente su quella classe.
+43 hook su 47 si risolvono; i 4 che mancano sono esattamente quelli.
+
+Le `netdev_ops` non hanno simbolo affatto in quella build, quindi il base pointer per
+nome non e' ottenibile: `wl_diag` ora lo trova col ripiego `__module_address`, che non
+usa simboli.
 
 Un vicolo chiuso, per non rifarlo: `wlc_phy_txpower_update_shm` (748 byte nel blob,
 `phy_cmn.c:1615` in brcmsmac) sembrava il produttore dei valori per rate, e non lo
 e': la sua prima riga e' `if (ISNPHY(pi)) return;`. Su N-PHY non fa niente, e b43
 giustamente non ha un equivalente.
+
+### 4j. I due tetti della tabella di potenza, e da dove vengono
+
+`patches/b43/0025` applica due tetti per numero di catene — 68 qdBm a una, 56 a
+due — e con quelli le 84 celle della tabella di potenza aggiustata escono **84 su
+84** sulla 3580L e **82 su 84** sulla vd630, che hanno offset SROM diversi di un
+fattore quattro. Le 2 che restano sono uno **sfasamento di un gruppo** nella colonna
+a una catena, non un valore sbagliato, e si vede solo sulla vd630 perche' l'altra ha
+le nibble tutte uguali.
+
+**I 3 dB fra i due tetti sono aritmetica, non misura**: due catene che irradiano
+insieme fanno il doppio della potenza di una, quindi ognuna deve scendere di
+`10*log10(2)`. `68 - 56 = 12` qdBm e' quel fattore a due decimali. Serve il numero di
+catene, non una tabella.
+
+**Il 68 invece e' dato regolatorio**, e va detto perche' cambia dove dovrebbe stare:
+il vendore porta dentro le sue tabelle per paese, `locales_2g_base` (5744 B) e
+`locales_2g_ht` (7782 B), e i byte sono limiti in qdBm — si leggono 76, 66, 60, 56,
+48, 45. Nella tabella MIMO il **56 compare 252 volte** ed e' fra i valori dominanti;
+quella legacy e' centrata piu' in alto. Quindi il tetto basso viene da la'.
+
+E `maxpwr20[BRCMS_MAXPWR_MIMO_TBL_SIZE]` con `SIZE = 14` **non e' per gruppo di
+modulazione**: il commento di brcmsmac dice «index by channel for 2.4 GHz limits»,
+quindi sono i 14 canali. Per un giro ho creduto fossero quattordici gruppi.
+
+Cosa manca per derivarlo invece di misurarlo: l'EIRP di Linux (20 dBm) meno il
+guadagno d'antenna di questa board (`ag0 = 2`) fa 72 qdBm, non 68. I 4 qdBm che
+restano non sono spiegati — e il blocco `#if 0` di `b43_nphy_op_recalc_txpower`, che
+sottrarrebbe `hw_gain = 6 + antenna_gain`, darebbe 72 anche lui.
 
 ### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5 — CHIUSA
 

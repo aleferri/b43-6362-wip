@@ -254,6 +254,13 @@ void b43_test_mirror_radio_set(u16 reg, u16 val)
 #define TBL_MIRROR_OFFS	1024
 
 static u32 tbl_mirror[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
+static u16 tbl_hi_pending;
+static int tbl_hi_valid;
+/* Vero mentre gira il corpo vero di una b43_ntab_*: quelle passano anche loro da
+ * 0x72/0x73/0x74, e il mirror l'hanno gia' aggiornato per offset, quindi
+ * riapplicarlo dalla porta lo farebbe due volte, con l'auto-incremento che sposta
+ * la seconda applicazione sulla cella dopo. */
+static int in_ntab;
 static u8 tbl_written[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
 
 static void tbl_mirror_set(u32 offset, u32 value)
@@ -294,6 +301,45 @@ static void tbl_mirror_set_bulk(u32 offset, unsigned int nr, const void *data)
 	}
 }
 
+/* Il simmetrico di tbl_port_get: una scrittura diretta su 0x73 o 0x74 aggiorna la
+ * cella indirizzata dall'ultima 0x72, non solo il mirror del registro.
+ *
+ * Serve perche' non tutto il driver passa dalle b43_ntab_*:
+ * b43_nphy_tx_pwr_ctrl_coef_setup() apre la porta a mano e scrive 128 celle di
+ * fila su 0x74/0x73. Senza questo quelle celle non finiscono nel mirror, e la
+ * prima cosa che le rilegge - b43_nphy_txpwr_index(), che prende la
+ * compensazione IQ a 320+indice e quella dell'oscillatore a 448+indice - si
+ * riprende l'ultima cella scritta da un'altra parte. Misurato nella finestra
+ * txpwr-index: le letture di 26/0x14a e 26/0x1ca tornavano 0x2e2e, cioe' il
+ * moltiplicatore appena scritto su 15/0x57.
+ *
+ * L'auto-incremento e' quello dell'hardware, ed e' come funzionano le scritture
+ * in blocco: l'indirizzo si scrive una volta e i dati si versano. Per una tabella
+ * a 32 bit la cella e' completa quando arriva la word bassa (0x73), che il driver
+ * scrive per seconda.
+ */
+static void tbl_port_put(int high, u16 val)
+{
+	u32 sel = mirror_phy[0x72];
+	u16 id = (sel & 0xFC00) >> 10, off = sel & 0x3FF;
+
+	if (in_ntab)
+		return;
+	if (id >= TBL_MIRROR_IDS || off >= TBL_MIRROR_OFFS)
+		return;
+	if (high) {
+		tbl_hi_pending = val;
+		tbl_hi_valid = 1;
+		return;
+	}
+	tbl_mirror[id][off] = tbl_hi_valid ? ((u32)tbl_hi_pending << 16) | val
+					   : val;
+	tbl_written[id][off] = 1;
+	tbl_hi_valid = 0;
+	if (off + 1 < TBL_MIRROR_OFFS)
+		mirror_phy[0x72] = (sel & 0xFC00) | (off + 1);
+}
+
 /* La cella indirizzata dall'ultima scrittura su 0x72, che porta (id << 10) | off
  * per ogni larghezza di tabella: 0x3c57 e' 15/0x57, 0x1d54 e' 7/0x154.
  * `high` distingue la porta 0x74 (word alta di una cella a 32 bit) da 0x73.
@@ -332,6 +378,8 @@ u16 b43_phy_read(struct b43_wldev *dev, u16 reg)
 void b43_phy_write(struct b43_wldev *dev, u16 reg, u16 value)
 {
 	fprintf(trace(), "cpu0 PHY.WR   addr=0x%04x val=0x%04x\n", reg, value);
+	if (reg == 0x73 || reg == 0x74)
+		tbl_port_put(reg == 0x74, value);
 	if (reg < MIRROR_PHY_SZ)
 		mirror_phy[reg] = value;
 }
@@ -608,7 +656,14 @@ u32 __wrap_b43_ntab_read(struct b43_wldev *dev, u32 offset)
 	 * lasciava nel trace la lettura del registro col mirror sbagliato, cioe'
 	 * un buco che sembrava un difetto del port e non lo era.
 	 */
-	return __real_b43_ntab_read(dev, offset);
+	{
+		u32 v;
+
+		in_ntab = 1;
+		v = __real_b43_ntab_read(dev, offset);
+		in_ntab = 0;
+		return v;
+	}
 }
 
 void __wrap_b43_ntab_read_bulk(struct b43_wldev *dev, u32 offset,
@@ -616,7 +671,9 @@ void __wrap_b43_ntab_read_bulk(struct b43_wldev *dev, u32 offset,
 {
 	fprintf(trace(), "cpu0 TBL.RD   id=0x%04x off=0x%04x len=%u\n",
 		ntab_id(offset), ntab_off(offset), nr_elements);
+	in_ntab = 1;
 	__real_b43_ntab_read_bulk(dev, offset, nr_elements, _data);
+	in_ntab = 0;
 }
 
 void __wrap_b43_ntab_write(struct b43_wldev *dev, u32 offset, u32 value)
@@ -624,7 +681,9 @@ void __wrap_b43_ntab_write(struct b43_wldev *dev, u32 offset, u32 value)
 	fprintf(trace(), "cpu0 TBL.WR   id=0x%04x off=0x%04x len=1\n",
 		ntab_id(offset), ntab_off(offset));
 	tbl_mirror_set(offset, value);
+	in_ntab = 1;
 	__real_b43_ntab_write(dev, offset, value);
+	in_ntab = 0;
 }
 
 void __wrap_b43_ntab_write_bulk(struct b43_wldev *dev, u32 offset,
@@ -633,7 +692,9 @@ void __wrap_b43_ntab_write_bulk(struct b43_wldev *dev, u32 offset,
 	fprintf(trace(), "cpu0 TBL.WR   id=0x%04x off=0x%04x len=%u\n",
 		ntab_id(offset), ntab_off(offset), nr_elements);
 	tbl_mirror_set_bulk(offset, nr_elements, _data);
+	in_ntab = 1;
 	__real_b43_ntab_write_bulk(dev, offset, nr_elements, _data);
+	in_ntab = 0;
 }
 
 /* ---------------- attese ----------------

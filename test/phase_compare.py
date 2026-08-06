@@ -506,6 +506,42 @@ WINDOWS = [
     # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
     # passano e non devono: b43 la cal PAPD non ce l'ha. Sono qui pronte per
     # quando la si porta, cosi' si verifica una fase per volta.
+    dict(name='txpwr-index', rng='15285:15340',
+         # Una chiamata sola di txpwr_index dentro lo sweep, per giudicare la
+         # posizione invece di riallineare a mano - cosa che mi e' andata storta
+         # tre volte. L'ancora e' la read del gain all'indice 10 sul core 0.
+         anchor='TBL.RD id=0x1a off=0xca len=1', anchor_nth=0,
+         flow=('init', '1'),
+         what='txpwr_index: gain, dac, radio gain, il moltiplicatore in due celle',
+         known='le op combaciano tutte, comprese le due celle del moltiplicatore '
+               'lette e riscritte; cio\' che diverge sono nove VALORI, e sono '
+               'del banco: le celle per indice della tabella di potenza '
+               '(26/0x14a, 0x1ca, 0x24a) non hanno un piano di lettura, quindi '
+               'il mirror risponde con l\'ultimo valore scritto sulla porta '
+               'dati o con 0xffff. Fino a quando i piani non ci sono, nessuna '
+               'modifica al driver puo\' allungare la run qui: una run si '
+               'rompe anche su un valore. Non e\' una divergenza del port.'),
+         # Aggiornata: col mirror che ora vede le scritture dalla porta dati,
+         # quelle celle esistono e le letture rendono cio' che coef_setup ci ha
+         # messo - non piu' 0x2e2e, cioe' il moltiplicatore di un'altra tabella.
+         # Resta una divergenza di VALORE, e quella e' del port: il vendore
+         # chiama coef_setup DUE volte, a #3754 con i coefficienti ancora a zero
+         # (la cal TX IQ/LO parte a #8505) e a #21203 con 0x16413. b43 la chiama
+         # una volta sola, dopo le cal, quindi lo sweep rilegge valori che
+         # l'hardware del vendore non ha ancora. Aggiungere la prima chiamata
+         # dov'e' sembrato naturale non ha spostato niente e ha prodotto una
+         # terza apertura della porta che il vendore non ha: tre tentativi su
+         # questa fase, tre negativi, e il punto di chiamata resta da trovare.
+    dict(name='adj-pwr-tbl', rng='5986:6070',
+         # Le 84 celle della tabella di potenza aggiustata, la sola fase in cui
+         # due board si controllano a vicenda: la 3580L ha le nibble SROM tutte
+         # uguali e non discrimina niente, la vd630 le ha da 2 a 8. Con i due
+         # tetti per gruppo di 0025: 84 su 84 qui, 82 su 84 sulla vd630, e le
+         # due che restano sono uno sfasamento di un gruppo nella colonna a una
+         # catena, non un valore sbagliato.
+         anchor='TBL.WR id=0x1a off=0x40 len=84', anchor_nth=4,
+         flow=('txpower', '1'),
+         what='adj_pwr_tbl: 84 celle, quattro colonne per numero di catene'),
     dict(name='recalc-txpower', rng='5726:6244',
          # La fase che nella tabella per fase fa 1 op su 716, e non perche' il
          # port non la sappia fare: la fa, ma in fondo alla traccia invece che in

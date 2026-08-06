@@ -72,3 +72,45 @@ regressione.
 
 Ogni cattura va in `router-data/<board>/` con il verbale accanto: senza il
 verbale, fra tre mesi il file è un blob di byte.
+
+## `wl down; wl up` NON basta per il download statico
+
+Il percorso di down del blob **non azzera `hw_up` in `pub`**, quindi quel ciclo rifa'
+solo un init parziale. Per l'init col download statico serve, fra il down e l'up, una
+**writemem** che azzeri quel flag: il successivo up passa da `hw_up()` ->
+`wlc_phy_por_inform()` e il PHY si reinizializza per intero, tabelle statiche e
+rcal/rccal comprese.
+
+Misurato su una cattura vd630 presa col solo `down`/`up`: **zero occorrenze** di
+`PHY.WR addr=0x72 val=0x2800`, l'apertura della tabella 10. Il file si chiamava
+`fullinit.txt` e non conteneva il download statico — il nome non e' il criterio, il
+grep lo e'.
+
+Per arrivare al flag serve il base pointer dei dati privati, che `wl_diag` stampa in
+dmesg. Se le `netdev_ops` non si risolvono per nome, ora c'e' un ripiego che non usa
+simboli: riconosce l'interfaccia perche' le sue `netdev_ops` cadono **dentro il
+modulo wl** (`__module_address`). Gli offset per camminare da `priv` a `pub` sono
+per versione: quelli annotati in `wl_diag.c` sono del blob 6.30 e su 7.14 non valgono.
+
+### Il poke a comando
+
+`poke=` come parametro spara a `insmod`, cioe' prima del `wl down`: per questa
+sequenza non serve. Da usare invece il write handler su `/proc/wl_diag`:
+
+```sh
+insmod wl_diag.ko arm=1              # priv= in dmesg
+cat /proc/wl_diag | nc host 5555 &   # drenare PRIMA
+wl down
+echo 'r   <priv> 64'  > /proc/wl_diag   # per trovare pub, dump in dmesg
+echo 'w8  <addr> 0'   > /proc/wl_diag   # azzera hw_up
+wl up
+```
+
+Larghezze: `w8`, `w16`, `w32`, piu' `r <addr> <n>` che dumpa in dmesg. Su MIPS un
+`w32` su indirizzo non allineato prende un address error, quindi l'handler lo
+rifiuta. Il risultato va in **dmesg** e non nella fifo, che resta la cattura.
+
+E la scrittura va fatta da dentro il kernel e non con un writemem da userspace via
+`/dev/mem`: gli indirizzi di un modulo stanno in spazio **vmalloc** (`0xc1...`,
+`0xc2...` nei log), che non e' raggiungibile con l'offset fisso di KSEG0 — servirebbe
+camminare le page table.
