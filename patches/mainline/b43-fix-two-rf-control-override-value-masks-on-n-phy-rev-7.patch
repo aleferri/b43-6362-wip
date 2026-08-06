@@ -26,7 +26,8 @@ Verified: records #11800-#11805, from
 "PHY.OR   addr=0x0342 val=0x0100 (set 0x0100)"
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n14969
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n14977
-Link: https://github.com/aleferri/b43-6362-wip/blob/a54f82b/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/04e05f5/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/04e05f5/test/phase_compare.py, region papd-cal
 
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---

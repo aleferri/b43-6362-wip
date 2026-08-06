@@ -87,24 +87,85 @@ REGIONS = [
 # conteggio: un blocco che si accorcia e' una regressione anche se il totale
 # sale.
 CONTIG = [
-    dict(name='papd-cal', rng='10966:13918',
-         anchor='TBL.WR id=0x20 off=0x0 len=64',
-         flow=('init', '1'),
-         what='wlc_phy_a4 intera: tabelle, filtri, setup, tono, cleanup, coda'),
-    # La stessa fase nell'init a FREDDO. Serve perche' li' le letture di tabella
-    # tornano i valori di un init completo: e' la cattura contro cui si
-    # verificheranno a2/a3, dove i valori contano.
-    dict(name='papd-cal-freddo', rng='18662:24096',
+    # UNA finestra, e non a fase: la macro operazione intera.
+    #
+    # Comincia dove comincia switch_channel - la CHANSPEC di #132, che il tracer
+    # emette e il port no - e finisce col MAC abilitato che trasmette, #26100.
+    # Sono 22951 op. Tutto cio' che sta prima, #1-131, e' op_init e rfkill: e' lo
+    # stato che questo blocco NON PUO' avere e che va seminato, non tracciato.
+    #
+    # Non si fanno region per fase. Una fase presa da sola dice che la sua
+    # sequenza combacia e non dice niente su cio' che le arriva addosso da prima:
+    # la finestra chanswitch-ch6 diceva 33/39 "nessuna op mancante" e la fase
+    # intera stava al 14%, perche' il 62% era un ciclo di misura che il port non
+    # fa affatto. E' implementare bene QUESTA che distingue un radio e un phy che
+    # stanno in piedi da uno che traballa.
+    #
+    # Nessuna ancora: la finestra e' tutta la run, quindi i blocchi si trovano
+    # sull'intero output del flow senza agganciarsi a un'op scelta a mano.
+    dict(name='up-ch1', rng='132:26100',
+         flow=('init', '1'), plan_from=True,
+         # Deroga per le sole classi su cui il tracer del vendore **non ha un
+         # hook**, e la distinzione conta: "zero occorrenze" da solo non prova
+         # niente, perche' puo' voler dire che il tracer non guarda o che wl non
+         # lo fa, e le due hanno conseguenze opposte sul port. Due errori in due
+         # sessioni, entrambi risolti guardando dove l'accesso passa nel
+         # riferimento GPL:
+         #
+         # - `PMU.` era in deroga per sbaglio: wl-diag aggancia lo spuravoid del
+         #   PMU (il decoder lo stampa `PMU.SPUR`), che e' la funzione che mainline
+         #   chiama `bcma_pmu_spuravoid_pllupdate`, quindi c'e' ed e' agganciabile:
+         #   zero occorrenze vuol dire che **non viene chiamata**, e il PMU.SPUR
+         #   del port e' una divergenza vera.
+         # - `MMIO.` e' in deroga, ma NON perche' il conteggio sia a zero: il
+         #   vendore gli accessi ai registri di core li registra come
+         #   `SI.COREREG` (54 nella cattura, `core=0x0`, `off=0x64` e `0x6c`),
+         #   quindi cercare "MMIO." non prova niente. La deroga sta in piedi per
+         #   il livello: `0x492` e' `psm_phy_hdr_param`, e in brcmsmac ci si
+         #   arriva con un `bcma_write16(pi->d11core, D11REGOFFS(...))` **diretto**
+         #   dentro `wlc_phy_chanspec_nphy_setup` — nessun accessor da agganciare,
+         #   e un tracer di funzioni non lo vede.
+         #
+         #   Quelle tre op del port sono giuste: il bit 2 e' `MAC_PHY_FORCE_CLK`
+         #   (nome di brcmsmac) e forza il clock del PHY per il tempo di scrivere
+         #   il `BBCFG` del B-PHY, che con l'N-PHY attivo puo' essere clock-gated.
+         #   brcmsmac fa lo stesso in `wlc_phy_chanspec_nphy_setup`, b43 in
+         #   `b43_nphy_channel_setup`.
+         #
+         # `PHY.CLK` e `MAC.FREQ` restano, ed e' una deroga **a termine**: gli
+         # hook adesso ci sono (`wlc_bmac_core_phy_clk` e
+         # `wlc_bmac_switch_macfreq` in wl-diag), quindi la prima cattura fatta col
+         # modulo aggiornato le rende confrontabili. **VA TOLTA quella volta**, e
+         # con essa questo commento: tenerla dopo vorrebbe dire nascondere
+         # divergenze che il tracer ormai vede.
+         #
+         # `MMIO.` invece resta: quegli accessi il vendore li fa in parte via
+         # `si_corereg` (agganciata, `SI.COREREG` nella cattura) e in parte inline,
+         # e l'unico che rompe il blocco e' `0x492`, che e' inline per davvero.
+         # Sarebbe piu' onesta ristretta a quell'offset invece che a tutta la
+         # classe: da fare quando la deroga a termine sopra sparisce e resta solo
+         # questa.
+         drop_port=('MMIO.', 'PHY.CLK', 'MAC.FREQ'),
+         what='switch_channel fino al MAC abilitato: la macro operazione'),
+    # La stessa macro operazione a FREDDO, e sono due finestre non per simmetria:
+    # il comportamento cambia col tipo di calibrazione. `wlc_phy_a4(pi, full_cal)`
+    # e `wlc_phy_a2_nphy(..., CAL_FULL | CAL_SOFT, ...)` prendono strade diverse, e
+    # si vede: nell'intervallo della cal PAPD i buchi di `a3`/`a2` sono 349 e 276
+    # op a caldo e **920 e 930** a freddo, perche' la' la ricerca dell'indice di
+    # gain e' completa. Verificare una fase di cal contro una cattura sola valida
+    # un ramo e non dice niente dell'altro.
+    #
+    # Il flow e' `initpor`, che e' l'unico che traccia un init a freddo **con** la
+    # sequenza di cal: non azzera `perical`, quindi passa dal ramo di `0014`.
+    #
+    # La fine non e' il MAC abilitato ma il limite di confrontabilita' della
+    # cattura: `full-init-*` ha un buco da 65285 record oltre #32769, quindi solo
+    # #2-32769 si confronta posizionalmente.
+    dict(name='up-ch1-freddo', rng='339:32769',
          capture='full-init-ch1-bw20.decoded',
-         anchor='TBL.WR id=0x20 off=0x0 len=64',
-         flow=('init', '1'),
-         what='wlc_phy_a4 nella cattura a freddo'),
-    # La cal RX IQ, che il port non ha: serve a dire se lo 0% della tabella per
-    # regione e' la verita' o un artefatto dell'assegnazione dei blocchi.
-    dict(name='rxiq-cal', rng='14093:22246',
-         anchor='TBL.WR id=0x7 off=0x110 len=2',
-         flow=('init', '1'),
-         what='wlc_phy_cal_rxiq_nphy_rev3, non portata'),
+         flow=('initpor', '1'), plan_from=True,
+         drop_port=('MMIO.', 'PHY.CLK', 'MAC.FREQ'),
+         what='la macro operazione a freddo: init completo con le cal'),
 ]
 
 def canon_contig(op):
@@ -120,20 +181,27 @@ def canon_contig(op):
     return op
 
 
-def contig_blocks(vops, tops, minsize=4):
+def contig_blocks(vops, tops, minsize=16):
     """I blocchi contigui in comune, con il record da cui parte ciascuno.
 
     difflib da' la struttura giusta: sequenze di op identiche nello stesso
     ordine, che e' esattamente la domanda "fin dove siamo in passo".
+
+    `minsize` decide solo cosa si STAMPA. Il totale si conta su tutti i blocchi:
+    filtrare anche il conteggio era un sottoconteggio, e su una finestra da 22951
+    op nascondeva ~1500 op vere in run corte. Un buco stampato puo' quindi
+    contenere run piu' brevi di minsize, e sulla finestra intera ne contiene:
+    dopo le tre MMIO su 0x492 che il tracer vendor non registra il port riprende a
+    combaciare per una decina di op alla volta.
     """
     a = [canon_contig(o) for o in vops]
     b = [canon_contig(o) for o in tops]
     sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
-    out = []
-    for bl in sm.get_matching_blocks():
-        if bl.size >= minsize:
-            out.append((vops[bl.a].ep, bl.a, bl.size))
-    return out
+    blocks = [bl for bl in sm.get_matching_blocks() if bl.size]
+    total = sum(bl.size for bl in blocks)
+    shown = [(vops[bl.a].ep, bl.a, bl.size) for bl in blocks
+             if bl.size >= minsize]
+    return shown, total
 
 
 def run_contig(vendor, reg, out):
@@ -143,13 +211,19 @@ def run_contig(vendor, reg, out):
     lo, hi = (int(x) for x in reg['rng'].split(':'))
     vops = CMP.load_vendor(vendor, (lo, hi))
     tall = CMP.load_test(out)
-    off = find_anchor(tall, CMP.normalize_op(reg['anchor']),
-                      reg.get('anchor_nth', 0))
-    if off < 0:
-        return None, 'ancora non trovata: %s' % reg['anchor']
-    blocks = contig_blocks(vops, tall[off:])
-    return dict(nops=len(vops), blocks=blocks,
-                matched=sum(b[2] for b in blocks)), None
+    if reg.get('anchor'):
+        off = find_anchor(tall, CMP.normalize_op(reg['anchor']),
+                          reg.get('anchor_nth', 0))
+        if off < 0:
+            return None, 'ancora non trovata: %s' % reg['anchor']
+    else:
+        off = 0
+    tops = tall[off:]
+    drop = reg.get('drop_port', ())
+    if drop:
+        tops = [o for o in tops if not any(o.startswith(d) for d in drop)]
+    blocks, total = contig_blocks(vops, tops)
+    return dict(nops=len(vops), blocks=blocks, matched=total), None
 
 
 def find_anchor(tops, anchor, nth):
@@ -435,16 +509,28 @@ def main():
             continue
         rout = '/tmp/phase_%s.out' % reg['name']
         flow, chan = reg['flow']
+        env = dict(os.environ)
+        if reg.get('plan_from'):
+            env['B43_TEST_PLAN_FROM'] = reg['rng'].split(':')[0]
+        # Fuori dalle regioni che lo chiedono NON si passa, e non e' una
+        # dimenticanza. Posizionare
+        # il cursore all'ingresso della regione sembra la cosa giusta e
+        # MISURATO PEGGIORA: papd-cal scende da 1830 a 1816 op in blocchi e il
+        # primo blocco da 847 a 843, perche' dentro la regione i piani servono
+        # valori dove il mirror era giusto - le quattro read AFE. Il knob c'e' in
+        # wrap.c per indagarlo; finche' non si sa quale read sfasa, il mirror e'
+        # meno bugiardo. Vedi CLAUDE.md, Prossimo passo.
         with open(rout, 'w') as fh:
             subprocess.run([os.path.join(HERE, 'nphy_trace'), flow,
                             'dsl3580l', chan], stdout=fh,
-                           stderr=subprocess.DEVNULL)
+                           stderr=subprocess.DEVNULL, env=env)
         res, err = run_contig(vendor, reg, rout)
         print('regione %s (%s): %s' % (reg['name'], reg['rng'], reg['what']))
         if err:
             print('  %s\n' % err)
         else:
-            print('  %d op del vendore, %d in blocchi contigui (%.0f%%)'
+            print('  %d op del vendore, %d in blocchi contigui (%.0f%%);'
+                  ' stampati i blocchi da 16 op in su'
                   % (res['nops'], res['matched'],
                      100.0 * res['matched'] / res['nops']))
             prev = None

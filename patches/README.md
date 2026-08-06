@@ -20,8 +20,13 @@ trova.
 `b43/0006` non ha citazioni, e resta senza: misura una cosa che il vendore in quella
 cattura non fa.
 
-`mainline/` sono **due patch separate**, non una serie, per difetti di mainline
-indipendenti da questo hardware: vanno inviate per prime e in due thread distinti,
-vedi `patches/mainline/README.md`. `b43/` e' la serie di questo lavoro, e si applica
-come un blocco; `b43/0010` porta le stesse due modifiche della prima patch mainline
-e uscira' quando quella entra.
+`mainline/` sono **cinque patch separate**, non una serie, per difetti di mainline
+indipendenti da questo hardware: vanno inviate per prime e in cinque thread distinti,
+vedi `patches/mainline/README.md`, che e' la fonte per l'elenco. `b43/` e' la serie di
+questo lavoro, e si applica come un blocco; `b43/0010` porta le stesse due modifiche
+di `mainline/b43-fix-two-defects-in-the-n-phy-sample-table-logic` e uscira' quando
+quella entra — le due si escludono, e applicando prima le mainline il `git apply` di
+`0010` fallisce di proposito.
+
+**Le mainline stanno anche nel baseline delle misure**: due di loro valgono 22 op
+sulla finestra `up-ch1`. Vedi `CLAUDE.md`, "Setup, ogni volta".

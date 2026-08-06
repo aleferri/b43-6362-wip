@@ -28,6 +28,9 @@
  * loop guidati dallo stato fanno un giro e finiscono. B43_TEST_NOPLANS=1
  * nell'ambiente li disattiva, che serve a misurare la differenza. */
 #include "readplans_init.h"
+/* Generato da reverse-tools/gen_seed.py: lo stato che op_init e rfkill lasciano
+ * dietro, cioe" cio' che la finestra sotto misura non puo' avere. */
+#include "seed_up.h"
 
 extern const struct b43_phy_operations b43_phyops_n;
 
@@ -267,10 +270,28 @@ static int flow_init(void)
 	dev.phy.n->rssical_chanspec_5G.center_freq = 0;
 	dev.phy.n->iqcal_chanspec_2G.center_freq = 0;
 	dev.phy.n->iqcal_chanspec_5G.center_freq = 0;
+	/* E anche questa, che serve per la stessa ragione e mancava. Da quando
+	 * b43_nphy_cal_perical_phyinit() calcola full/parziale invece di
+	 * inchiodare `true` — come fa il riferimento, sul confronto fra il canale
+	 * e quello dell'ultima cal TX IQ/LO — un secondo init che trova questa
+	 * valorizzata prende la strada PARZIALE, e la cattura contiene un init
+	 * completo. Misurato: senza azzerarla la finestra up-ch1 perde 24 op.
+	 */
+	dev.phy.n->txiqlocal_coeffsvalid = false;
+	dev.phy.n->txiqlocal_chanspec.center_freq = 0;
 
 	b43_test_plans_reset();
 	if (!getenv("B43_TEST_NOPLANS"))
 		b43_test_load_readplans();
+
+	/* I seed: lo stato che op_init e rfkill hanno prodotto e che la finestra
+	 * misurata non puo' avere. Si applicano DOPO l'init a freddo e prima del
+	 * secondo init, che e' quello tracciato: cosi' correggono solo gli
+	 * indirizzi di cui la cattura sa e il port no, senza coprire niente di
+	 * quello che il codice sotto misura programma da se'.
+	 */
+	if (!getenv("B43_TEST_NOSEED"))
+		b43_test_seed_up();
 
 	return init_once(false);
 }

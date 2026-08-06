@@ -30,3 +30,20 @@ estrarre le tabelle statiche, che è quello che fa `blob_tables.py`) e i prologh
 e le uscite degli accessor da agganciare, quanto basta a sapere se il detour del
 tracer regge su quella funzione — se c'è un branch nelle prime quattro parole,
 il modulo la corrompe.
+
+Il criterio che tiene insieme le due voci e' **dove va il prodotto**. Localizzare
+i simboli e i siti di chiamata serve a costruire lo strumento di misura: il
+risultato e' `wl-diag`, che osserva l'hardware, e senza quei siti gli hook non si
+possono installare. Leggere il corpo di una funzione per sapere *cosa fa il
+driver* produce invece un'affermazione sul comportamento, e quella affermazione
+finirebbe nel port: quella strada non si prende, e per le stesse domande si guarda
+`brcmsmac`, che e' GPL e pubblicato dallo stesso vendore.
+
+Questo perimetro e' stato **superato una volta**, e conviene dire come: per
+attribuire un ciclo di misura visto in una cattura sono stati disassemblati corpi
+di funzione, elencati i chiamanti e cercata una costante su tutto `.text`. Le
+conclusioni erano giuste ma la fonte no, e sono state rifatte su `brcmsmac` — dove
+c'erano tutte, una perfino migliore: `wlc_phy_aci_scan_nphy` sta in
+`phy/phy_int.h:1097` come **prototipo senza corpo**, che dice piu' di qualunque
+disassemblato sul fatto che quella e' una politica sopra il PHY. La lezione: le
+domande sul comportamento si portano a `brcmsmac` **prima**, non dopo.

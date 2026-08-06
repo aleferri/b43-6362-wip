@@ -130,3 +130,6 @@ static inline u32 int_sqrt64(u64 x)
 #endif
 
 #endif
+
+/* Serve alla cal RX IQ, che media la potenza su 1024 campioni. */
+#define DIV_ROUND_CLOSEST(x, d) (((x) + ((d) / 2)) / (d))

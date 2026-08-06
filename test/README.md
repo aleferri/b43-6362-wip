@@ -43,8 +43,13 @@ Il repo non tiene una copia dei sorgenti del driver.
   parte invece di quella richiesta. Si vedeva sulla banda del filtro passa-basso
   che la cal PAPD rilegge da `7/0x154`, e per due sessioni e' stato attribuito ai
   piani di lettura e alla cattura sbagliata prima che qualcuno guardasse `wrap.c`.
-  Le `__wrap_b43_ntab_*` fanno girare la `__real_` comunque, perche' e' lei che
-  emette le op sulla porta: cambia solo il valore che torna. Le `b43_ntab_*` invece stanno
+  Il mirror lo serve `tbl_port_get()` **alla porta dati**, cioe' dentro
+  `b43_phy_read` per `0x73` e `0x74`, usando `(id << 10) | off` dall'ultima
+  scrittura su `0x72`. Prima lo serviva solo al valore di ritorno di
+  `b43_ntab_read`: il driver leggeva la cella giusta e il trace continuava a
+  mostrare il mirror del registro, cioe' la misura diceva di no mentre il codice
+  era a posto. Due sessioni di colpa data ai piani di lettura e alla cattura
+  sbagliata prima di guardare qui. Le `b43_ntab_*` invece stanno
   in `tables_nphy.c` che compiliamo, quindi si intercettano al linker con
   `--wrap` e poi si chiama la `__real_`: nel trace escono l'etichetta `TBL.WR` e
   le `PHY.WR` su 0x72/0x73/0x74 che ne discendono, come nella cattura.
@@ -207,44 +212,54 @@ tutte:
 | rssi-cal | 16 | 11/16 | mancano 5, in più 3: i nove coefficienti combaciano, le mancanti sono `PHY.RD` su `0x73`, che i piani escludono di proposito |
 | papd-digifilt (`0015`) | 15 | **15/15** | **ok** |
 
-### Regioni contigue: `CONTIG`
+### Le finestre, che sono due: `CONTIG`
 
-Una fase di calibrazione **non si misura a finestre per funzione**, si misura come
-una regione contigua sola. Il motivo sono i piani di lettura: sono posizionali,
-quindi servono il valore che l'hardware ha dato solo se il port fa le stesse read
-nello stesso ordine del vendore. Dentro una regione contigua quella condizione e'
-vera per costruzione; con una finestra per funzione no, e si finisce a inseguire
-il cursore dei piani invece del difetto. Le finestre `papd-calsetup` e
-`papd-calcleanup` sono esistite una sessione e sono state togliere per questo.
+`CONTIG` ha **due** voci, la stessa macro operazione nei suoi due comportamenti:
+`up-ch1` (init a caldo, `opinit-*`, flow `init`) da **22951 op, 5791 in blocchi
+contigui, 25%**, e `up-ch1-freddo` (init completo, `full-init-*`, flow `initpor`)
+da **27571 op, 8746, 32%**. Due e non una perche' il tipo di calibrazione cambia
+il comportamento — `full_cal` contro `soft`, e i buchi di `a3`/`a2` passano da 349
+e 276 op a 920 e 930 — quindi una fase di cal verificata contro una cattura sola
+valida un ramo e tace sull'altro. La seconda copre piu' della prima perche'
+contiene il download delle tabelle statiche.
 
-`CONTIG` sta accanto a `WINDOWS` e non da' un voto: da' la **struttura dei
-blocchi comuni**, ciascuno col record da cui parte, calcolata con `difflib` sui
-due flussi. Un blocco che si accorcia e' una regressione anche se il totale sale.
-Oggi ce ne sono due, la stessa fase in due catture: `papd-cal` (#10966-13918 della
-`opinit-*`) da **2486 op, 1836 in blocchi contigui, 74%**, il primo da 847;
-`papd-cal-freddo` (#18662-24096 della `full-init-*`) da **3727 op, le stesse 1836,
-49%**, stesso primo blocco. I buchi grossi sono `a3`/`a2`: 349 e 276 a caldo, 920 e
-930 a freddo, dove la cal e' completa. Una regione puo' dichiarare `capture=` come
-una finestra.
+Con `patches/b43/0017` il port sceglie full o parziale come il riferimento invece
+di inchiodare `true`. Su queste due catture non cambia niente — sono entrambe di
+un'interfaccia che sale su un canale non calibrato, quindi il test viene `full` in
+tutte e due — ma ha fatto uscire un buco qui: `main.c` azzerava fra i due init
+`rssical_chanspec` e `iqcal_chanspec` e non `txiqlocal_chanspec`, e un secondo init
+che la trovava valorizzata prendeva la strada parziale, **−24 op** su `up-ch1`. Le
+tre parti dello stato di cal si azzerano insieme. Non ha ancora — i blocchi si cercano su tutto l'output del flow —
+e il verdetto e' la struttura dei blocchi, non la percentuale: un blocco che si
+accorcia e' una regressione anche se il totale sale.
 
-C'e' anche `rxiq-cal` (#14093-22246), la fase che il port **non** ha, e serve a
-tenere onesta la tabella per regione: quella dice 0% e la regione trova un blocco
-da **172 op contigue a #14121**. Non e' una contraddizione ed e' istruttivo: quelle
-172 op sono `TBL.WR id=0x1a off=0x40 len=84`, l'upload dei gain, cioe' **la coda di
-`wlc_phy_txpwr_index_nphy` che il port fa identica** — il confine fra le due regioni
-in `REGIONS` sta a #14092/#14093 e passa in mezzo a quella coda. Da correggere. Lo
-0% della tabella nasce dall'assegnazione dei blocchi della global run, che e'
-esclusiva: un blocco lungo altrove si porta via le op.
+Le region per fase sono state provate e togliere, quattro in altrettante sessioni.
+Il motivo non e' estetico: **una fase presa da sola non dice niente su cio' che le
+arriva addosso da prima**. `chanswitch-ch6` diceva 33/39 e "nessuna op mancante";
+la fase intera sta al 14%, perche' 200 op su 321 sono un ciclo di 100+100 read
+consecutive su `0x1c9`/`0x1ca` che il port non fa affatto, e che nessuno ha ancora
+attribuito (`CLAUDE.md`, Prossimo passo 0). Una finestra che passa mentre la fase
+e' al 14% e' peggio di nessuna finestra.
 
-`canon_contig()` **non riduce piu' niente**, e questa e' la parte piu' severa del
-confronto. C'e' stata una riduzione che portava ogni read al suo indirizzo, perche'
-l'harness stampava `val=UNDEFINED` mentre la cattura coi RETVAL ripiegati il valore
-ce l'ha; ora `wrap.c` stampa il valore che ha servito, quindi un blocco dice che il
-port fa le stesse op, nello stesso ordine, **e legge le stesse cose**. Il prezzo e'
-visibile: `papd-cal` e' scesa da 1836 a 1819 op in blocchi e il primo blocco da 847
-a 791. Quelle 17 op sono informazione che prima era nascosta, e la prima e' il
-bbmult (`docs/papd-cal-map.md`). Guadagno collaterale: la finestra `papd-tables`
-e' passata da 513/774 a **774/774**.
+I confronti per fase restano nelle **finestre** qui sopra, che sono il dettaglio;
+`up-ch1` e' la misura.
+
+### I seed
+
+Lo stato che la finestra non puo' avere lo semina
+`reverse-tools/gen_seed.py --before 132` in `test/seed_up.h`, applicato da `main.c`
+dopo l'init a freddo e prima di quello tracciato. Si semina **solo cio' che
+precede la finestra**: seminare lo stato prodotto dentro farebbe tornare giusto per
+magia un registro che il port programma male.
+
+Due categorie: quello che `op_init` e `rfkill` hanno programmato, e quello il cui
+**primo accesso e' una read**, cioe' il default del chip — criterio che non e' "mai
+scritto", perche' `0x17d` la cal la scrive dopo averla letta. Le due `atten` del
+coupler a `0xaa` entrano per questa via.
+
+**Valgono 32 op su 22951**: 5130 senza, 5130 coi soli seed di `op_init`+`rfkill`,
+5162 coi default. Il resto del divario e' codice che manca, non stato.
+`B43_TEST_NOSEED=1` li disattiva.
 
 La colonna **run** è la sequenza consecutiva più lunga che combacia, su quante op
 ha la finestra: dice fin dove le due sequenze stanno insieme, che è più

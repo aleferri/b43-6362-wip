@@ -129,10 +129,22 @@ suo: `b43_nphy_cal_rx_iq()` forza `type = 0` quando `phy->rev >= 7`, quindi il
 
 Cosa c'e' dietro, misurato sulla cattura: **7510 op**, #14093-22246, un terzo
 della finestra di init. Che sia la cal RX IQ si riconosce da tre cose, tutte
-contabili: sette scritture della tabella dei campioni da 160 word (#16319,
-#17130, #17542, #18588, #19399, #20210, #20624), un upload di gain sulle tabelle
-26 e 27 a `off=0x40 len=84` fra un tono e il successivo, e diciassette coppie
+contabili: otto scritture della tabella dei campioni da 160 word (#15508, #16319,
+#17130, #17542, #18588, #19399, #20210, #20624), due azzeramenti da 84 celle
+sulle tabelle 26 e 27 a `off=0x40 len=84` per ogni tono, e diciassette coppie
 read/write su IQLOCAL una cella per volta.
+
+Quelle scritture da 84 celle **non sono un upload di gain**, come diceva questa
+voce: sono `wlc_phy_txpwrctrl_enable_nphy` che spegne il controllo di potenza
+dentro `wlc_phy_txpwr_index_nphy`, e b43 quel codice ce l'ha in
+`b43_nphy_tx_power_ctrl()`. Vedi `docs/rxiq-cal-map.md`.
+
+**Non e' piu' uno stub.** `patches/b43/0018` porta il guscio, l'indice di potenza
+per core e lo sweep di gain, e `up-ch1` passa da 5791 a **11552 op su 22951**;
+`0019` aggiunge il gain di pre-calibrazione e lo porta a **12363**.
+Resta fuori la misura per cui lo sweep prepara il gain — il tono al tipo di cal
+chiesto e `b43_nphy_calc_rx_iq_comp()` — quindi la funzione torna ancora errore e
+la ricaduta qui sotto vale ancora.
 
 Ricaduta oltre le op: lo stub torna -1, e in `b43_phy_initn` la `save_cal` sta
 dietro `if (b43_nphy_cal_rx_iq(...) == 0)`, quindi **non viene mai salvata una

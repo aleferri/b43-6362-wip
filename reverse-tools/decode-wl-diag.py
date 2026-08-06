@@ -55,8 +55,13 @@ OPS = {
     32: "OTP.INIT",  33: "OTP.RDW",   34: "OTP.RDR",
     35: "RAD.AND",   36: "RAD.OR",
     37: "PMU.SPUR",  38: "PHY.ARRW",
+    39: "SHM.RD",    40: "SHM.WR",   41: "SHM.SET",
+    42: "MAC.SUSP",  43: "MAC.EN",
+    44: "PHY.CLK",   45: "MAC.FREQ",
     255: "DROP",
 }
+
+
 
 # Le read loggano solo occorrenza+indirizzo: il valore NON e' catturato (hook
 # all'ingresso, o foglia con return non agganciabile). Va emesso UNDEFINED, MAI
@@ -118,6 +123,11 @@ def main():
             elif op in TABLE:                      # accesso tabella: id/off/len
                 print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "
                       f"id={h(addr, False)} off={h(aux, False)} len={val}")
+            elif op in (42, 43):                   # MAC.SUSP / MAC.EN: nessun operando
+                print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8}")
+            elif op in (44, 45):                   # PHY.CLK / MAC.FREQ: solo val
+                print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "
+                      f"val={h(val, False)}")
             elif op in GPIO or op in MCTRL:        # addr assente (reg fisso)
                 print(f"{t:14.6f} #{seq:<8} cpu{cpu} {name:<8} "
                       f"val={h(val, wide)} mask={h(aux, wide)}")
