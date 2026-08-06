@@ -54,6 +54,7 @@
 #include <linux/kfifo.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
+#include <linux/string.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/spinlock.h>
@@ -388,10 +389,24 @@ static struct hook hooks[] = {
 	 * wlc_bmac_copyfrom_objmem (156). I wlapi_* omonimi sono trampolini da
 	 * 16 byte e non si agganciano: il detour non ci sta.
 	 */
-	{ "wlc_bmac_read_objmem",    OP_OBJ_R,     1, 0, 3, .retcap = true },
-	{ "wlc_bmac_write_objmem",   OP_OBJ_W,     1, 2, 4 },
-	{ "wlc_bmac_copyto_objmem",  OP_OBJ_CPTO,  1, 0, 5 },
-	{ "wlc_bmac_copyfrom_objmem", OP_OBJ_CPFROM, 1, 0, 5 },
+	 * I tre numeri sono (addr, val, aux) come indici di a1..a3, e la prima
+	 * versione di queste quattro righe li aveva sbagliati tutti: la cattura
+	 * vd630 lo mostra, ogni OBJ.CPTO esce con val=0x0000 perche' le avevo
+	 * dichiarato val=0. Le firme:
+	 *   read_objmem(hw, off, sel)             a1=off, a2=sel
+	 *   write_objmem(hw, off, v, sel)         a1=off, a2=v, a3=sel
+	 *   copyto_objmem(hw, off, buf, len, sel) a1=off, a2=buf, a3=len,
+	 *                                        sel sullo STACK: in o32 non c'e'
+	 *                                        un a4, quindi non e' leggibile e
+	 *                                        aux resta 0.
+	 * Per un trasferimento in blocco la cosa che serve e' `len`: senza, la
+	 * cattura dice DOVE ha scritto e non QUANTO, e una CPTO a 0x1d4 non si
+	 * distingue fra due byte e trentasei.
+	 */
+	{ "wlc_bmac_read_objmem",    OP_OBJ_R,     1, 0, 2, .retcap = true },
+	{ "wlc_bmac_write_objmem",   OP_OBJ_W,     1, 2, 3 },
+	{ "wlc_bmac_copyto_objmem",  OP_OBJ_CPTO,  1, 3, 0 },
+	{ "wlc_bmac_copyfrom_objmem", OP_OBJ_CPFROM, 1, 3, 0 },
 	/* branch a slot 3 (beq): detour classico a 4 parole impossibile. short-j a
 	 * 1 parola: o[0]=j stub; o[1] (addiu $v0,1) resta come delay slot; lo stub
 	 * riesegue o[0..1] e rientra a +8 (v0 ri-settato DOPO la hook). addr=a1
@@ -967,9 +982,114 @@ static unsigned int wd_poll(struct file *f, poll_table *wait)
 	return 0;
 }
 
+/* Scrittura in memoria kernel dalla shell, a cattura in corso.
+ *
+ * Il `poke=` come module param non basta e il motivo e' la sequenza: per l'init
+ * col download statico serve azzerare `hw_up` in `pub` *fra* `wl down` e
+ * `wl up`, e un parametro spara a insmod, cioe' troppo presto. Questo handler
+ * fa la stessa cosa a comando:
+ *
+ *   echo 'w8  c1f42f8c 0'     > /proc/wl_diag   scrivi un byte
+ *   echo 'w32 c1f42f8c 0'     > /proc/wl_diag   scrivi una word
+ *   echo 'r   c1f42f8c 16'    > /proc/wl_diag   dumpa 16 byte in dmesg
+ *
+ * Indirizzi in esadecimale, valore con prefisso libero (0x, decimale). Il
+ * risultato va in dmesg, non nella fifo: la fifo e' la cattura e non si sporca.
+ *
+ * MIPS, e conta: gli indirizzi di un modulo stanno in spazio vmalloc (0xc0000000
+ * in su nel log: c1f4..., c208...), che NON e' raggiungibile da /dev/mem con un
+ * offset fisso come KSEG0 - servirebbe camminare le page table. Per questo la
+ * scrittura si fa da qui, in contesto kernel, dove l'indirizzo virtuale e'
+ * direttamente dereferenziabile. E si usa un accesso della larghezza chiesta,
+ * senza memcpy, perche' su MIPS una word deve essere allineata: un `w32` su un
+ * indirizzo non multiplo di 4 prende un address error, quindi si rifiuta.
+ *
+ * Nessuna validazione dell'indirizzo, come per il poke: e' un attrezzo da banco.
+ * Stampa sempre il valore trovato prima, cosi' un indirizzo sbagliato si vede.
+ */
+static ssize_t wd_cmd_write(struct file *f, const char __user *ubuf,
+			    size_t len, loff_t *off)
+{
+	char buf[64], *p, *tok;
+	unsigned long addr;
+	unsigned long val;
+	int width = 8, i;
+
+	if (len == 0 || len >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+	buf[len] = 0;
+	p = strim(buf);
+
+	tok = strsep(&p, " \t");
+	if (!tok || !p)
+		return -EINVAL;
+	if (!strcmp(tok, "w8"))
+		width = 8;
+	else if (!strcmp(tok, "w16"))
+		width = 16;
+	else if (!strcmp(tok, "w32"))
+		width = 32;
+	else if (!strcmp(tok, "r"))
+		width = 0;
+	else
+		return -EINVAL;
+
+	p = skip_spaces(p);
+	tok = strsep(&p, " \t");
+	if (!tok || kstrtoul(tok, 16, &addr) || !addr)
+		return -EINVAL;
+	if (!p || kstrtoul(skip_spaces(p), 0, &val))
+		return -EINVAL;
+
+	if (width && (addr & ((width / 8) - 1))) {
+		pr_warn("wl_diag: %p non allineato per w%d\n",
+			(void *)addr, width);
+		return -EINVAL;
+	}
+
+	switch (width) {
+	case 0:
+		if (val > 64)
+			val = 64;
+		pr_info("wl_diag: dump %p +%lu:\n", (void *)addr, val);
+		for (i = 0; i < (int)val; i += 16)
+			pr_info("wl_diag:   +%02x: %*ph\n", i, 16,
+				(u8 *)addr + i);
+		break;
+	case 8: {
+		u8 *q = (u8 *)addr, was = *q;
+
+		*q = (u8)val;
+		pr_info("wl_diag: w8  %p: 0x%02x -> 0x%02x (riletto 0x%02x)\n",
+			q, was, (u8)val, *q);
+		break;
+	}
+	case 16: {
+		u16 *q = (u16 *)addr, was = *q;
+
+		*q = (u16)val;
+		pr_info("wl_diag: w16 %p: 0x%04x -> 0x%04x (riletto 0x%04x)\n",
+			q, was, (u16)val, *q);
+		break;
+	}
+	default: {
+		u32 *q = (u32 *)addr, was = *q;
+
+		*q = (u32)val;
+		pr_info("wl_diag: w32 %p: 0x%08x -> 0x%08x (riletto 0x%08x)\n",
+			q, was, (u32)val, *q);
+		break;
+	}
+	}
+	return len;
+}
+
 static const struct file_operations wd_fops = {
 	.owner = THIS_MODULE,
 	.read = wd_read,
+	.write = wd_cmd_write,
 	.poll = wd_poll,
 	.llseek = no_llseek,
 };
@@ -997,7 +1117,7 @@ static int wd_proc_add(void)
 	/* create_proc_entry e' via dal 3.10. Dal 5.6 proc_create vuole
 	 * struct proc_ops e non file_operations: se serve arrivare fin la',
 	 * qui va una seconda struttura, non una conversione. */
-	wd_pde = proc_create("wl_diag", S_IRUSR, NULL, &wd_fops);
+	wd_pde = proc_create("wl_diag", S_IRUSR | S_IWUSR, NULL, &wd_fops);
 #endif
 	if (!wd_pde) {
 		pr_err("wl_diag: /proc/wl_diag non creata\n");
@@ -1019,6 +1139,11 @@ static void wd_proc_del(void)
  * (wl+0x8 -> wlc, wlc+0x130 -> wlc_hw, wlc_hw+0x90 -> band, band+0x24 -> pi sul
  * blob 6.30) senza doverla cercare a mano ogni volta.
  *
+ * Quegli offset sono del **6.30** e su 7.14 non valgono: le struct sono cambiate,
+ * e si vede anche da fuori (`wl_netdev_ops` passa da 80 a 136 byte). Il base
+ * pointer questa funzione lo da' su qualunque build; gli offset per arrivare a
+ * `pub` e al flag `hw_up` vanno ricavati per versione.
+ *
  * Il riconoscimento e' su netdev_ops: le due strutture sono simboli globali del
  * driver wl. Sono DATI, e su un kernel senza KALLSYMS_ALL i dati di vmlinux non
  * sono in kallsyms -- ma wl e' un modulo, e i simboli di un modulo ci entrano
@@ -1035,22 +1160,47 @@ static void wd_dump_privs(void)
 
 	ops[0] = (const void *)kallsyms_lookup_name("wl_dslcpe_netdev_ops");
 	ops[1] = (const void *)kallsyms_lookup_name("wl_netdev_ops");
-	if (!ops[0] && !ops[1]) {
-		pr_info("wl_diag: netdev_ops di wl non risolte, niente base pointer\n");
-		return;
-	}
+	if (!ops[0] && !ops[1])
+		pr_info("wl_diag: netdev_ops di wl non risolte, uso il ripiego "
+			"per modulo\n");
 
 	rtnl_lock();
 	for_each_netdev(&init_net, dev) {
+		const char *how = NULL;
+
 		for (n = 0; n < 2; n++) {
 			if (!ops[n] || dev->netdev_ops != ops[n])
 				continue;
-			pr_info("wl_diag: %s: priv=%p (netdev=%p, ops=%s)\n",
-				dev->name, netdev_priv(dev), dev,
-				n ? "wl_netdev_ops" : "wl_dslcpe_netdev_ops");
-			found++;
+			how = n ? "wl_netdev_ops" : "wl_dslcpe_netdev_ops";
 			break;
 		}
+
+		/* Ripiego che non dipende da nessun simbolo: se le netdev_ops di
+		 * questa interfaccia stanno DENTRO il modulo wl, l'interfaccia e'
+		 * di wl. Serve perche' la strada per nome e' fragile due volte -
+		 * quale delle due strutture sia in uso dipende dalla build, e i
+		 * loro nomi cambiano fra versioni. Misurato sui due blob:
+		 * `wl_netdev_ops` e' 80 byte sul 6.30 e 136 sul 7.14, cioe'
+		 * struct net_device_ops segue il kernel; e su un device 7.14 reale
+		 * nessuno dei due nomi era in kallsyms mentre tutte le funzioni
+		 * c'erano. Con __module_address non serve indovinare il nome.
+		 */
+		if (!how && dev->netdev_ops) {
+			struct module *m;
+
+			preempt_disable();
+			m = __module_address((unsigned long)dev->netdev_ops);
+			preempt_enable();
+			if (m && !strcmp(m->name, "wl"))
+				how = "modulo wl (ripiego)";
+		}
+
+		if (!how)
+			continue;
+
+		pr_info("wl_diag: %s: priv=%p (netdev=%p, ops=%p via %s)\n",
+			dev->name, netdev_priv(dev), dev, dev->netdev_ops, how);
+		found++;
 	}
 	rtnl_unlock();
 
@@ -1107,6 +1257,12 @@ static void wd_do_poke(void)
 /* ---- init/exit -------------------------------------------------------- */
 static int eligible[NHOOK];   /* indici agganciabili */
 static int n_elig;
+/* I simboli che non si sono risolti, per stamparli insieme nel riepilogo: su una
+ * build reale (wl.ko della vd630) mancano i quattro accessor objmem a parola
+ * singola, inlinati - copyto_objmem la' e' 568 byte contro 160 nel blob. Quindi
+ * su quel device l'unico accesso osservabile alla object memory e' il bulk. */
+static const char *miss[8];
+static int n_miss;
 
 static int __init wd_init(void)
 {
@@ -1128,6 +1284,14 @@ static int __init wd_init(void)
 
 		a = kallsyms_lookup_name(hooks[i].name);
 		if (!a) {
+			/* Un simbolo mancante e' un BUCO DELLA CATTURA, non un
+			 * avviso fra gli altri: chi la legge deve sapere quali
+			 * classi di accesso non sono osservabili, altrimenti
+			 * "zero occorrenze" viene letto come "non lo fa". Si
+			 * accumulano e si stampano nel riepilogo.
+			 */
+			if (n_miss < ARRAY_SIZE(miss))
+				miss[n_miss++] = hooks[i].name;
 			pr_warn("wl_diag: '%s' non trovato (wl caricato?)\n",
 				hooks[i].name);
 			continue;
@@ -1296,6 +1460,16 @@ static int __init wd_init(void)
 		hooks[eligible[i]].armed = true;
 	}
 	pr_info("wl_diag: ARMATO (%d hook) -> /proc/wl_diag\n", n_elig);
+	if (n_miss) {
+		int k;
+
+		pr_warn("wl_diag: BUCHI DELLA CATTURA, %d simboli non risolti:\n",
+			n_miss);
+		for (k = 0; k < n_miss; k++)
+			pr_warn("wl_diag:   %s\n", miss[k]);
+		pr_warn("wl_diag: gli accessi che passano da questi NON compaiono. "
+			"Annotarlo con la cattura.\n");
+	}
 	wd_dump_privs();
 	wd_do_poke();
 	return 0;

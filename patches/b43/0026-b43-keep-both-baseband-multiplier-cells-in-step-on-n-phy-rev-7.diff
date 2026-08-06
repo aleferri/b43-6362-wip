@@ -1,0 +1,130 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: keep both baseband multiplier cells in step on N-PHY rev 7
+
+The baseband multiplier lives in two cells of the IQ/LO table, 87 and 95,
+and b43_nphy_txpwr_index() was writing only the first. brcmsmac keeps them
+together in wlc_phy_ipa_set_bbmult_nphy(), which writes the same value to
+both, and this driver has that helper too - it arrived with the PAPD
+calibration and has one caller.
+
+The helper is not what this wants though, and the capture is why: it shows
+the second cell being read before it is written, with the previous value
+still in it, and only the calling core's half changed - the same
+read-modify-write the first cell gets, not a copy of it. So do that, on
+both.
+
+Which callers touch both cells is measured and it is not by phase. Of the
+70 writes to 87 in the capture, 40 have a write to 95 beside them and 30 do
+not, and inside the gain sweep alone five are paired and seven are not. The
+paired ones are the calls to this function - twelve of them, the
+pre-calibration index, the handing back, the PAPD tail and the six sweep
+iterations - and the PAPD calibration's own six. The bare ones are stopping
+the sample playback and b43_nphy_tx_power_fix(), which are left alone.
+
+Verified positionally rather than by eye, with a window on one call:
+the operation sequence now matches the vendor driver's, the
+read-modify-write on the second cell included. What still differs inside
+that window is values and not operations, and they are the harness's: the
+per-index cells of the power control table have no read plan, so the mirror
+answers with the last thing written to the data port. That is why this does
+not lengthen a matching run - a run breaks on any difference, a value one
+included - and why the gain is 57 operations rather than the 240 the six
+extra operations per call would suggest.
+
+check_patch_gating.py marks b43_nphy_txpwr_index() ungated and it was when it
+arrived: its gate is in the callers, all of which test phy rev 8 and radio
+rev 8. The two helpers move up in the file so the function can reach them and
+are otherwise unchanged.
+
+Verified: records #15296-#15310, from
+"TBL.RD   id=0x000f off=0x005f len=1"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n24234
+Link: https://github.com/aleferri/b43-6362-wip/blob/2e298fc/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -3850,6 +3850,22 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+ 		b43_nphy_stay_in_carrier_search(dev, 0);
+ }
+ 
++/* The baseband multipliers the calibration works on: table 15 offsets 87 and
++ * 95. brcmsmac's wlc_phy_ipa_get_bbmult_nphy() and its set counterpart.
++ */
++static u16 b43_nphy_ipa_get_bbmult(struct b43_wldev *dev)
++{
++	return b43_ntab_read(dev, B43_NTAB16(15, 87));
++}
++
++static void b43_nphy_ipa_set_bbmult(struct b43_wldev *dev, u8 m0, u8 m1)
++{
++	u16 m0m1 = (m0 << 8) | m1;
++
++	b43_ntab_write(dev, B43_NTAB16(15, 87), m0m1);
++	b43_ntab_write(dev, B43_NTAB16(15, 95), m0m1);
++}
++
+ /* Put one transmit chain on a chosen index of the power control table, the way
+  * brcmsmac's wlc_phy_txpwr_index_nphy() does for a non-negative index. The
+  * three tables the index selects sit 128 cells apart: the gain at 192, the IQ
+@@ -3966,6 +3982,21 @@ static void b43_nphy_txpwr_index(struct b43_wldev *dev, u8 core_mask,
+ 
+ 		b43_ntab_write(dev, B43_NTAB16(7, 0x110 + core), rad_gain);
+ 
++		/* The multiplier lives in two cells, 87 and 95, and both get the
++		 * core's half read-modify-written - not one written and the other
++		 * copied. The capture shows the second one being read before it
++		 * is written, and with the same value in it as the first had, so
++		 * the two are kept in step rather than one being derived from the
++		 * other.
++		 *
++		 * Which callers write both is measured and it is not by phase: of
++		 * the 70 writes to 87 in the capture 40 have a write to 95 beside
++		 * them and 30 do not, and inside the gain sweep alone five are
++		 * paired and seven are not. The paired ones are the calls to this
++		 * function and the PAPD calibration; the bare ones are stopping
++		 * the sample playback and b43_nphy_tx_power_fix(), which write 87
++		 * alone and are left as they are.
++		 */
+ 		m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 87));
+ 		if (core == 0)
+ 			m1m2 = (m1m2 & 0x00FF) | (bbmult << 8);
+@@ -3973,6 +4004,13 @@ static void b43_nphy_txpwr_index(struct b43_wldev *dev, u8 core_mask,
+ 			m1m2 = (m1m2 & 0xFF00) | bbmult;
+ 		b43_ntab_write(dev, B43_NTAB16(15, 87), m1m2);
+ 
++		m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 95));
++		if (core == 0)
++			m1m2 = (m1m2 & 0x00FF) | (bbmult << 8);
++		else
++			m1m2 = (m1m2 & 0xFF00) | bbmult;
++		b43_ntab_write(dev, B43_NTAB16(15, 95), m1m2);
++
+ 		iqcomp = b43_ntab_read(dev, B43_NTAB32(tbl, 320 + txpwrindex));
+ 		iqcomp_a = (iqcomp >> 10) & 0x3FF;
+ 		iqcomp_b = iqcomp & 0x3FF;
+@@ -6732,22 +6770,6 @@ static const struct {
+ 	  R2057_TX1_TXRXCOUPLE_2G_PWRUP, R2057_TX1_TXRXCOUPLE_2G_ATTEN },
+ };
+ 
+-/* The baseband multipliers the calibration works on: table 15 offsets 87 and
+- * 95. brcmsmac's wlc_phy_ipa_get_bbmult_nphy() and its set counterpart.
+- */
+-static u16 b43_nphy_ipa_get_bbmult(struct b43_wldev *dev)
+-{
+-	return b43_ntab_read(dev, B43_NTAB16(15, 87));
+-}
+-
+-static void b43_nphy_ipa_set_bbmult(struct b43_wldev *dev, u8 m0, u8 m1)
+-{
+-	u16 m0m1 = (m0 << 8) | m1;
+-
+-	b43_ntab_write(dev, B43_NTAB16(15, 87), m0m1);
+-	b43_ntab_write(dev, B43_NTAB16(15, 95), m0m1);
+-}
+-
+ /* The transmit digital filter the PAPD calibration runs behind, which is not
+  * the one the PHY init leaves in place: row 3 of tbl_tx_filter_coef_rev4 at
+  * 20 MHz, row 4 at 40 MHz. brcmsmac's

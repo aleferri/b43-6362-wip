@@ -113,6 +113,59 @@ static const struct board boards[] = {
 		.pa_2g = { { 0xff71, 0x1740, 0xfb17 },
 			   { 0xff81, 0x1784, 0xfb1b } },
 	},
+	{
+		/* La vd630, aggiunta per FALSIFICARE una previsione: sulla
+		 * 3580L le colonne CDD/STBC/SDM della tabella di potenza
+		 * aggiustata tornano (0x0c), ma la' le nibble di mcs2gpo sono
+		 * tutte 6 e 2*6 = 12 = 0x0c, quindi potrebbe essere una
+		 * coincidenza. Qui le nibble MCS vanno da 2 a 8 e nella cattura
+		 * quelle colonne restano 0x0c COSTANTI: se il calcolo di b43 le
+		 * fa variare, la coincidenza e' dimostrata.
+		 *
+		 * Valori da router-data/vd630/nvram.txt. Solo cio' che serve al
+		 * calcolo della potenza: il resto della board non e' verificato
+		 * contro la sua cattura, che e' un init parziale.
+		 */
+		.name = "vd630",
+		/* Stesso PHY e stesso radio della 3580L: il blob D6220 ha i 33
+		 * simboli dati del 2057 rev5-8 con size identiche e
+		 * regs_2057_rev8 uguale byte per byte (docs/blob-inventory.md).
+		 * Il chip pero' e' un altro, e questi quattro campi non sono
+		 * verificati contro la cattura: servono solo a far prendere al
+		 * PHY il percorso del 2057 rev 8. Cio' che si sta misurando qui
+		 * e' il calcolo della potenza dalla SROM, che da questi non
+		 * dipende.
+		 */
+		.chip_id = 0x6362,
+		.chip_rev = 1,
+		.core_rev = 22,
+		.dev_id = 0x435f,
+		.phy_rev = 8,
+		.radio_rev = 8,
+		.radio_ver = 0x2057,
+		.sprom_rev = 8,
+		.boardflags_lo = 0x0200,
+		.boardflags_hi = 0x0000,
+		.boardflags2_lo = 0x0000,
+		.boardflags2_hi = 0x0000,
+		.fem_tssipos = 1,
+		.fem_extpa_gain = 2,
+		.fem_pdet_range = 2,
+		.fem_tr_iso = 3,
+		.fem_antswlut = 0,
+		.maxpwr_2g = { 74, 74 },
+		/* ofdm2gpo=1715741218 = 0x66442222, mcs2gpo0..7 alternano
+		 * 0x4422 e 0x8866: nibble MCS 2,2,4,4,6,6,8,8 */
+		.cck2gpo = 0x0000,
+		.ofdm2gpo = 0x66442222,
+		.mcs2gpo = { 0x4422, 0x8866, 0x4422, 0x8866,
+			     0x4422, 0x8866, 0x4422, 0x8866 },
+		.cddpo = 0x0000,
+		.stbcpo = 0x0000,
+		.itssi_2g = { 32, 32 },
+		.pa_2g = { { 0xff43, 0x1778, 0xfab3 },
+			   { 0xff82, 0x1838, 0xfab0 } },
+	},
 };
 
 static struct ssb_sprom sprom;
