@@ -16,7 +16,7 @@ harness che compila il vero `phy_n.c`.
 ```sh
 sh scripts/fetch-upstream-state.sh ~/src/linux      # sparse, ~60 MB, sha 848acc8ffe1b
 cd ~/src/linux
-for p in .../patches/mainline/*.patch; do git apply "$p"; done   # tutte e cinque
+for p in .../patches/mainline/*.patch; do git apply "$p"; done   # tutte e sei
 for p in .../patches/b43/0*.patch; do git apply "$p"; done       # 0010 conflitta, e va bene
 cd test && make KDIR=~/src/linux && make KDIR=~/src/linux warncheck
 ./phase_compare.py --vendor ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
@@ -56,12 +56,71 @@ tre.
 ## Stato
 
 `13 finestre: 0 da guardare, 4 divergenze note` piu' **due** finestre vere:
-`up-ch1` (**12363 op su 22951, 54%**) e `up-ch1-freddo` (**14353 su 27571, 52%**)
+**Il verdetto e' la tabella per fase di `phase_compare.py`: 4271 op su 18826, il
+23%.** Non il totale in blocchi contigui, che dice 15281 su 22943 (67%) e che **non
+e' una misura**: su `up-ch1` 774 blocchi su 879 stanno sotto le 16 op e valgono
+~1900 op del totale. Sommare frammenti da due op e chiamarla copertura e' contare il
+sommerso nel PIL.
+
+Un blocco conta se corrisponde a una **fase**: una voce di `phy_ops` dove esiste,
+oppure — eccezione dichiarata finche' il port non le espone — una macro operazione
+delimitata da un marcatore citato. Il numero per fase e' **uno**, la run contigua
+piu' lunga dentro la fase, quindi nessun frammento lo muove.
+
+| fase | op | run |
+|---|---|---|
+| `gain-table` | 1540 | **1540 100%** |
+| `pwr-setup` | 432 | 266 62% |
+| `idle-tssi` | 660 | 334 51% |
+| `cal-papd` | 2662 | 847 32% |
+| `coda-idle-tssi` | 1139 | 334 29% |
+| `cal-tx-iqlo` | 1570 | 333 21% |
+| `cal-rssi-2` | 960 | 83 9% |
+| `cal-rx-iq` | 5617 | 420 7% |
+| `perical-ingresso` | 1402 | 103 7% |
+| `coeff-setup-2` | 1073 | 10 1% |
+| `coeff-setup` | 1055 | **0 0%** |
+| `recalc-txpower` (**phy_ops vera**) | 716 | **1 0%** |
+
+Tre cose che questa tabella ha ribaltato e che i totali avevano coperto per giri
+interi: `coeff-setup` fa **zero** — i blocchi da 256 op che contavo cadono fuori
+dalla fase, quindi tre sessioni di lavoro su quella fase girano attorno a op che non
+stanno dove il vendore le mette; `recalc_txpower`, che e' una `phy_ops` **vera** e
+non una macro, fa **1 su 716**; e la cal RX IQ fa **7%**, non 85% — le sei iterazioni
+dello sweep sono vere e hanno la forma giusta, ma la run piu' lunga dentro la fase e'
+**una** iterazione. L'unica fase che torna per intero e' `gain-table`, 1540 su 1540.
+
+Il totale vecchio resta stampato sopra la tabella, e serve a vedere quanto sommerso
+c'e': 15281 contro 4271.
+
+`up-ch1-freddo` **e' scesa di 75 con `0024`**, ed e' l'assegnazione che
+redistribuisce: della fase che `0024` aggiunge, la finestra fredda contiene le
+**prime nove op**. Finisce a #32769, dove comincia il buco da 65285 record, e la
+scrittura tardiva della tabella di potenza sta a **#106217**, dall'altra parte.
+
+Quelle nove op vanno dette, perche' sono la ragione per cui la fase **non va gateata
+su `!do_full_init`**: gli ultimi record della cattura fredda, #32753-32769, sono le
+otto read che aprono la misura dell'idle TSSI piu' il primo override, e sono le
+stesse op nello stesso ordine di #23761-23777 nella cattura calda. Quindi il vendore
+la fase la comincia anche a freddo; il buco la taglia dopo nove record, e non e' la
+cattura che ne mostra l'assenza. **Gatare qui vorrebbe dire gatare contro un buco**,
+che e' lo stesso errore di gatare contro un conteggio a zero — la regola sulle
+deroghe vale nei due sensi, e per un giro questa voce l'ha detto al rovescio.
+
+Verificato invece che dedotto: i tre blocchi che smettono di comparire sono tutti in
+fondo alla finestra (#32507, #32613, #32685) e su quella regione da sola il port e'
+identico prima e dopo, 183 su 217 in 29 blocchi; e le nove fanno 9 su 14 in due
+blocchi in entrambi i casi, perche' il port le emette gia' dall'idle TSSI che fa
+salendo.
 
 Ci sono arrivate con due patch. `0018` e' la cal RX IQ — il guscio di
 `wlc_phy_cal_rxiq_nphy_rev3`, `b43_nphy_txpwr_index()` e **lo sweep di gain** — e
 vale **+5761**, da 5791 a 11552. `0019` e' il **gain di pre-calibrazione**, e vale
-altri **+811**.
+altri **+811**. `0020` rimette l'indice di potenza a posto in coda alla cal PAPD,
+e ne vale **+771**; `0021` lo **restituisce** subito dopo la lettura dei gain, e
+vale **+491**. `0022`+`0023` chiudono la cal RX IQ con la **misura** — tono,
+coefficienti, `save_cal` — e valgono **+726**; `0024` aggiunge la **coda** della cal
+periodica (idle TSSI, power setup, vcocal) e vale **+456**.
 
 `0019` e' la piu' piccola e la piu' istruttiva: tre righe, e sistemano un **valore
 sbagliato** invece di un'op mancante, che e' il motivo per cui nessuno l'aveva
@@ -83,9 +142,44 @@ piu' vecchio di questo radio, esattamente come quello dell'rccal (voce 5 di
 E `0019` **ha un costo, misurato**: sulla sola regione della cal PAPD,
 #10962-14092, il port passa da 2023 op appaiate su 2662 a **2014**, e da 16 blocchi
 contigui a 25; se lo portano #12700-12950 (−6 su 164) e #13700-13870 (−6 su 114).
-Nove op contro 811 e' uno scambio da fare, ma **perche' la cal PAPD combaci un po'
-peggio quando gira al gain che usa il vendore non e' spiegato**, ed e' la prossima
-cosa da guardare.
+`0020` non le recupera, e non doveva: sono localizzate e identificate.
+
+**Le nove op sono due `TBL.WR id=0xf off=0x57` e `off=0x5f` col valore `0x2c2c`**, a
+#12785 e #12867, ognuna preceduta da `PHY.MOD 0xc3 mask=0x4` — cioe' due
+`stopplayback` che rimettono il **bbmult salvato**. Il vendore rimette `0x2c`, il
+port `0x2e`. E la tabella di gain del port e' giusta: la cattura la scrive lei
+stessa a #2194, `0x4077_002e` all'indice 10, bbmult `0x2e`. Quindi in quel punto il
+vendore **non e' all'indice 10**: e' gia' tornato al 30, il cui bbmult e' `0x2c`.
+
+**Chiuse da `0021`, e la risposta non era nel riferimento.** Chi riporta l'indice
+cosi' presto non e' nessuno dei quattro punti di brcmsmac: due stanno in
+`precal_txgain` sui rami phy rev < 7, uno in `wlc_phy_cal_txgainctrl_nphy`
+(chiamata solo da quei rami), il quarto e' la coda di `wlc_phy_a4` che `0020` porta
+e che gira **dopo** #12867. L'ha trovata `trace_tables.py --cell 0xf:0x57`, aggiunto
+per questo: il bbmult fa `0x2c2c` → `0x2e2c` → `0x2e2e` mentre l'indice viene
+forzato core per core, e poi torna a `0x2c2e` e `0x2c2c` a **#8096** e **#8294**,
+dove il vendore esegue il ramo a **indice negativo** di `txpwr_index` — quello che
+`0019` aveva lasciato fuori dicendo che non aveva chiamanti.
+
+**Il senso del precal e' un'altra cosa da come suona:** l'indice forzato serve solo
+a *leggere* dei gain, non a restare programmato. Il vendore lo forza, legge, e
+restituisce subito radio gain, dac gain, bbmult e le compensazioni; le cal girano
+sull'hardware di prima, coi gain letti all'indice forzato.
+
+**Regola che ne esce: quando una cella di tabella diverge, guardare la sua storia
+prima del flusso del riferimento.** `trace_tables.py --cell ID:OFF` la stampa,
+letture comprese, e distingue le write che cambiano il valore da quelle idempotenti.
+
+**E la regola gemella, che e' costata un'ora: un difetto che sembra tale va misurato
+prima di crederci.** `gap-inventory.md` 4a bis diceva da sempre che il degrado
+`type = 2 -> 0` in `b43_nphy_cal_rx_iq()` era un difetto. Togliendolo il port e'
+peggiorato di **476 op**. Il difetto vero era un altro e a monte: b43 restringeva a
+`bool` il **modo** del test DAC, che il riferimento testa `== 1`, quindi un tipo 2
+costruiva il tono sulla banda sbagliata. Con quello sistemato (`0022` e la sesta
+mainline) il tipo 2 e il tipo 0 danno le stesse op, come nel riferimento, e il port
+porta il tipo vero senza pagarlo. Il degrado **era** un difetto, ma non quello che
+si vedeva, e la misura ha indicato la direzione giusta solo dopo aver guardato
+`if (dac_test_mode == 1)` nel riferimento.
 
 E il numero non e' il punto: **la forma torna**. La cattura fa tre iterazioni per
 core, ognuna un indice di potenza seguito dal suo tono, e il port fa le stesse tre,
@@ -99,17 +193,41 @@ quella regione da sola il port e' identico prima e dopo — stesse 172 op dalla 
 posizione, 178 su 183. **Quando un blocco si accorcia si misura la regione da sola
 prima di chiamarla regressione**, perche' l'assegnazione e' esclusiva e golosa.
 
-Run intera: flow `full` contro `opinit-ch1-ch6-bw20.decoded` #132-26100, cioe'
-il suo primo `up` a canale 1. Per regione, coi numeri di prima dello sweep:
+Per regione, flow `init`, `--global-run 132 26100`, **rimisurato**:
 
-| regione | record | appaiate |
-|---|---|---|
-| init vero e proprio | #132-10961 | 36% |
-| cal PAPD (`a4`) | #10962-14092 | **76%** |
-| cal RX IQ, ingresso | #14093-15920 | **0%** |
-| cal RX IQ, sweep di gain | #15921-22246 | **9%**, 5812 op, la più grande |
-| seconda cal RSSI | #22247-23771 | 0% col flow `full`, 46% col flow `init` |
-| coda | #23772-26100 | 29% |
+| regione | record | op | appaiate | non conf. | su confrontabili | prima dello sweep |
+|---|---|---|---|---|---|---|
+| init vero e proprio | #132-10961 | 9692 | 4868 50% | **1180** | **57%** | 36% |
+| cal PAPD (`a4`) | #10962-14092 | 2662 | 1933 73% | 0 | 73% | 76% |
+| cal RX IQ, ingresso | #14093-15920 | 1698 | 1513 89% | 3 | 89% | 0% |
+| cal RX IQ, sweep di gain | #15921-22246 | 5812 | 4921 85% | 0 | 85% | 9% |
+| seconda cal RSSI | #22247-23771 | 960 | 623 65% | 0 | 65% | 0% |
+| coda | #23772-26100 | 2127 | 949 45% | **176** | **49%** | 29% |
+
+**La colonna `non conf.` e' nuova, e prima quelle op stavano nel denominatore**:
+sono famiglie che il port non ha modo di emettere, perche' l'harness compila il PHY
+e non il core — `OBJ.*` (1286 nella finestra), `MAC.MCTRL`/`MHF` (40), `TPL.RAMW`
+(19), `GPIO.OUT` (12) — e la object memory ha comunque l'encoding non confrontabile
+di `o708`/`o70e`. **`coverage.py` le escludeva e lo dichiarava, `phase_compare.py`
+no**: era un'incoerenza fra i due strumenti, chiusa. Il totale in blocchi contigui
+**non** le esclude, di proposito: la colonna dice contro cosa si misura, non gonfia
+il verdetto.
+
+Dove cadono e' la parte interessante: **nelle quattro regioni di calibrazione sono
+zero**, quindi quelle percentuali erano gia' oneste; tutte e 1356 stanno nell'init e
+nella coda, che sono le due regioni dove il core lavora.
+
+La cal PAPD scende di tre punti e **non e' una regressione**: misurata da sola la
+regione fa 2023 su 2662 (76%), e la differenza e' l'assegnazione esclusiva, che con
+piu' blocchi in gara redistribuisce. Vale la regola di sopra: quando un numero
+scende, misurare la regione da sola prima di crederci.
+
+**L'init vero e proprio resta il buco piu' grosso**, anche col denominatore giusto:
+3643 op confrontabili non appaiate su 8511. Il buco singolo piu' grande della
+finestra sta li', **3099 op dopo #2172**, e un terzo di quello e' object memory: le
+op confrontabili sono ~2155, quasi tutte scritture delle tabelle 26/27 (128, 84 e 64
+celle) che il port fa, ma in un punto diverso della sequenza. Prima di cercare codice
+mancante li', conviene guardare l'**ordine**.
 
 Il totale della global run **non si guarda**: e' oscillato 5953 → 7075 → 5783 su
 cambiamenti che hanno solo migliorato la fedelta', perche' l'assegnazione dei
@@ -231,6 +349,12 @@ Due cose sulla lettura del report, imparate sbagliando:
 
   Regola: una deroga si dichiara **contro un hook mancante**, mai contro un
   conteggio a zero — e prima di dichiararla si guarda se **l'accessor esiste**.
+  E non basta che *un* accessor della famiglia sia agganciato: **si guarda da che
+  accessor passa quell'accesso.** Ci sono ricaduto sulla object memory —
+  `write_objmem16` era agganciata, quindi ho concluso che una regione letta 192
+  volte e mai scritta la scrivesse l'ucode. La scrive `copyto_objmem`, che dentro
+  chiama `write_objmem` e non la variante `*16`, e non era agganciata. Quattro hook
+  aggiunti, vedi `gap-inventory.md` 4i.
   La famiglia degli accessor e' grande — in brcmsmac sono **66 `brcms_b_*`**, che
   sono gli stessi rinominati — e `wl-diag` ne agganciava **dieci**: le mancanti
   erano la ragione di tutte e tre le deroghe. Aggiunte `read_shm`,
@@ -367,8 +491,8 @@ perche' sia la leva. Non farlo sembrare la leva.
 
 ## Difetti trovati in mainline, per ricordare cosa cercare
 
-`patches/mainline/` sono i **cinque** indipendenti da questo hardware, da mandare per
-primi e come **cinque `[PATCH]` separate in altrettanti thread**, non come serie: non
+`patches/mainline/` sono i **sei** indipendenti da questo hardware, da mandare per
+primi e come **sei `[PATCH]` separate in altrettanti thread**, non come serie: non
 dipendono l'una dall'altra, e legarle vuol dire che una review lunga su una blocca il
 merge delle altre. L'elenco con una riga a testa sta in `patches/mainline/README.md`,
 che e' la fonte. Con la sola `sample-table-logic`, `sampleplay-tssi` e

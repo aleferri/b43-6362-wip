@@ -46,6 +46,76 @@ def as_int(kv, key):
         return None
 
 
+def retvals(records):
+    """RETVAL indicizzati per il record cui si riferiscono.
+
+    Nel trace vendor una read porta `val=UNDEFINED` e il valore arriva in un
+    record RETVAL a parte; nell'output dell'harness il valore e' sulla read
+    stessa. Le due forme si trattano insieme.
+    """
+    out = {}
+    for r in records:
+        if r['op'] == 'RETVAL':
+            ref = r['kv'].get('for', '')
+            if ref.startswith('#'):
+                out[int(ref[1:])] = as_int(r['kv'], 'val')
+    return out
+
+
+def collect_reads(records):
+    """Ogni TBL.RD con i valori serviti, ricostruiti dalle PHY.RD successive.
+
+    Sulle read la porta dati bassa viene prima di quella alta, al contrario
+    delle write: qui l'ordine si segue invece di assumerlo.
+    """
+    rv = retvals(records)
+    tables = []
+    i = 0
+    while i < len(records):
+        r = records[i]
+        if r['op'] != 'TBL.RD':
+            i += 1
+            continue
+        tbl = dict(seq=r['seq'], kind='RD', id=as_int(r['kv'], 'id'),
+                   off=as_int(r['kv'], 'off'), len=as_int(r['kv'], 'len'),
+                   values=[], width=16, addr_seen=None)
+        pending_lo = None
+        j = i + 1
+        while j < len(records):
+            n = records[j]
+            if n['op'] == 'RETVAL':
+                j += 1
+                continue
+            if n['op'] == 'PHY.WR' and as_int(n['kv'], 'addr') == ADDR_REG:
+                if tbl['addr_seen'] is not None:
+                    break
+                tbl['addr_seen'] = as_int(n['kv'], 'val')
+                j += 1
+                continue
+            if n['op'] != 'PHY.RD':
+                break
+            addr = as_int(n['kv'], 'addr')
+            val = as_int(n['kv'], 'val')
+            if val is None:
+                val = rv.get(n['seq'])
+            if addr == DATA_LO:
+                if pending_lo is not None:
+                    tbl['values'].append(pending_lo)
+                pending_lo = val
+            elif addr == DATA_HI:
+                tbl['width'] = 32
+                tbl['values'].append(((val or 0) << 16) | (pending_lo or 0))
+                pending_lo = None
+            else:
+                break
+            j += 1
+        if pending_lo is not None:
+            tbl['values'].append(pending_lo)
+        tables.append(tbl)
+        i = j
+    return tables
+
+
 def collect(records):
     """Ogni TBL.WR con i valori ricostruiti dalle PHY.WR successive."""
     tables = []
@@ -55,7 +125,7 @@ def collect(records):
         if r['op'] != 'TBL.WR':
             i += 1
             continue
-        tbl = dict(seq=r['seq'], id=as_int(r['kv'], 'id'),
+        tbl = dict(seq=r['seq'], kind='WR', id=as_int(r['kv'], 'id'),
                    off=as_int(r['kv'], 'off'), len=as_int(r['kv'], 'len'),
                    values=[], width=None, addr_seen=None)
         pending_hi = None
@@ -117,12 +187,45 @@ def main():
                     help='mostra solo queste tabelle (ripetibile)')
     ap.add_argument('--c-array', metavar='NOME',
                     help='emette i valori come array C con questo nome')
+    ap.add_argument('--cell', metavar='ID:OFF',
+                    help='storia di una sola cella: ogni accesso, read e write,'
+                         ' in ordine di record, col valore che quella cella'
+                         ' aveva o prendeva')
     args = ap.parse_args()
 
     records = parse(args.trace)
     if args.range:
         lo, hi = args.range
         records = [r for r in records if lo <= r['seq'] <= hi]
+
+    if args.cell:
+        want_id, want_off = (int(x, 0) for x in args.cell.split(':'))
+        hist = []
+        for t in collect(records) + collect_reads(records):
+            if t['id'] != want_id or t['off'] is None:
+                continue
+            k = want_off - t['off']
+            if k < 0 or k >= max(len(t['values']), t['len'] or 0):
+                continue
+            val = t['values'][k] if k < len(t['values']) else None
+            hist.append((t['seq'], t['kind'], t['len'] or 0, val))
+        hist.sort()
+        prev = None
+        for seq, kind, ln, val in hist:
+            shown = '?' if val is None else '0x%04x' % val
+            # Una write che non cambia il valore non e' un cambio di stato, e
+            # distinguerle e' il punto di guardare una cella sola.
+            mark = ''
+            if kind == 'WR':
+                mark = '  <-- cambia' if val != prev else '  (idem)'
+                if val is not None:
+                    prev = val
+            elif prev is None and val is not None:
+                prev = val
+            print('#%-6d %s  len %-3d %s%s' % (seq, kind, ln, shown, mark))
+        print('\n%d accessi alla cella tbl %d off 0x%x' % (len(hist), want_id,
+                                                           want_off))
+        return
 
     tables = collect(records)
     if args.id is not None:

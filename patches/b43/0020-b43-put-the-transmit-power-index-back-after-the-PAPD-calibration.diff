@@ -1,0 +1,117 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: put the transmit power index back after the PAPD calibration
+
+The PAPD calibration turns the transmit power control off and programs
+its own gain, and brcmsmac puts the index back at the end of wlc_phy_a4(),
+one core at a time, from the internal index it keeps per core. b43 does
+neither, so whatever the previous patch programmed for the calibrations
+stays programmed afterwards.
+
+Add both halves. The internal index has been sitting in this file behind a
+comment - the two lines that store it in b43_nphy_tx_power_fix() were
+commented out, reasonably enough while nothing could program an index at
+all - so uncomment them and put the restore at the end of the PAPD
+calibration, gated on the power control being off, which on this radio it
+is because the calibration turned it off itself.
+
+It matters beyond the two gain cells. The next tone saves the baseband
+multiplier before it plays and puts it back when it stops, so leaving the
+calibration's index programmed leaks its multiplier into everything
+downstream: the capture restores 0x2c2c into the multiplier cell at #12785
+and #12867, and without this the port restores 0x2e2e there, which is the
+multiplier of the index the calibration ran at.
+
+The two operations are in the capture where the reference puts them, one
+core each: #14305 writes the gain cell of core 0 and #14728 that of core
+1, both reading offset 0xde of the per-core power control table, which is
+192 + 30. Thirty is what b43_nphy_tx_power_fix() already picks for phy rev
+7 and up, so the value is not new, only the storing of it.
+
+Measured with test/phase_compare.py on the contiguous-block windows:
+up-ch1 goes from 12363 of 22951 to 13134 (54% to 57%), up-ch1-freddo from
+14353 of 27571 to 15087 (52% to 55%). No block of the previous measurement
+is lost or shortened, which is worth saying because the previous patch did
+shorten some.
+
+It does not close the nine operations that patch cost inside the PAPD
+calibration region, and it was expected to: those sit at #12785 and
+#12867, which is before this restore runs, so the port is still on the
+calibration's index there while the vendor is already back on 30. What
+puts it back that early in the vendor driver is not any of the four
+restore sites brcmsmac has - all of them are either on the rev below 7
+path or after the PAPD calibration - so the answer is not in the
+reference's control flow and has to come from the capture: it wants the
+history of that one multiplier cell across the whole run, which no tool
+here produces yet.
+
+Two things check_patch_gating.py flags, both declared rather than worked
+around. It marks b43_nphy_papd_cal() as ungated: the gate is the early
+return on phy rev 8 and radio rev 8 at the top of that function, which
+arrived with the PAPD frame, and the tool looks for one near the hunk
+rather than at the top of the function the hunk is in. And it points at
+b43_nphy_tx_power_fix(), which is shared by every N-PHY: the uncommented
+lines run everywhere. What they store is read in exactly two places -
+cal_orig_pwr_idx, which this file writes and never reads, and the restore
+this patch adds, which is gated - so on any other revision the store has
+no observable effect.
+
+Verified: records #14297-#14340, from
+"TBL.RD   id=0x001a off=0x00de len=1"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n25370
+Link: https://github.com/aleferri/b43-6362-wip/blob/8491752/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/8491752/test/phase_compare.py
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -3975,12 +3975,14 @@ static void b43_nphy_tx_power_fix(struct b43_wldev *dev)
+ 	    (txpi[0] < 40 || txpi[0] > 100 || txpi[1] < 40 || txpi[1] > 100))
+ 		txpi[0] = txpi[1] = 91;
+ 
+-	/*
++	/* The internal index is what the PAPD calibration puts back when it is
++	 * done, so it has to be remembered here. This was commented out for as
++	 * long as nothing could program an index.
++	 */
+ 	for (i = 0; i < 2; i++) {
+ 		nphy->txpwrindex[i].index_internal = txpi[i];
+ 		nphy->txpwrindex[i].index_internal_save = txpi[i];
+ 	}
+-	*/
+ 
+ 	for (i = 0; i < 2; i++) {
+ 		const u32 *table = b43_nphy_get_tx_gain_table(dev);
+@@ -6743,6 +6745,7 @@ static void b43_nphy_papd_cal_cleanup(struct b43_wldev *dev,
+ static void b43_nphy_papd_cal(struct b43_wldev *dev)
+ {
+ 	struct b43_phy *phy = &dev->phy;
++	struct b43_phy_n *nphy = phy->n;
+ 	struct nphy_papd_restore_state state;
+ 	u16 bbcfg;
+ 	u8 core;
+@@ -6793,6 +6796,23 @@ static void b43_nphy_papd_cal(struct b43_wldev *dev)
+ 
+ 	b43_phy_write(dev, B43_NPHY_BBCFG, bbcfg);
+ 	b43_nphy_int_pa_set_tx_dig_filters(dev);
++
++	/* And the transmit chains go back to the index they were on. brcmsmac
++	 * does this at the end of wlc_phy_a4(), one core at a time, when the
++	 * power control was off for the calibration - which on this radio it
++	 * was, because the calibration turned it off itself.
++	 *
++	 * It matters beyond the two gain cells: the next tone saves the
++	 * baseband multiplier before it plays and puts it back after, so
++	 * leaving the calibration's index programmed leaks its multiplier into
++	 * everything downstream.
++	 */
++	if (!nphy->txpwrctrl) {
++		b43_nphy_txpwr_index(dev, 1 << 0,
++				     nphy->txpwrindex[0].index_internal, false);
++		b43_nphy_txpwr_index(dev, 1 << 1,
++				     nphy->txpwrindex[1].index_internal, false);
++	}
+ }
+ 
+ /* The offset the PAPD engine applies to the epsilon table. brcmsmac computes it

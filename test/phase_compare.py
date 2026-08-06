@@ -104,7 +104,15 @@ CONTIG = [
     # Nessuna ancora: la finestra e' tutta la run, quindi i blocchi si trovano
     # sull'intero output del flow senza agganciarsi a un'op scelta a mano.
     dict(name='up-ch1', rng='132:26100',
-         flow=('init', '1'), plan_from=True,
+         # La cattura non e' una phy_op sola: e' una SEQUENZA di phy_ops, e
+         # tracciarne una fingendo il resto e' quello che teneva `recalc-txpower`
+         # a 1 op su 716 - la fase c'e' nella cattura (#5726, il secondo
+         # pwr_setup, dopo il TPL.RAMW del core a #5672) e nel trace del port non
+         # c'era affatto. Il flow `txpower` e' init piu' recalc_txpower, cioe'
+         # due voci di phy_ops vere. Le cal restano dove b43 le mette, dentro
+         # l'init: quella e' una differenza fra port e vendore, e la tabella
+         # delle fasi la mostra invece di nasconderla.
+         flow=('txpower', '1'), plan_from=True,
          # Deroga per le sole classi su cui il tracer del vendore **non ha un
          # hook**, e la distinzione conta: "zero occorrenze" da solo non prova
          # niente, perche' puo' voler dire che il tracer non guarda o che wl non
@@ -181,6 +189,24 @@ def canon_contig(op):
     return op
 
 
+# Le famiglie di op che il port non puo' emettere, e non per un buco del driver:
+# l'harness compila il PHY e non il core, quindi MCTRL, gli host flags, la
+# template RAM e i GPIO non hanno nessun codice dietro. La object memory ce l'ha
+# ma con un encoding che non e' confrontabile — `b43_shm_write16()` prende un
+# offset in byte nella regione SHARED, il tracer registra l'argomento di
+# `write_objmem16()`, che e' un indirizzo di parola con un altro selettore di
+# spazio (vedi CLAUDE.md, `o708`/`o70e`). E' la stessa esclusione che coverage.py
+# dichiara, e qui serve a sapere contro cosa si sta misurando: nella regione di
+# init sono 1181 op su 9692, cioe' il 12%, e nelle regioni di calibrazione zero.
+NOT_COMPARABLE = ('OBJ.WR', 'OBJ.RD', 'MAC.MCTRL', 'MAC.MHF', 'MAC.MHF.RD',
+                  'TPL.RAMW', 'GPIO.OUT', 'GPIO.CTL')
+
+
+def comparable(op):
+    """Falso per un'op di una famiglia che il port non ha modo di emettere."""
+    return not op.startswith(NOT_COMPARABLE)
+
+
 def contig_blocks(vops, tops, minsize=16):
     """I blocchi contigui in comune, con il record da cui parte ciascuno.
 
@@ -204,12 +230,141 @@ def contig_blocks(vops, tops, minsize=16):
     return shown, total
 
 
+# ---------------------------------------------------------------------------
+# Op del vendore che il port NON deve emettere, dichiarate una per una.
+#
+# Le regole sono quelle di cmp_skip.py, e valgono per la stessa ragione: una
+# lista di eccezioni e' anche il modo piu' comodo di far tornare un numero.
+#
+#   1. ogni voce ha un `motivo` scritto e, dove serve, un `dopo` che e' il
+#      contesto: la voce si applica solo se l'op vendore precedente combacia;
+#   2. quante op sono state saltate si stampa SEMPRE, accanto alla percentuale;
+#   3. una voce e' legittima solo se si sa perche' il port non emette quell'op.
+#      "Si allinea meglio" non e' un motivo.
+#
+# Perche' contestuale e non a tappeto: l'etichetta TBL.WR/TBL.RD dove la
+# emettono TUTTI E DUE i lati sta facendo lavoro di allineamento, ~950 op che
+# combaciano e ancorano i blocchi. Toltala da entrambi i lati in compare.py,
+# MISURATO: up-ch1 da 14939 a 4665 e quattro finestre a "da guardare". Quindi si
+# salta solo dove il port non la emette, e si dice dove.
+SKIPS = (
+    dict(pattern=r'^TBL\.(WR|RD) id=0x1[ab] off=0x(140|1c0) len=128$',
+         dopo=None, max=8, cascata=False,
+         motivo="etichetta del tracer, non un accesso: il payload sulla porta "
+                "dati la contiene tutta - 0x72 porta (id << 10) | offset, "
+                "0x73/0x74 i valori, e len e' il loro numero. Qui il port non "
+                "la emette perche' b43_nphy_tx_pwr_ctrl_coef_setup() scrive a "
+                "mano sulla porta invece di passare da b43_ntab_write_bulk, e "
+                "l'harness intercetta al linker solo le b43_ntab_*. Dove il "
+                "driver passa dall'accessor l'etichetta c'e' su entrambi i lati "
+                "e combacia, e allora questa voce non si applica."),
+)
+
+
+def apply_skips(vops):
+    """Togli dal flusso vendore le op dichiarate in SKIPS. Ritorna (op, saltate).
+
+    Il conteggio torna al chiamante perche' va stampato: una percentuale su un
+    flusso potato e non dichiarato e' esattamente il numero comodo che le regole
+    di cmp_skip.py vietano.
+    """
+    left = [dict(r, rx=re.compile(r['pattern']),
+                 dopo_rx=re.compile(r['dopo']) if r['dopo'] else None,
+                 hits=0) for r in SKIPS]
+    out, skipped = [], 0
+    for i, op in enumerate(vops):
+        drop = False
+        for r in left:
+            if r['hits'] >= r['max'] or not r['rx'].match(op):
+                continue
+            if r['dopo_rx'] and not (i and r['dopo_rx'].match(vops[i - 1])):
+                continue
+            r['hits'] += 1
+            drop = True
+            break
+        if drop:
+            skipped += 1
+        else:
+            out.append(op)
+    return out, skipped
+
+# ---------------------------------------------------------------------------
+# Le fasi, che sono l'unita' del verdetto.
+#
+# Un blocco contiguo conta se corrisponde a una FASE: una voce di phy_ops dove
+# esiste, oppure - eccezione dichiarata finche' il port non le espone - una macro
+# operazione che sappiamo delimitare con un marcatore. Un frammento da due op non
+# e' copertura, e sommarlo al totale era contare il sommerso nel PIL: su up-ch1
+# 774 blocchi su 879 stanno sotto le 16 op e valgono ~1900 op del totale.
+#
+# Percio' il numero per fase e' UNO e non e' una somma: la RUN piu' lunga che
+# combacia dentro la fase. Non e' gonfiabile da frammenti per costruzione, ed e'
+# la stessa misura che la tabella delle finestre chiama `run` e che il README
+# dichiara piu' informativa del conteggio dei mismatch.
+#
+# `marcatore` e' come la fase e' delimitata: si cita, non si sceglie a occhio.
+PHASES = (
+    dict(rng=(1034, 1739), name='idle-tssi', op='macro: txpwrctrl_idle_tssi',
+         marcatore='tono tbl 17 len 160 a #1288, unico della fase'),
+    dict(rng=(1740, 2171), name='pwr-setup', op='macro: txpwrctrl_pwr_setup',
+         marcatore='26/27 off 0x0 len 64 a #1740'),
+    dict(rng=(2172, 3711), name='gain-table', op='macro: tx_gain_table_upload',
+         marcatore='26/27 off 0xc0 len 128 a #2172, unica nella finestra'),
+    dict(rng=(3712, 4785), name='coeff-setup', op='macro: txpwrctrl_coeff_setup',
+         marcatore='26/27 off 0x140 e 0x1c0 len 128 a #3754'),
+    dict(rng=(5726, 6500), name='recalc-txpower', op='phy_ops: recalc_txpower',
+         marcatore='secondo 26/27 off 0x0 len 64 a #5726, dopo il TPL.RAMW #5672'),
+    dict(rng=(7034, 8504), name='perical-ingresso', op='macro: ingresso della cal',
+         marcatore='TPC off #7034, get_tx_gain #7038, precal #7234, hand-back #8086'),
+    dict(rng=(8505, 10733), name='cal-tx-iqlo', op='macro: cal_txiqlo',
+         marcatore='gain di cal len=2 #8511, ripristino #10733'),
+    dict(rng=(10962, 14092), name='cal-papd', op='macro: cal PAPD (a4)',
+         marcatore='confini di REGIONS, toni #11838 e #12952'),
+    dict(rng=(14951, 21136), name='cal-rx-iq', op='macro: cal_rxiq',
+         marcatore='BBCFG #14951, gain di cal #14983, ripristino #21136'),
+    dict(rng=(21137, 22246), name='coeff-setup-2', op='macro: txpwrctrl_coeff_setup',
+         marcatore='26/27 off 0x140 e 0x1c0 len 128 a #21203'),
+    dict(rng=(22247, 23771), name='cal-rssi-2', op='macro: rssi_cal',
+         marcatore='confini di REGIONS'),
+    dict(rng=(23772, 25000), name='coda-idle-tssi', op='macro: idle_tssi + pwr_setup',
+         marcatore='tono #23939, 26/27 off 0x0 len 64 a #24391'),
+)
+
+
+def phase_report(vops, blocks):
+    """Per ogni fase la run piu' lunga che ci cade dentro. Niente somme."""
+    print('  %-17s %-34s %6s %8s' % ('fase', 'cosa e\'', 'op', 'run'))
+    tot_op = tot_run = 0
+    for ph in PHASES:
+        lo, hi = ph['rng']
+        idx = [i for i, o in enumerate(vops) if lo <= o.ep <= hi]
+        if not idx:
+            continue
+        a, b = idx[0], idx[-1]
+        best = 0
+        for rec, vi, size in blocks:
+            s0, s1 = max(vi, a), min(vi + size - 1, b)
+            if s1 >= s0:
+                best = max(best, s1 - s0 + 1)
+        tot_op += len(idx)
+        tot_run += best
+        print('  %-17s %-34s %6d %5d %3.0f%%'
+              % (ph['name'], ph['op'], len(idx), best,
+                 100.0 * best / len(idx)))
+    print('  %-17s %-34s %6d %5d %3.0f%%'
+          % ('TOTALE', 'somma delle run, non delle op', tot_op, tot_run,
+             100.0 * tot_run / max(1, tot_op)))
+    print('\n  La run e\' la sequenza contigua piu\' lunga dentro la fase: un\n'
+          '  frammento non la muove. Le op fuori dalle fasi dichiarate non\n'
+          '  compaiono, e non e\' una dimenticanza.')
+
 def run_contig(vendor, reg, out):
     if reg.get('capture'):
         vendor = merged_vendor(os.path.join(HERE, '..', 'router-data',
                                             'dsl-3580l', reg['capture']))
     lo, hi = (int(x) for x in reg['rng'].split(':'))
     vops = CMP.load_vendor(vendor, (lo, hi))
+    vops, skipped = apply_skips(vops)
     tall = CMP.load_test(out)
     if reg.get('anchor'):
         off = find_anchor(tall, CMP.normalize_op(reg['anchor']),
@@ -222,8 +377,9 @@ def run_contig(vendor, reg, out):
     drop = reg.get('drop_port', ())
     if drop:
         tops = [o for o in tops if not any(o.startswith(d) for d in drop)]
-    blocks, total = contig_blocks(vops, tops)
-    return dict(nops=len(vops), blocks=blocks, matched=total), None
+    blocks, total = contig_blocks(vops, tops, minsize=1)
+    return dict(nops=len(vops), blocks=blocks, matched=total,
+                skipped=skipped, vops=vops), None
 
 
 def find_anchor(tops, anchor, nth):
@@ -350,6 +506,19 @@ WINDOWS = [
     # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
     # passano e non devono: b43 la cal PAPD non ce l'ha. Sono qui pronte per
     # quando la si porta, cosi' si verifica una fase per volta.
+    dict(name='recalc-txpower', rng='5726:6244',
+         # La fase che nella tabella per fase fa 1 op su 716, e non perche' il
+         # port non la sappia fare: la fa, ma in fondo alla traccia invece che in
+         # mezzo all'init, dove la mette il vendore. Questa finestra la confronta
+         # SENZA la posizione, agganciandosi alla terza apertura di 26/0x0 - le
+         # prime due sono l'init - cosi' si vede se le op sono le stesse.
+         #
+         # Il cortocircuito di b43_nphy_op_recalc_txpower resta: se le tabelle le
+         # ha gia' scritte l'init, uscire subito salta lavoro ridondante. Il flow
+         # invalida la cache per rendere la fase osservabile, non per correggerla.
+         anchor='TBL.WR id=0x1a off=0x0 len=64', anchor_nth=2,
+         flow=('txpower', '1'),
+         what='recalc_txpower: pwr_setup piu\' txpwrctrl_enable, sei table-op'),
     dict(name='papd-digifilt', rng='11741:11755',
          anchor='PHY.WR addr=0x186 val=0xfed9',
          flow=('init', '1'),
@@ -402,6 +571,7 @@ def run(vendor, win, verbose):
 
     lo, hi = (int(x) for x in win['rng'].split(':'))
     vops = CMP.load_vendor(vendor, (lo, hi))
+    vops, skipped = apply_skips(vops)
     tall = CMP.load_test(out)
     if not vops:
         return None, 'finestra vendore vuota'
@@ -493,15 +663,31 @@ def main():
               % (tot, len(vops), 100.0 * tot / max(1, len(vops)), len(blocks)))
         print('\nper regione (il numero di record se lo porta dietro l\'op, '
               'vedi CMP.Op):')
-        print('  %-34s %-16s %6s %8s' % ('regione', 'record', 'op', 'appaiate'))
+        print('  %-34s %-16s %6s %9s %7s %9s'
+              % ('regione', 'record', 'op', 'appaiate', 'n.conf', 'su conf.'))
+        tot_nc = 0
         for rlo, rhi, name in REGIONS:
             idx = [i for i, o in enumerate(vops) if rlo <= o.ep <= rhi]
             if not idx:
                 continue
             m = sum(1 for i in idx if i in matched)
-            print('  %-34s %-16s %6d %5d %3.0f%%'
+            nc = sum(1 for i in idx if not comparable(vops[i]))
+            tot_nc += nc
+            conf = len(idx) - nc
+            print('  %-34s %-16s %6d %5d %3.0f%% %7d %8.0f%%'
                   % (name, '#%d-%d' % (rlo, rhi), len(idx), m,
-                     100.0 * m / len(idx)))
+                     100.0 * m / len(idx), nc,
+                     100.0 * m / conf if conf else 0.0))
+        if tot_nc:
+            print('\n  n.conf: op di famiglie che il port non puo\' emettere, '
+                  'perche\' l\'harness compila')
+            print('  il PHY e non il core, e perche\' la object memory ha un '
+                  'encoding diverso. Sono')
+            print('  ' + ' '.join(sorted(NOT_COMPARABLE)) + '.')
+            print('  Stessa esclusione che coverage.py dichiara per la SHM. Il '
+                  'totale in blocchi')
+            print('  contigui sopra NON le esclude: questa colonna dice contro '
+                  'cosa si misura.')
         return 0
 
     for reg in CONTIG:
@@ -533,12 +719,11 @@ def main():
                   ' stampati i blocchi da 16 op in su'
                   % (res['nops'], res['matched'],
                      100.0 * res['matched'] / res['nops']))
-            prev = None
-            for rec, vi, size in res['blocks']:
-                if prev is not None and vi > prev:
-                    print('  %-8s buco di %d op' % ('', vi - prev))
-                print('  #%-8d %4d op contigue' % (rec, size))
-                prev = vi + size
+            if res['skipped']:
+                print('  %d op saltate per skip dichiarati (SKIPS in questo'
+                      ' file), non contate nel denominatore' % res['skipped'])
+            if reg['name'] == 'up-ch1':
+                phase_report(res['vops'], res['blocks'])
             print()
 
     if args.only and any(r['name'] == args.only for r in CONTIG):

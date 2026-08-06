@@ -113,6 +113,8 @@ enum wldiag_op {
 	OP_SHM_R, OP_SHM_W, OP_SHM_SET,			/* 39,40,41 (append) */
 	OP_MAC_SUSPEND, OP_MAC_ENABLE,			/* 42,43 (append) */
 	OP_PHY_CLK, OP_MAC_FREQ,			/* 44,45 (append) */
+	OP_OBJ_R, OP_OBJ_W,				/* 46,47 (append) */
+	OP_OBJ_CPTO, OP_OBJ_CPFROM,			/* 48,49 (append) */
 	OP_DROP = 255,
 };
 /* NOTA sul perimetro, e non e' una nota di stile.
@@ -371,6 +373,25 @@ static struct hook hooks[] = {
 	{ "wlc_phy_chanspec_set", OP_CHANSPEC, 1, 0, 0 },
 	{ "wlc_bmac_read_objmem16",  OP_MAC_OBJ_R, 1, 0, 2, .retcap = true },
 	{ "wlc_bmac_write_objmem16", OP_MAC_OBJ_W, 1, 2, 3 },
+	/* I *16 non sono gli unici, e per due catture ci siamo creduti: la
+	 * object memory si scrive anche a parola singola con write_objmem (che
+	 * prende il selettore di spazio come terzo argomento) e in blocco con
+	 * copyto_objmem, che dentro chiama write_objmem e NON write_objmem16.
+	 * Senza questi quattro, una scrittura in blocco non compare, e
+	 * `M_RT_DIRMAP_A` (SHM 0x1c0, la mappa diretta dei rate OFDM) risulta
+	 * letta 192 volte e mai scritta in 70796 record - da cui la conclusione
+	 * sbagliata che la scrivesse l'ucode.
+	 *
+	 * I nomi vengono dalla tabella dei simboli del blob, che e' cio' per cui
+	 * PROVENANCE.md la autorizza: wlc_bmac_read_objmem (236 B),
+	 * wlc_bmac_write_objmem (160), wlc_bmac_copyto_objmem (160),
+	 * wlc_bmac_copyfrom_objmem (156). I wlapi_* omonimi sono trampolini da
+	 * 16 byte e non si agganciano: il detour non ci sta.
+	 */
+	{ "wlc_bmac_read_objmem",    OP_OBJ_R,     1, 0, 3, .retcap = true },
+	{ "wlc_bmac_write_objmem",   OP_OBJ_W,     1, 2, 4 },
+	{ "wlc_bmac_copyto_objmem",  OP_OBJ_CPTO,  1, 0, 5 },
+	{ "wlc_bmac_copyfrom_objmem", OP_OBJ_CPFROM, 1, 0, 5 },
 	/* branch a slot 3 (beq): detour classico a 4 parole impossibile. short-j a
 	 * 1 parola: o[0]=j stub; o[1] (addiu $v0,1) resta come delay slot; lo stub
 	 * riesegue o[0..1] e rientra a +8 (v0 ri-settato DOPO la hook). addr=a1

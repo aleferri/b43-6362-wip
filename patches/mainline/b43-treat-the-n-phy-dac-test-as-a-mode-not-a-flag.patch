@@ -1,0 +1,80 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: treat the N-PHY DAC test as a mode, not a flag
+
+wlc_phy_gen_load_samples_nphy() and wlc_phy_runsamples_nphy() take a u8
+dac_test_mode and test it against one: the short sample table and the
+sample command of 5 are for mode 1 alone, and every other value, including
+2, takes the ordinary path. b43 narrowed that argument to bool all the way
+down, so any mode above 1 turns the special path on.
+
+Three places, all mechanical: the parameter of
+b43_nphy_gen_load_samples(), b43_nphy_load_samples() and b43_nphy_tx_tone()
+becomes a u8, the table length test becomes == 1, and so does the sample
+command.
+
+No caller in tree passes anything but 0 or 1, so nothing changes today -
+this is the kind of latent narrowing that only bites the first caller with
+a real mode. That caller is the RX IQ calibration, which is handed a
+calibration type of 2 and passes it straight through, and the two are not
+interchangeable: with the flag, mode 2 builds the 160 word tone off a
+bandwidth of 80 or 82 instead of 20, so every sample is wrong.
+
+Measured on an MMIO capture of wl 6.30.102.7 on a BCM6362, with the RX IQ
+calibration in place and passing its real type: without this the port
+matches 13875 of 22951 operations of an interface coming up, with it 14351,
+and the difference is the two measurement tones, which appear as 336 and
+334 operation contiguous runs. Alone it changes nothing, as above.
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23043
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23149
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -1571,7 +1571,7 @@ static int b43_nphy_load_samples(struct b43_wldev *dev,
+ 
+ /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/GenLoadSamples */
+ static u16 b43_nphy_gen_load_samples(struct b43_wldev *dev, u32 freq, u16 max,
+-					bool test)
++					u8 dac_test)
+ {
+ 	int i;
+ 	u16 bw, len;
+@@ -1581,7 +1581,7 @@ static u16 b43_nphy_gen_load_samples(struct b43_wldev *dev, u32 freq, u16 max,
+ 	bw = b43_is_40mhz(dev) ? 40 : 20;
+ 	len = bw << 3;
+ 
+-	if (test) {
++	if (dac_test == 1) {
+ 		if (b43_phy_read(dev, B43_NPHY_BBCFG) & B43_NPHY_BBCFG_RSTRX)
+ 			bw = 82;
+ 		else
+@@ -1615,7 +1615,7 @@ static u16 b43_nphy_gen_load_samples(struct b43_wldev *dev, u32 freq, u16 max,
+ 
+ /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/RunSamples */
+ static void b43_nphy_run_samples(struct b43_wldev *dev, u16 samps, u16 loops,
+-				 u16 wait, bool iqmode, bool dac_test,
++				 u16 wait, bool iqmode, u8 dac_test,
+ 				 bool modify_bbmult)
+ {
+ 	struct b43_phy *phy = &dev->phy;
+@@ -1672,7 +1672,7 @@ static void b43_nphy_run_samples(struct b43_wldev *dev, u16 samps, u16 loops,
+ 		b43_phy_mask(dev, B43_NPHY_IQLOCAL_CMDGCTL, 0x7FFF);
+ 		b43_phy_set(dev, B43_NPHY_IQLOCAL_CMDGCTL, 0x8000);
+ 	} else {
+-		tmp = dac_test ? 5 : 1;
++		tmp = (dac_test == 1) ? 5 : 1;
+ 		b43_phy_write(dev, B43_NPHY_SAMP_CMD, tmp);
+ 	}
+ 	for (i = 0; i < 100; i++) {
+@@ -3582,7 +3582,7 @@ static void b43_nphy_workarounds(struct b43_wldev *dev)
+  * https://bcm-v4.sipsolutions.net/802.11/PHY/N/TXTone
+  */
+ static int b43_nphy_tx_tone(struct b43_wldev *dev, u32 freq, u16 max_val,
+-			    bool iqmode, bool dac_test, bool modify_bbmult)
++			    bool iqmode, u8 dac_test, bool modify_bbmult)
+ {
+ 	u16 samp = b43_nphy_gen_load_samples(dev, freq, max_val, dac_test);
+ 	if (samp == 0)

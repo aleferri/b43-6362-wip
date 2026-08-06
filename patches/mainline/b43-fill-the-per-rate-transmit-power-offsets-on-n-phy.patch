@@ -1,0 +1,106 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: fill the per-rate transmit power offsets on N-PHY
+
+b43_nphy_tx_power_ctl_setup() spreads nphy->tx_power_offset[] over the 84
+entries of the adjusted power table, four columns of twenty groups: SISO,
+CDD, STBC and SDM. That array has no writer. It is declared in phy_n.h,
+read in two places and filled nowhere, so those 84 cells go out as zeros
+whatever the SPROM says - and they are what the hardware backs each rate
+off by, so every rate transmits at the same power.
+
+Fill it. The reference computes the same quantity as the maximum minus the
+per-rate target (brcmsmac phy_cmn.c), and the layout lines up cell for
+cell: the PPR this driver already builds in b43_nphy_op_recalc_txpower()
+holds CCK, OFDM, OFDM CDD and the four MCS groups in exactly the order the
+rate indices want them, so it is one pass over __all_rates.
+
+Measured against an MMIO capture of wl 6.30.102.7 on a BCM6362, with the
+per-rate power offsets of the board loaded into the harness from its NVRAM
+(ofdm2gpo=0x44444444, mcs2gpo=0x6666, cck2gpo=0): of the 84 cells the
+vendor driver writes, 64 now match where none did.
+
+The 20 that remain are the whole SISO column, off by a constant 6 quarter-dB
+- the vendor has 0x02 where this has 0x08 - and where that comes from is not
+established. What is established is that it is not this patch and not the
+SROM chain: the multiplier, the field unpacking and the definition of the
+offset are identical in brcmsmac, the SROM value is the same in the board's
+NVRAM and in a dump of its SPROM, the SROM revision is 8 so the reference
+does not take its rev-9 early return, and the three columns fed from the MCS
+rates are exact through the same code. The vendor driver also writes that
+table 96 times across the capture with byte-identical contents every time,
+so what the capture shows there is a remembered value and not a computation
+- which is why chasing the arithmetic did not converge.
+
+Not tested on hardware, like everything else in this series. What it
+changes on a device is real though, and worth saying: rates that were all
+being given the same power now get the per-rate backoff the SPROM asks
+for.
+
+Verified: records #5986-#6157, from
+"TBL.WR   id=0x001a off=0x0040 len=84"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_cmn.c?id=848acc8ffe1b#n1399
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n17468
+Link: https://github.com/aleferri/b43-6362-wip/blob/c365f7b/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/c365f7b/router-data/dsl-3580l/nvram.txt
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -6477,6 +6477,7 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+ 	struct ieee80211_channel *channel = dev->wl->hw->conf.chandef.chan;
+ 	struct b43_ppr *ppr = &nphy->tx_pwr_max_ppr;
+ 	u8 max; /* qdBm */
++	int i;
+ 
+ 	if (nphy->tx_pwr_last_recalc_freq == channel->center_freq &&
+ 	    nphy->tx_pwr_last_recalc_limit == phy->desired_txpower)
+@@ -6511,6 +6512,22 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+ 	/* Make sure we didn't go too low */
+ 	b43_ppr_apply_min(dev, ppr, INT_TO_Q52(8));
+ 
++	/* The per rate backoff from the maximum, which is what
++	 * b43_nphy_tx_power_ctl_setup() spreads over the 84 entries of the
++	 * adjusted power table. Without this nphy->tx_power_offset[] has no
++	 * writer at all - it is declared, read twice and never filled - so those
++	 * 84 cells go out as zeros however the SPROM is programmed.
++	 *
++	 * The reference computes the same thing as
++	 * "pi->tx_power_max - pi->tx_power_target[rate]"
++	 * (brcmsmac phy_cmn.c), and the layout lines up cell for cell: the PPR
++	 * holds CCK, OFDM, OFDM CDD and the four MCS groups in exactly the order
++	 * the rate indices have them, so it is one pass over __all_rates.
++	 */
++	max = b43_ppr_get_max(dev, ppr);
++	for (i = 0; i < B43_PPR_RATES_NUM; i++)
++		nphy->tx_power_offset[i] = max - ppr->__all_rates[i];
++
+ 	/* Apply */
+ 	b43_mac_suspend(dev);
+ 	b43_nphy_tx_power_ctl_setup(dev);
+@@ -7164,6 +7181,16 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 		b43_nphy_rssi_cal(dev);
+ 	}
+ 
++	/* The transmit power control coefficients go in before the calibrations,
++	 * not after. In the reference this call is the last thing the PHY init
++	 * does and what precedes it only schedules a calibration for later, so
++	 * nothing is emitted between the two; here the calibrations run inline
++	 * at that point, so leaving the call after them put it on the wrong side
++	 * of six thousand operations. The capture has the pair either side: once
++	 * at the end of the init and once at the end of the calibration run.
++	 */
++	b43_nphy_tx_pwr_ctrl_coef_setup(dev);
++
+ 	if (!((nphy->measure_hold & 0x6) != 0)) {
+ 		if (b43_current_band(dev->wl) == NL80211_BAND_2GHZ)
+ 			do_cal = !nphy->iqcal_chanspec_2G.center_freq;
+@@ -7226,7 +7253,6 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 		}
+ 	}
+ 
+-	b43_nphy_tx_pwr_ctrl_coef_setup(dev);
+ 	b43_nphy_tx_power_ctrl(dev, tx_pwr_state);
+ 	b43_phy_write(dev, B43_NPHY_TXMACIF_HOLDOFF, 0x0015);
+ 	b43_phy_write(dev, B43_NPHY_TXMACDELAY, 0x0320);
