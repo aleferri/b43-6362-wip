@@ -49,6 +49,11 @@ OPS = {
     21: "SI.COREREG",
     22: "ARGX",     23: "RETVAL",
     24: "OBJ.RD",   25: "OBJ.WR",
+    # Gli accessor non-16: parola singola con selettore di spazio, e i due
+    # trasferimenti in blocco. Senza questi le scritture in blocco della object
+    # memory non si vedevano affatto (vedi wl_diag.c).
+    46: "OBJ.RD2",  47: "OBJ.WR2",
+    48: "OBJ.CPTO", 49: "OBJ.CPFROM",
     26: "CHANSPEC",
     27: "TPL.PTRW",  28: "TPL.DATW",
     29: "TPL.PTRR",  30: "TPL.DATR",  31: "TPL.RAMW",
@@ -68,7 +73,7 @@ OPS = {
 # 0x0000 inventato -- altrimenti si riparte col problema di distinguere zeri
 # veri da zeri finti.
 CHANSPEC = 26
-READS    = {1, 4, 18, 24, 29, 30, 32, 33, 34}                 # PHY.RD, RAD.RD, MAC.MHF.RD, OBJ.RD
+READS    = {1, 4, 18, 24, 29, 30, 32, 33, 34, 46, 49}                 # PHY.RD, RAD.RD, MAC.MHF.RD, OBJ.RD
 HAS_MASK = {3, 6, 7, 8, 9, 10, 11, 12, 17} # aux e' una mask (RMW, GPIO, MHF)
 GPIO     = {10, 11, 12}                   # niente addr; val=a2, mask=aux=a1
 MCTRL    = {16}                            # MACCONTROL RMW: reg fisso, niente addr; val=a2, mask=aux=a1

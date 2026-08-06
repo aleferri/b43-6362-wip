@@ -114,9 +114,12 @@ poi ogni iterazione ha il suo tono, ed e' il `cal RX IQ, sweep di gain`
 `patches/b43/0018`: il guscio di `wlc_phy_cal_rxiq_nphy_rev3`,
 `b43_nphy_txpwr_index()` e lo sweep. `up-ch1` da 5791 a **11552 op su 22951**, tre
 iterazioni per core come la cattura, ognuna come run di 85, 103, 85 e 420 op
-appaiate; `0019`, il gain di pre-calibrazione, lo porta a **12363**. Resta fuori la **misura**: il tono al tipo di cal chiesto e
-`b43_nphy_calc_rx_iq_comp()`, che b43 ha gia'. Finche' manca, la funzione torna
-errore e nessuna cal viene salvata.
+appaiate; `0019` (gain di pre-calibrazione) e `0020` (indice di potenza rimesso dopo la cal
+PAPD) e `0021` (indice restituito dopo la lettura dei gain) lo portano a **13625**.
+`0022`+`0023` chiudono con la **misura** — tono al tipo di cal chiesto e
+`b43_nphy_calc_rx_iq_comp()` — e arrivano a **14351, il 63%**: i due toni di misura
+della cattura, #17542 e #20624, escono come run contigue da **336 e 334 op**. La
+funzione torna 0 e `b43_nphy_save_cal()` gira per la prima volta.
 
 Due cose che il port non fa, dichiarate:
 

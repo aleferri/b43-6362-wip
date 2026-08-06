@@ -16,12 +16,14 @@ delle altre, e non c'è nessuna ragione tecnica per pagare quel prezzo.
 | `b43-fix-the-rounding-of-the-negative-rssi-cal-offsets` | la parentesi di `abs()` nel posto sbagliato: il `+4` finisce dentro il valore negativo invece che sul suo modulo, e ogni offset sotto -4 arrotonda verso lo zero. Lo stesso file la scrive giusta due volte | 2 |
 | `b43-fix-two-rf-control-override-value-masks-on-n-phy-rev-7` | due `val_mask` di `tbl_rf_control_override_rev7_over1` non coprono il campo del proprio shift. Col campo `0x0100` il port azzera il bit 8 di `0x340`, che appartiene alla banda del filtro programmata poche op prima | 4 |
 | `b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7` | `one_to_many`, caso `TX_PU`: quattro chiamate contro cinque di brcmsmac, manca `(0x1 << 2)` su override 2 | 1 |
+| `b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` | il modo del test DAC e' un `u8` testato `== 1`, b43 lo restringe a `bool` in tre punti: qualunque modo sopra 1 accende la strada sbagliata | 5 |
 
 Le ultime due si dimostrano **a tre voci**: brcmsmac, la cattura e b43 dicono cose
 diverse, e le prime due dicono la stessa. Le righe della cattura stanno nel corpo
 delle patch.
 
-`b43-program-the-fifth-tx-power-up-override` è l'unica qui che
+`b43-program-the-fifth-tx-power-up-override` e
+`b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` sono le due qui che
 `reverse-tools/check_patch_gating.py` segna `NON GATEATA`, e **è corretto**: sta in
 `b43_nphy_rf_ctl_override_one_to_many()`, che gira su ogni N-PHY rev 7 e su. È la
 stessa eccezione dichiarata di `b43/0010` e per la stessa ragione — un refuso di
@@ -48,5 +50,12 @@ va in mainline, `b43/0010` esce.
 La seconda non è in `patches/b43/`: cambia cosa programmano un radio 2057 rev 5 e
 un phy rev 7 in 5 GHz, e non abbiamo né l'uno né l'altro. Il razionale sta in
 `docs/todo-nphy.md` 3d bis.
+
+`b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` e' latente: nessun chiamante in
+tree passa un modo diverso da 0 o 1, quindi da sola non cambia niente. Morde il
+primo chiamante con un modo vero, che e' la cal RX IQ — e la misura c'e': col
+`bool`, un tipo 2 costruisce le 160 word del tono su una banda di 80 o 82 invece di
+20, e il port perde **476 op** su `up-ch1`. Duplicata in `b43/0022` perche' quella
+serie si applica come un blocco.
 
 Nessuna ha girato su hardware.

@@ -139,12 +139,21 @@ voce: sono `wlc_phy_txpwrctrl_enable_nphy` che spegne il controllo di potenza
 dentro `wlc_phy_txpwr_index_nphy`, e b43 quel codice ce l'ha in
 `b43_nphy_tx_power_ctrl()`. Vedi `docs/rxiq-cal-map.md`.
 
-**Non e' piu' uno stub.** `patches/b43/0018` porta il guscio, l'indice di potenza
-per core e lo sweep di gain, e `up-ch1` passa da 5791 a **11552 op su 22951**;
-`0019` aggiunge il gain di pre-calibrazione e lo porta a **12363**.
-Resta fuori la misura per cui lo sweep prepara il gain — il tono al tipo di cal
-chiesto e `b43_nphy_calc_rx_iq_comp()` — quindi la funzione torna ancora errore e
-la ricaduta qui sotto vale ancora.
+**CHIUSA.** `patches/b43/0018` porta il guscio, l'indice di potenza per core e lo
+sweep di gain, e `up-ch1` passa da 5791 a **11552 op su 22951**; `0019` aggiunge il
+gain di pre-calibrazione (**12363**), `0020` rimette l'indice dopo la cal PAPD
+(**13134**), `0021` lo restituisce dopo la lettura dei gain (**13625**), e
+`0022`+`0023` chiudono con la **misura** — tono, coefficienti, e la funzione che
+torna 0: **14351, il 63%**.
+
+Anche la ricaduta e' chiusa: la cal riesce, quindi `b43_nphy_save_cal()` viene
+chiamata, e per la prima volta su questo hardware una calibrazione viene salvata.
+
+E il degrado `type = 2 -> 0` che questa voce chiamava difetto **non era quello**:
+togliendolo il port peggiora di 476 op. Il difetto era a monte, nel modo del test
+DAC ristretto a `bool` (`patches/mainline/b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag`);
+sistemato quello, il tipo 2 e il tipo 0 danno le stesse op e il degrado si puo'
+togliere senza costo.
 
 Ricaduta oltre le op: lo stub torna -1, e in `b43_phy_initn` la `save_cal` sta
 dietro `if (b43_nphy_cal_rx_iq(...) == 0)`, quindi **non viene mai salvata una
@@ -153,6 +162,42 @@ calibrazione** — vale per la sequenza di `0014` come per il ramo `perical != 2
 Non e' portabile a pezzi come le tabelle: e' un loop guidato dalle letture, come
 `a2`/`a3`. La mappa della fase c'e', fatta come quella della cal PAPD:
 `docs/rxiq-cal-map.md`.
+
+### 4i. Tre regioni di object memory che il port non tocca
+
+Misurato sulle due catture, con `OBJ.RD`/`OBJ.WR` (gli accessor `*_objmem16`):
+
+| offset | in b43 | in brcmsmac | letture | scritture viste |
+|---|---|---|---|---|
+| `0x1c0`-`0x1df` | `B43_SHM_SH_OFDMDIRECT` | **`M_RT_DIRMAP_A`** = `(0xe0 * 2)` | 192 / 176 | **0** |
+| `0x300`-`0x31f` | `B43_SHM_SH_PWRIND_BLKS` (`0x308`) | power indication | 128 / 118 | 104 / 92 |
+| `0x6c0`-`0x6df` | **nessun nome** | — | 448 / 416 | **0** |
+
+`M_RT_DIRMAP_A` e' una mappa di **puntatori**, non di valori: i numeri letti
+(`0x384, 0x38f, 0x39a, ...`, passo 11) puntano alle voci per rate, e
+`M_RT_OFDM_PCTL1_POS = 18` e' l'offset del word di controllo potenza dentro la
+voce. brcmsmac lo usa come `read_shm(entry_ptr + M_RT_OFDM_PCTL1_POS)` e la
+`write_shm` corrispondente (`main.c:1646` e `1653`). E' il percorso della potenza
+per rate, e sta nel **core**, non nel PHY.
+
+**Le zero scritture non provano niente, e per due giri ho creduto il contrario.**
+Gli accessor agganciati da `wl-diag` erano `write_objmem16`/`read_objmem16`; la
+object memory si scrive anche con `write_objmem` (parola singola col selettore di
+spazio) e in blocco con `copyto_objmem`, che dentro chiama `write_objmem` e **non**
+la variante `*16`. Una scrittura in blocco quindi non compariva. E' la trappola 1
+nella sua forma generale: *prima di dire che qualcosa non viene scritto, guardare da
+che accessor passa la scrittura.* La deroga qui si dichiara **contro l'hook
+mancante**, non contro il conteggio.
+
+Aggiunti i quattro hook (`wlc_bmac_read_objmem`, `write_objmem`, `copyto_objmem`,
+`copyfrom_objmem`, dai simboli del blob: 236, 160, 160, 156 byte; i `wlapi_*`
+omonimi sono trampolini da 16 byte e non si agganciano). **Serve una cattura nuova**:
+nelle due che abbiamo quelle scritture non sono osservabili.
+
+Un vicolo chiuso, per non rifarlo: `wlc_phy_txpower_update_shm` (748 byte nel blob,
+`phy_cmn.c:1615` in brcmsmac) sembrava il produttore dei valori per rate, e non lo
+e': la sua prima riga e' `if (ISNPHY(pi)) return;`. Su N-PHY non fa niente, e b43
+giustamente non ha un equivalente.
 
 ### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5 — CHIUSA
 

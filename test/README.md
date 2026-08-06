@@ -348,6 +348,12 @@ Il confronto è **sulle celle e sui registri toccati, non posizionale**: dove il
 vendore scrive 64 celle una per una e il port ne fa una bulk, lo stato della
 tabella è lo stesso e la sequenza di op no.
 
+`phase_compare.py` fa la stessa esclusione da quando la tabella per regione ha la
+colonna `non conf.`: prima quelle op stavano nel denominatore delle regioni e le
+diluivano — 1180 su 9692 nell'init, 176 su 2127 nella coda, **zero** in tutte e
+quattro le regioni di calibrazione. Il totale in blocchi contigui non le esclude di
+proposito.
+
 Dei 677 offset SHM che il vendore tocca il port ne scrive due, e `coverage.py`
 non li confronta: sono `o708`/`o70e`, con l'encoding diverso spiegato sotto. Gli
 altri 675 li scrive il core di b43, che non compiliamo — qui c'è solo il PHY.

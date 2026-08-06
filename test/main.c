@@ -58,6 +58,14 @@ struct board {
 	 * confronto col vendore si vede subito (0x1ea = TXPCTL_TPWR). */
 	u8 maxpwr_2g[2];
 	u8 itssi_2g[2];
+	/* Gli offset di potenza per rate, dalla NVRAM. Senza questi il PPR esce
+	 * tutto zero e adj_pwr_tbl - le 84 celle a 26/27 off 0x40 - esce zeri,
+	 * dove il vendore scrive un pattern: la finestra recalc-txpower si
+	 * fermava a 266 op su 519 esattamente li'. */
+	u16 cck2gpo;
+	u32 ofdm2gpo;
+	u16 mcs2gpo[8];
+	u16 cddpo, stbcpo;
 	u16 pa_2g[2][3];
 };
 
@@ -93,6 +101,14 @@ static const struct board boards[] = {
 		/* srom[0xC0/2] e srom[0xE0/2] e seguenti: maxp 74 (18.5 dBm in
 		 * Q5.2), itssi 32, e i pa_2g dei due core. */
 		.maxpwr_2g = { 74, 74 },
+		/* nvram.txt: cck2gpo=0 ofdm2gpo=1145324612 mcs2gpo0..7=26214
+		 * cddpo=0 stbcpo=0 */
+		.cck2gpo = 0x0000,
+		.ofdm2gpo = 0x44444444,
+		.mcs2gpo = { 0x6666, 0x6666, 0x6666, 0x6666,
+			     0x6666, 0x6666, 0x6666, 0x6666 },
+		.cddpo = 0x0000,
+		.stbcpo = 0x0000,
 		.itssi_2g = { 32, 32 },
 		.pa_2g = { { 0xff71, 0x1740, 0xfb17 },
 			   { 0xff81, 0x1784, 0xfb1b } },
@@ -129,6 +145,12 @@ static void setup(const struct board *b, unsigned int channel)
 	sprom.fem.ghz2.pdet_range = b->fem_pdet_range;
 	sprom.fem.ghz2.tr_iso = b->fem_tr_iso;
 	sprom.fem.ghz2.antswlut = b->fem_antswlut;
+	sprom.cck2gpo = b->cck2gpo;
+	sprom.ofdm2gpo = b->ofdm2gpo;
+	for (i = 0; i < 8; i++)
+		sprom.mcs2gpo[i] = b->mcs2gpo[i];
+	sprom.cddpo = b->cddpo;
+	sprom.stbcpo = b->stbcpo;
 	for (i = 0; i < 2; i++) {
 		sprom.core_pwr_info[i].maxpwr_2g = b->maxpwr_2g[i];
 		sprom.core_pwr_info[i].itssi_2g = b->itssi_2g[i];
@@ -344,6 +366,16 @@ static int flow_txpower(void)
 
 	if (err)
 		return err;
+	/* Il riferimento non ha cortocircuito: wlc_phy_txpower_recalc_target_nphy
+	 * fa limit_to_tbl + pwr_setup + txpwrctrl_enable ogni volta. b43 invece
+	 * esce alla prima riga se frequenza e limite sono quelli dell'ultimo
+	 * calcolo, e l'init li ha appena impostati, quindi la chiamata non emette
+	 * niente e la fase recalc-txpower misurava 1 op su 716. Qui si invalida
+	 * la cache per far girare la fase: modella "qualcosa e' cambiato", che
+	 * nella cattura e' cio' che succede fra l'init e #5726 - in mezzo il core
+	 * scrive la template RAM.
+	 */
+	dev.phy.n->tx_pwr_last_recalc_freq = 0;
 	fprintf(stderr, "--- init finita, recalc_txpower ---\n");
 	err = b43_phyops_n.recalc_txpower(&dev, true);
 	fprintf(stderr, "recalc_txpower: %d\n", err);

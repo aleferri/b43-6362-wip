@@ -1,0 +1,211 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: hand the transmit power index back after reading the gains
+
+The pre-calibration index was added two patches ago to make the gains the
+calibrations aim for come out right, and it left the index programmed. The
+vendor driver does not: it forces the index, reads the gains off it, and
+hands the chain straight back what it had - the radio gain, the DAC gain,
+the baseband multiplier and the IQ and local oscillator compensations. The
+calibrations then run on the hardware they would have run on anyway, with
+the gains read at the forced index.
+
+That is worth stating plainly because it is the opposite of what the name
+suggests: the forced index is a measurement, not a setting.
+
+Add the other direction of b43_nphy_txpwr_index(), a negative index, along
+with the save it needs on the first forced index and the per-core record
+of whether one is forced at all. That record starts at -1 rather than
+zero, which would mean index zero rather than none.
+
+Where the body comes from and where the position comes from are different,
+and both are named: the body is brcmsmac's wlc_phy_txpwr_index_nphy() for
+a negative index, which that driver has in full. The call site is not -
+brcmsmac hands the index back at the end of its periodic calibration, not
+before it, and the four other places it does so are all on the phy rev
+below 7 path. So the position is the capture's: #8086-#8110 for core 0 and
+#8286-#8310 for core 1, each the exact operation sequence of that branch -
+the two override bits, the DAC gain, the radio gain cell going back to
+0x4027 which is the value from before the forced index, and the read
+modify write of the multiplier cell.
+
+This closes the nine operations the pre-calibration patch cost, and it was
+found by looking at the history of one table cell rather than by reading
+the reference: reverse-tools/trace_tables.py --cell 0xf:0x57 shows the
+multiplier going 0x2c2c, then 0x2e2c and 0x2e2e as the index is forced on
+each core, then back to 0x2c2e and 0x2c2c at #8096 and #8294, and staying
+there through the PAPD calibration. The port was staying at 0x2e2e.
+
+Measured with test/phase_compare.py on the contiguous-block windows:
+up-ch1 goes from 13134 of 22951 to 13625 (57% to 59%), up-ch1-freddo from
+15087 of 27571 to 15513 (55% to 56%). The PAPD calibration region is back
+to where it was before the pre-calibration patch, 2023 of 2662 matching
+operations in 16 contiguous blocks rather than 2014 in 25.
+
+Five blocks of the previous measurement no longer appear at their record,
+and all five are merges into a longer block starting earlier, checked one
+at a time: #12788 of 78 and #12870 of 59 become the single 145 at #12784,
+which is the run the pre-calibration patch had split in two; #13756 of 78
+becomes 90 at #13752; #8983 of 22 becomes 25 at #8979. The fifth, #11760
+of 55, has no neighbour, so it was measured on its own region: 120 of 122
+in three blocks before, 121 of 122 in two blocks after.
+
+check_patch_gating.py marks two things ungated and both are declared.
+b43_nphy_txpwr_index() itself carries no revision test, and did not when it
+arrived either: its gate is in its callers, all of which test phy rev 8 and
+radio rev 8. And b43_nphy_op_prepare_structs() is common to every N-PHY, so
+the two lines that start the per-core record at -1 run everywhere. That
+record is read in exactly one place, b43_nphy_txpwr_index(), which no other
+revision reaches, so on anything else it is written and never read. It is
+also the correct value rather than a convenient one: zero would claim index
+zero is forced.
+
+Verified: records #8086-#8310, from
+"TBL.WR   id=0x000f off=0x0057 len=1"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n28325
+Link: https://github.com/aleferri/b43-6362-wip/blob/8491752/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/8491752/reverse-tools/trace_tables.py
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -3849,16 +3849,17 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+  * compensation at 320, the local oscillator compensation at 448, and on an
+  * internal PA the RF power offset at 576.
+  *
+- * Only the non-negative index is here. Handing the index back is a separate
+- * path in the reference, driven by state it keeps for the transmit
+- * calibrations, and nothing in b43 asks for it.
++ * A negative index means the other direction: hand the chain back the gain, the
++ * multiplier and the compensations it had before an index was first forced on
++ * it.
+  */
+ static void b43_nphy_txpwr_index(struct b43_wldev *dev, u8 core_mask,
+-				 u8 txpwrindex, bool restore_cals)
++				 s8 txpwrindex, bool restore_cals)
+ {
+ 	struct b43_phy_n *nphy = dev->phy.n;
++	struct b43_phy_n_txpwrindex *saved;
+ 	bool tx_pwr_ctrl_state;
+-	u16 rad_gain, dac_gain, m1m2;
++	u16 rad_gain, dac_gain, m1m2, tmp;
+ 	u16 iqcomp_a, iqcomp_b, regval[2];
+ 	u32 txgain, iqcomp, locomp;
+ 	s32 rfpwr_offset;
+@@ -3872,6 +3873,75 @@ static void b43_nphy_txpwr_index(struct b43_wldev *dev, u8 core_mask,
+ 			continue;
+ 
+ 		tbl = core ? 27 : 26;
++		saved = &nphy->txpwrindex[core];
++
++		/* Hand the chain back what it had before an index was forced on
++		 * it. Nothing to hand back if nothing was forced.
++		 */
++		if (txpwrindex < 0) {
++			if (saved->index < 0)
++				continue;
++
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER1, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			b43_phy_write(dev, core ? B43_NPHY_AFECTL_DACGAIN2 :
++						  B43_NPHY_AFECTL_DACGAIN1,
++				      saved->AfeCtrlDacGain);
++
++			b43_ntab_write(dev, B43_NTAB16(7, 0x110 + core),
++				       saved->rad_gain);
++
++			m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 87));
++			if (core == 0)
++				m1m2 = (m1m2 & 0x00FF) | (saved->bbmult << 8);
++			else
++				m1m2 = (m1m2 & 0xFF00) | saved->bbmult;
++			b43_ntab_write(dev, B43_NTAB16(15, 87), m1m2);
++
++			if (restore_cals) {
++				regval[0] = saved->iqcomp_a;
++				regval[1] = saved->iqcomp_b;
++				b43_ntab_write_bulk(dev,
++						    B43_NTAB16(15, 80 + 2 * core),
++						    2, regval);
++				b43_ntab_write(dev, B43_NTAB16(15, 85 + core),
++					       saved->locomp);
++				b43_ntab_write(dev, B43_NTAB16(15, 93 + core),
++					       saved->locomp);
++			}
++
++			b43_nphy_tx_power_ctrl(dev, nphy->txpwrctrl);
++			saved->index_internal = saved->index_internal_save;
++			saved->index = -1;
++			continue;
++		}
++
++		/* First time an index is forced on this chain, remember what it
++		 * is being forced over.
++		 */
++		if (saved->index < 0) {
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER1, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			saved->AfeCtrlDacGain =
++				b43_phy_read(dev, core ?
++					     B43_NPHY_AFECTL_DACGAIN2 :
++					     B43_NPHY_AFECTL_DACGAIN1);
++			saved->rad_gain =
++				b43_ntab_read(dev, B43_NTAB16(7, 0x110 + core));
++			tmp = b43_ntab_read(dev, B43_NTAB16(15, 87));
++			saved->bbmult = (tmp >> (core ? 0 : 8)) & 0xFF;
++			b43_ntab_read_bulk(dev, B43_NTAB16(15, 80 + 2 * core),
++					   2, regval);
++			saved->iqcomp_a = regval[0];
++			saved->iqcomp_b = regval[1];
++			saved->locomp =
++				b43_ntab_read(dev, B43_NTAB16(15, 85 + core));
++			saved->index_internal_save = saved->index_internal;
++		}
+ 
+ 		tx_pwr_ctrl_state = nphy->txpwrctrl;
+ 		b43_nphy_tx_power_ctrl(dev, false);
+@@ -3922,6 +3992,8 @@ static void b43_nphy_txpwr_index(struct b43_wldev *dev, u8 core_mask,
+ 		}
+ 
+ 		b43_nphy_tx_power_ctrl(dev, tx_pwr_ctrl_state);
++
++		saved->index = txpwrindex;
+ 	}
+ 
+ 	if (nphy->hang_avoid)
+@@ -7116,6 +7188,17 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 				if (phy->rev == 8 && phy->radio_rev == 8) {
+ 					b43_nphy_precal_txgain(dev);
+ 					target = b43_nphy_get_tx_gains(dev);
++					/* The forced index was only ever there
++					 * to read those gains off: the hardware
++					 * goes back to what it had, while the
++					 * calibrations keep the gains. The
++					 * capture hands it back here, one core
++					 * at a time, immediately after the read.
++					 */
++					b43_nphy_txpwr_index(dev, 1 << 0, -1,
++							     true);
++					b43_nphy_txpwr_index(dev, 1 << 1, -1,
++							     true);
+ 					b43_nphy_cal_perical_phyinit(dev,
+ 								     target);
+ 				}
+@@ -7396,6 +7479,12 @@ static void b43_nphy_op_prepare_structs(struct b43_wldev *dev)
+ 	nphy->perical = 2; /* avoid additional rssi cal on init (like wl) */
+ 	/* 128 can mean disabled-by-default state of TX pwr ctl. Max value is
+ 	 * 0x7f == 127 and we check for 128 when restoring TX pwr ctl. */
++	/* No index is forced on either chain yet, and zero would mean index
++	 * zero rather than none.
++	 */
++	nphy->txpwrindex[0].index = -1;
++	nphy->txpwrindex[1].index = -1;
++
+ 	nphy->tx_pwr_idx[0] = 128;
+ 	nphy->tx_pwr_idx[1] = 128;
+ 

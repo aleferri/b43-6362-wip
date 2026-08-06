@@ -1,0 +1,119 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: run the tail of the periodic calibration on radio 2057 rev 8
+
+The sequence this driver runs from the N-PHY init stopped at the RSSI
+calibration. brcmsmac's wlc_phy_cal_perical_nphy_run() has three more steps
+on the first calibration after an association, which an interface coming up
+is: measure the idle TSSI again now that the calibrations have run, program
+the transmit power control off it, and recalibrate the VCO. Add them.
+
+All three are already in this file, run once from the init before the
+calibrations; the vendor driver runs them in both places, and the capture
+agrees - it writes the 64 cell power control table at #1740 and #5726 on
+the way up and again at #24391, after the calibrations.
+
+The VCO calibration needed extracting first: it sat inline at the end of
+b43_radio_2057_setup(), which is the only thing that wanted it until now.
+Same four register operations, one caller more.
+
+While here, put b43_nphy_tx_pwr_ctrl_coef_setup() behind the same test the
+reference has it behind - the RX IQ calibration having succeeded - instead
+of running it either way. Now that the calibration can succeed the two
+differ.
+
+Measured with test/phase_compare.py: up-ch1 goes from 14351 of 22951 to
+14807 (63% to 65%), and no block of the previous measurement is lost or
+shortened. Five new contiguous runs, and two of them are the point: 334
+operations at #23928, the idle TSSI tone, and 266 at #24391, the power
+control table.
+
+up-ch1-freddo goes the other way, 16231 of 27571 to 16156, and that number
+is not a regression: the cold capture does not contain this phase inside
+the window at all. Its window ends at #32769, which is where a 65285 record
+hole starts, and the late power control table write is at #106217, on the
+far side of it. So the operations this patch adds have nothing to match in
+that window and can only redistribute the assignment, which is exclusive
+and greedy. Checked rather than assumed: the three blocks that stop
+appearing are all at the very end of the window, #32507, #32613 and
+#32685, and measured on that region alone the port is identical before and
+after - 183 of 217 in 29 contiguous blocks both ways.
+
+check_patch_gating.py marks two things ungated and both are declared.
+b43_nphy_cal_perical_phyinit() has no revision test of its own and never had:
+its only caller tests phy rev 8 and radio rev 8. And b43_radio_2057_setup() is
+shared, but what happens to it here is an extraction and nothing else - the
+same four register operations in the same order, now behind a name. The
+channel switch window of phase_compare.py is unchanged by it.
+
+Verified: records #23928-#25000, from
+"TBL.WR   id=0x001a off=0x0000 len=64"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n25476
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n20802
+Link: https://github.com/aleferri/b43-6362-wip/blob/d07e029/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/d07e029/test/phase_compare.py
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -756,6 +756,18 @@ static void b43_radio_2057_chantab_upload(struct b43_wldev *dev,
+ 	}
+ }
+ 
++/* brcmsmac's wlc_phy_radio205x_vcocal_nphy(), the radio 2057 path. The channel
++ * setup runs it, and so does the end of the periodic calibration.
++ */
++static void b43_radio_2057_vcocal(struct b43_wldev *dev)
++{
++	b43_radio_mask(dev, R2057_RFPLL_MISC_EN, ~0x01);
++	b43_radio_mask(dev, R2057_RFPLL_MISC_CAL_RESETN, ~0x04);
++	b43_radio_set(dev, R2057_RFPLL_MISC_CAL_RESETN, 0x4);
++	b43_radio_set(dev, R2057_RFPLL_MISC_EN, 0x01);
++	usleep_range(300, 600);
++}
++
+ static void b43_radio_2057_setup(struct b43_wldev *dev,
+ 				 const struct b43_nphy_chantabent_rev7 *tabent_r7,
+ 				 const struct b43_nphy_chantabent_rev7_2g *tabent_r7_2g)
+@@ -839,12 +851,7 @@ static void b43_radio_2057_setup(struct b43_wldev *dev,
+ 
+ 	usleep_range(50, 100);
+ 
+-	/* VCO calibration */
+-	b43_radio_mask(dev, R2057_RFPLL_MISC_EN, ~0x01);
+-	b43_radio_mask(dev, R2057_RFPLL_MISC_CAL_RESETN, ~0x04);
+-	b43_radio_set(dev, R2057_RFPLL_MISC_CAL_RESETN, 0x4);
+-	b43_radio_set(dev, R2057_RFPLL_MISC_EN, 0x01);
+-	usleep_range(300, 600);
++	b43_radio_2057_vcocal(dev);
+ }
+ 
+ /* Calibrate resistors in LPF of PLL?
+@@ -6972,12 +6979,24 @@ static void b43_nphy_cal_perical_phyinit(struct b43_wldev *dev,
+ 
+ 	if (!b43_nphy_cal_tx_iq_lo(dev, target, full, false)) {
+ 		b43_nphy_papd_cal(dev);
+-		if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0)
++		if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0) {
+ 			b43_nphy_save_cal(dev);
++			b43_nphy_tx_pwr_ctrl_coef_setup(dev);
++		}
+ 	}
+ 
+-	b43_nphy_tx_pwr_ctrl_coef_setup(dev);
+ 	b43_nphy_rssi_cal(dev);
++
++	/* And what the reference does on the first calibration after an
++	 * association, which an interface coming up is: measure the idle TSSI
++	 * again now that the calibrations have run, program the power control
++	 * off it, and recalibrate the VCO. All three are already in this file
++	 * for the init; the capture does them here as well, the power control
++	 * table at #24391.
++	 */
++	b43_nphy_tx_power_ctl_idle_tssi(dev);
++	b43_nphy_tx_power_ctl_setup(dev);
++	b43_radio_2057_vcocal(dev);
+ }
+ 
+ static int b43_phy_initn(struct b43_wldev *dev)
