@@ -21,6 +21,7 @@ guardare, e la prima riga di differenza e' il punto.
 
 import argparse
 import collections
+import difflib
 import importlib.util
 import os
 import re
@@ -74,6 +75,81 @@ REGIONS = [
     (22247, 23771, 'seconda cal RSSI'),
     (23772, 26100, 'coda'),
 ]
+
+
+# La cal PAPD non si misura piu' a finestre per funzione ma come UNA regione
+# contigua, e il motivo sono i piani di lettura. I piani sono posizionali:
+# servono il valore che l'hardware ha dato solo se il port fa le stesse read
+# nello stesso ordine del vendore. Dentro una regione contigua quella condizione
+# e' garantita per costruzione, quindi i valori tornano da soli; con una finestra
+# per funzione no, e si finisce a inseguire il cursore dei piani invece del
+# difetto. Il verdetto qui e' la STRUTTURA dei blocchi contigui, non un
+# conteggio: un blocco che si accorcia e' una regressione anche se il totale
+# sale.
+CONTIG = [
+    dict(name='papd-cal', rng='10966:13918',
+         anchor='TBL.WR id=0x20 off=0x0 len=64',
+         flow=('init', '1'),
+         what='wlc_phy_a4 intera: tabelle, filtri, setup, tono, cleanup, coda'),
+    # La stessa fase nell'init a FREDDO. Serve perche' li' le letture di tabella
+    # tornano i valori di un init completo: e' la cattura contro cui si
+    # verificheranno a2/a3, dove i valori contano.
+    dict(name='papd-cal-freddo', rng='18662:24096',
+         capture='full-init-ch1-bw20.decoded',
+         anchor='TBL.WR id=0x20 off=0x0 len=64',
+         flow=('init', '1'),
+         what='wlc_phy_a4 nella cattura a freddo'),
+    # La cal RX IQ, che il port non ha: serve a dire se lo 0% della tabella per
+    # regione e' la verita' o un artefatto dell'assegnazione dei blocchi.
+    dict(name='rxiq-cal', rng='14093:22246',
+         anchor='TBL.WR id=0x7 off=0x110 len=2',
+         flow=('init', '1'),
+         what='wlc_phy_cal_rxiq_nphy_rev3, non portata'),
+]
+
+def canon_contig(op):
+    """Nessuna riduzione: le read si confrontano col loro valore.
+
+    C'era, e riduceva una read al suo indirizzo perche' l'harness stampava
+    val=UNDEFINED mentre la cattura coi RETVAL ripiegati il valore ce l'ha. Ora
+    wrap.c stampa il valore che ha servito, quindi la riduzione non serve piu' ed
+    e' stata togliere: dentro una regione contigua un blocco dice che il port fa
+    le stesse op, nello stesso ordine, **e legge le stesse cose**. Se un giorno
+    serve una deroga, va dichiarata per regione come `allow` per le finestre, non
+    globale qui."""
+    return op
+
+
+def contig_blocks(vops, tops, minsize=4):
+    """I blocchi contigui in comune, con il record da cui parte ciascuno.
+
+    difflib da' la struttura giusta: sequenze di op identiche nello stesso
+    ordine, che e' esattamente la domanda "fin dove siamo in passo".
+    """
+    a = [canon_contig(o) for o in vops]
+    b = [canon_contig(o) for o in tops]
+    sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    out = []
+    for bl in sm.get_matching_blocks():
+        if bl.size >= minsize:
+            out.append((vops[bl.a].ep, bl.a, bl.size))
+    return out
+
+
+def run_contig(vendor, reg, out):
+    if reg.get('capture'):
+        vendor = merged_vendor(os.path.join(HERE, '..', 'router-data',
+                                            'dsl-3580l', reg['capture']))
+    lo, hi = (int(x) for x in reg['rng'].split(':'))
+    vops = CMP.load_vendor(vendor, (lo, hi))
+    tall = CMP.load_test(out)
+    off = find_anchor(tall, CMP.normalize_op(reg['anchor']),
+                      reg.get('anchor_nth', 0))
+    if off < 0:
+        return None, 'ancora non trovata: %s' % reg['anchor']
+    blocks = contig_blocks(vops, tall[off:])
+    return dict(nops=len(vops), blocks=blocks,
+                matched=sum(b[2] for b in blocks)), None
 
 
 def find_anchor(tops, anchor, nth):
@@ -132,13 +208,12 @@ WINDOWS = [
          anchor='TBL.WR id=0x20 off=0x0 len=64',
          flow=('init', '1'),
          what='tabelle scalare ed epsilon della cal, patches/b43/0004 e 0012',
-         known='le prime 260 op combaciano: sono le due tabelle scalare, 32 e '
-               '34, 64 valori ciascuna. Poi due cose. Il vendore salva e azzera '
-               'il bit 15 di 0x01 (lo spur), che e\' di wlc_phy_a4 e non e\' '
-               'ancora portato. E scrive le due tabelle epsilon con 64 '
-               'scritture singole dove b43 fa un bulk di 64: stesse celle, '
-               'stessi valori, forma diversa, da cui i 256 mancanti e i 256 in '
-               'piu\'.'),
+         known='resta una sola op, e non e\' una sequenza: il valore che la '
+               'PHY.RD di 0x01 restituisce. Le due tabelle scalare, il '
+               'salvataggio del reset RX e le due tabelle epsilon scritte cella '
+               'per cella combaciano. Questa finestra e\' ormai un '
+               'sottoinsieme della regione papd-cal, che e\' la misura da '
+               'guardare.'),
     dict(name='ipa-bias', rng='605:607',
          anchor='PHY.WR addr=0x32f val=0x3',
          flow=('init', '1'),
@@ -209,13 +284,6 @@ WINDOWS = [
                  'tbl_tx_filter_coef_rev4 ma nessun equivalente di '
                  'wlc_phy_ipa_restore_tx_digi_filts_nphy, che la scrive solo '
                  'per la durata della cal.'),
-    dict(name='papd-calsetup', rng='11756:11837',
-         anchor='RAD.WR addr=0x17e val=0xc',
-         flow=('init', '1'),
-         what='wlc_phy_papd_cal_setup_nphy, core 0',
-         pending='cal PAPD non portata. Scritture pure, quindi verificabile '
-                 'per intero appena c\'e\': override RF, save/mod AFE e i '
-                 'TXRXCOUPLE_2G del radio. Vedi docs/papd-cal-map.md punto 1.'),
     dict(name='chanswitch-ch6', rng='34940:34990', test_len=42,
          anchor='RAD.WR addr=0x16 val=0x58',
          flow=('chanset', '6'),
@@ -360,6 +428,34 @@ def main():
             print('  %-34s %-16s %6d %5d %3.0f%%'
                   % (name, '#%d-%d' % (rlo, rhi), len(idx), m,
                      100.0 * m / len(idx)))
+        return 0
+
+    for reg in CONTIG:
+        if args.only and reg['name'] != args.only:
+            continue
+        rout = '/tmp/phase_%s.out' % reg['name']
+        flow, chan = reg['flow']
+        with open(rout, 'w') as fh:
+            subprocess.run([os.path.join(HERE, 'nphy_trace'), flow,
+                            'dsl3580l', chan], stdout=fh,
+                           stderr=subprocess.DEVNULL)
+        res, err = run_contig(vendor, reg, rout)
+        print('regione %s (%s): %s' % (reg['name'], reg['rng'], reg['what']))
+        if err:
+            print('  %s\n' % err)
+        else:
+            print('  %d op del vendore, %d in blocchi contigui (%.0f%%)'
+                  % (res['nops'], res['matched'],
+                     100.0 * res['matched'] / res['nops']))
+            prev = None
+            for rec, vi, size in res['blocks']:
+                if prev is not None and vi > prev:
+                    print('  %-8s buco di %d op' % ('', vi - prev))
+                print('  #%-8d %4d op contigue' % (rec, size))
+                prev = vi + size
+            print()
+
+    if args.only and any(r['name'] == args.only for r in CONTIG):
         return 0
 
     bad = known = pending = 0

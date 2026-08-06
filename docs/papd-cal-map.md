@@ -36,6 +36,24 @@ Regione del primo init: **#10962 - #14092**, ~3100 record.
 | #13859-13918 | filtri digitali TX rimessi a quelli dell'init | `wlc_phy_ipa_set_tx_digi_filts_nphy` |
 | #13921-14092 | tabelle 26/27 riscritte con gain e potenza aggiornati | `wlc_phy_txpwr_index_nphy` |
 
+### Una op del setup non spiegata
+
+`RAD.RD 0x81` a **#11820** e **#12934** nel primo init, #46544 e #48182 nel
+secondo: quattro read in 70796 record, tutte dentro `papd_cal_setup`, una per
+core, sempre **fra le quattro read AFE e le quattro mod sulle stesse quattro**.
+Il registro e' `TR2G_CONFIG1_CORE0_NU`, lo stesso indirizzo per entrambi i core,
+scritto **una volta per init** (#83, `val=0x1`) nel blocco di init del radio e mai
+piu'; le read tornano `0x1`. brcmsmac non lo tocca, e nei due driver esiste solo
+come define.
+
+Il flush generico e' **escluso**: un barrier si vedrebbe dappertutto, non quattro
+volte. Restano un flag che l'init pianta in un registro libero e rilegge, o un
+barrier proprio in quel punto — ultima read prima delle prime write sugli stessi
+quattro registri. **SALAME** su entrambe: la cattura non le distingue. Le
+distingue il blob, guardando se il return finisce in uno store o in un branch.
+Nel driver non c'e': un read di cui non sappiamo se il valore serve non va in
+mainline.
+
 Il core 0 e il core 1 si distinguono senza ambiguità: `papd_cal_setup` scrive
 `TXRXCOUPLE_2G_PWRUP`/`ATTEN` a `0xc`/`0xf0` sul core in calibrazione e a
 `0x0`/`0xff` sull'altro, quindi #11834-11837 (`0x17e`/`0x17d` accesi) è il core 0
@@ -101,19 +119,31 @@ la conseguenza.
 **Il tono vero è la tabella 17**, e b43 ha già `b43_nphy_tx_tone()` e
 `b43_nphy_run_samples()`. Quel pezzo però era rotto: vedi sotto.
 
-## Ordine di lavoro proposto
+## Ordine di lavoro
 
-1. **il setup di `papd_cal_setup`**, #11756-11837: override RF, save/mod AFE e i
-   due `TXRXCOUPLE_2G` per core. Sono solo scritture, quindi verificabile per
-   intero e senza matematica nuova. La finestra `papd-calsetup` di
-   `phase_compare.py` è già lì e aspetta.
-2. **`restore`/`set` dei filtri digitali** attorno alla cal: 15 op più 45, la
-   tabella c'è già. Non si può portare da solo — lasciare acceso fuori dalla cal
-   il filtro della cal è peggio che non toccarlo — quindi va insieme al punto 1.
-3. **un solo passo del loop del core 0**, con i piani di lettura attivi. Se un
-   passo torna, il resto è iterazione.
+I punti 1 e 2 sono **fatti**, `patches/b43/0015`, e sono venuti fuori insieme
+perche' nessuno dei due sta in piedi da solo: un setup senza cleanup lascia
+accesi gli override RF, quelli AFE e il coupler, e il filtro della cal fuori
+dalla cal e' peggio che non toccarlo.
+
+1. ~~il setup di `papd_cal_setup`~~ — piu' il **cleanup**, che il piano non
+   nominava, piu' i pezzi di `wlc_phy_a4` che li circondano: il reset RX salvato e
+   azzerato fra le tabelle scalare e le epsilon e riscritto in coda, il bbmult
+   salvato prima del loop, il bit 13 di `PAPD_CAL_SHIFTS0/1` rispento dopo.
+2. ~~`restore`/`set` dei filtri digitali~~ — finestra `papd-digifilt` **15/15**.
+3. **un solo passo del loop del core 0**. I piani di lettura non servono piu'
+   "attivi" ma **in ordine**: vedi sotto.
 4. **la matematica di `a3_nphy` e `a2_nphy`**, ed è l'ultima perché è l'unica
    parte che non si può verificare a pezzi.
+
+### Le tabelle epsilon si scrivono cella per cella
+
+Non e' un vezzo di fedelta': `0015` ha cambiato il bulk di 64 in due loop di 64
+scritture singole, come brcmsmac e come il vendore. Costa 64 setup di indirizzo
+di tabella invece di uno, e in cambio il bulk si appoggia all'auto-incremento
+dell'indirizzo, che qui nessuno ha provato. La finestra `papd-tables` e' passata
+da **260/774 a 513/774**, e quello che resta e' una sola op: il valore che la
+`PHY.RD` di `0x01` restituisce.
 
 ## Cosa è già portato, dopo aver letto la mappa
 
@@ -225,26 +255,87 @@ rifare questa conta.
 
 ### L'ordine, e perche' e' questo
 
-1. **Separare i piani di lettura per cattura.** `main.c` ne carica uno solo, da
-   `opinit-*`. Un init a freddo va servito coi valori della cattura a freddo, e
-   `a2`/`a3` si verificano solo la'. Senza questo passo il codice della cal
-   calcola su valori di un'altra cattura e sembra sbagliato quando non lo e'.
-   La modifica e' piccola — il loader dei piani prende il nome dal `--name` di
-   `gen_readplans.py`, e il flow scegle il set — ed e' gia' stata scritta e poi
-   ritirata perche' misurata su un albero senza le patch: **va rimisurata su un
-   controllo giusto**.
-2. **Le finestre su `#18662` in avanti**, contro `full-init-ch1-bw20.decoded`.
-   Il meccanismo `capture=` esiste e funziona (`static-tables`, 1424/1424).
+Il prerequisito e' cambiato: non e' "separare i piani per cattura", e' **avere la
+fase contigua**. I piani sono posizionali, quindi servono il valore che
+l'hardware ha dato solo se il port fa le stesse read nello stesso ordine del
+vendore; dentro una regione contigua quella condizione e' vera per costruzione, e
+allora i valori tornano da soli senza posizionare niente per chiamata.
+
+Misurato: la regione `papd-cal` (`CONTIG` in `phase_compare.py`, #10966-13918)
+copre **2486 op del vendore e 1819 stanno in blocchi comuni nello stesso ordine e
+con gli stessi valori letti, 73%**, il primo blocco da **791 op**. La struttura:
+
+| da | op contigue | cosa |
+|---|---|---|
+| #10966 | 791 | tabelle scalare, reset RX, epsilon cella per cella, filtri |
+| — | buco di 4 | il **bbmult**: vedi sotto |
+| #11764 | 52 | override RF del setup, banda del filtro compresa |
+| — | buco di 1 | `RAD.RD 0x81`, non spiegata |
+| #11822 | 334 | mod AFE, coupler, il tono da 160 word |
+| — | **buco di 349** | `a3`/`a2`, core 0 |
+| #12792 | 74 | i 17 override spenti della cleanup |
+| #12882 | 48 | coda della cleanup, AFE e bbmult |
+| #12936 | 334 | core 1, stessa forma |
+| — | **buco di 276** | `a3`/`a2`, core 1 |
+| #13760 | 74 | cleanup core 1 |
+| #13856 | 48 | coda di `a4` |
+
+Quindi:
+
+1. **I due buchi grossi sono `a3`/`a2`** e sono il lavoro vero. Tutto il resto e'
+   contiguo, e dentro quel contiguo i piani sono in ordine.
+2. ~~I 3 op della banda del filtro~~ — **chiusi, e non era ne' la cattura ne' i
+   piani.** L'harness mirrorava solo PHY, radio, MMIO e SHM: una lettura di
+   tabella passa dalla porta dati `0x73`, quindi il port si riprendeva l'ultima
+   cella scritta da qualunque parte — le epsilon appena azzerate, cioe' 0 — invece
+   di `7/0x154`. La cella la scrivono entrambi, e con lo stesso valore
+   (`0x2c64`, #6996 nella cattura a freddo). Aggiunto `tbl_mirror` in `wrap.c`, il
+   primo blocco e' passato da **796 a 847 op** e il totale da 1812 a 1836. Prima
+   di guardarci l'ho attribuito ai piani e poi alla cattura a caldo: **TONNO**
+   entrambe le volte.
 3. **Poi il codice**, un passo di cal per volta, col criterio del +-2 sui valori
-   che passano da rccal (sezione sopra).
+   che passano da rccal (sezione sopra), **contro la regione `papd-cal-freddo`**.
+
+### Il bbmult: b43 non scrive mai 15/87
+
+Trovato dal confronto sui valori letti, appena l'harness ha smesso di stampare
+`val=UNDEFINED`. Il vendore in ingresso alla cal legge **`0x2c2c`** dalla cella 87
+della tabella 15 e il port legge **`0`**: quella cella nella cattura il vendore la
+scrive **70 volte**, la prima a **#1219**, molto prima della cal, e b43 non la
+scrive mai — le sue scritture sulla tabella 15 stanno su 0-17 e 32-49, la ladder
+della cal TX IQ/LO. Conseguenza a valle: la cleanup ripristina uno zero.
+
+E' il buco di 4 op del primo blocco, ed e' il prossimo da inseguire. Non e' del
+guscio: il guscio legge, salva e ripristina quello che trova.
+
+### La stessa fase in due catture indipendenti
+
+`papd-cal-freddo` (#18662-24096 di `full-init-ch1-bw20.decoded`) da' **3727 op del
+vendore e le stesse 1819 in blocchi, 49%**, con lo stesso primo blocco da 791. Il
+denominatore e' piu' grande perche' quella e' una cal completa: i due buchi di
+`a3`/`a2` sono **920 e 930** op invece di 349 e 276.
+
+Due cose per cui e' quella la cattura su cui verificare `a2`/`a3`:
+
+- **la coda della cleanup matcha piu' a lungo**, 82 op contro 48, perche' i valori
+  che ripristina sono quelli che un init completo lascia dietro;
+- la struttura dei blocchi e' **la stessa** in due catture che non hanno niente in
+  comune se non il driver: e' la conferma piu' forte che il guscio e' giusto, piu'
+  di qualunque percentuale su una sola cattura.
 
 ### La regola del controllo
 
 Prima di credere a qualsiasi numero di questa fase: `git -C ~/src/linux diff
---stat`. Deve dire **27 inserzioni** su `phy_n.c` con `0001..0014` e la patch
-mainline della cal RSSI applicate, e `--global-run 132 26100` sul flow `init`
-deve dare **5953 op su 22951, 26%, 721 blocchi**. Se non torna, l'albero e'
-spoglio e ogni misura della cal e' rumore: e' la trappola 1, e ci si ricasca.
+--numstat`. Con `0001..0014` e la patch mainline della cal RSSI applicate deve
+dire **213 inserzioni e 13 delezioni** su `phy_n.c` — la voce diceva 27, che e' il
+conto di `0011` da sola e non torna su niente — e `--global-run 132 26100` sul
+flow `init` deve dare **5953 op su 22951, 26%, 721 blocchi**.
+
+Con dentro anche `0015` e le due mainline degli override RF: **249+/7-** su
+`phy_n.c`, **2+/2-** su `tables_nphy.c`, e `--global-run` a **7075 su 22951, 31%**.
+
+Se non torna, l'albero e' spoglio e ogni misura della cal e' rumore: e' la
+trappola 1, e ci si ricasca.
 
 ## Perche' il resto non si porta a pezzi
 

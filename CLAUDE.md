@@ -38,19 +38,29 @@ tre.
 
 ## Stato
 
-`14 finestre: 0 da guardare, 5 divergenze note, 2 fasi non ancora portate`
+`13 finestre: 0 da guardare, 4 divergenze note` piu' **tre regioni**, `papd-cal` e
+`papd-cal-freddo`: la stessa fase nelle due catture, 1836 op in blocchi contigui in
+entrambe, stesso primo blocco da 847
 
 Run intera: flow `full` contro `opinit-ch1-ch6-bw20.decoded` #132-26100, cioe'
-il suo primo `up` a canale 1. **5398 op su 22951, 24%**. Per regione:
+il suo primo `up` a canale 1. **6433 op su 22951, 28%**. Per regione:
 
 | regione | record | appaiate |
 |---|---|---|
 | init vero e proprio | #132-10961 | 36% |
-| cal PAPD (`a4`) | #10962-14092 | 26% |
-| cal RX IQ, ingresso | #14093-15920 | 5% |
+| cal PAPD (`a4`) | #10962-14092 | **68%** |
+| cal RX IQ, ingresso | #14093-15920 | **0%** |
 | cal RX IQ, sweep di gain | #15921-22246 | **9%**, 5812 op, la più grande |
-| seconda cal RSSI | #22247-23771 | **0%** |
+| seconda cal RSSI | #22247-23771 | 0% col flow `full`, 46% col flow `init` |
 | coda | #23772-26100 | 29% |
+
+Col flow `init`, che e' quello che imita il vendore, il totale e' **7075 su 22951,
+31%**. La cal PAPD e' salita da 26% a 68% perche' il suo guscio c'e'
+(`patches/b43/0015`): restano fuori `a3`/`a2`, due buchi da 349 e 276 op.
+
+`cal RX IQ, ingresso` e' scesa da 5% a 0%: le 84 op che prima risultavano
+appaiate erano coincidenze posizionali, non codice, e lo spostamento del resto le
+ha spazzate. **Da guardare**, non da archiviare.
 
 ## La struttura della cattura
 
@@ -61,6 +71,16 @@ driver in `docs/init-flow.md`.
 
 `do_full_init` (b43) == `phy_init_por` (brcmsmac): dietro ci stanno il download
 delle tabelle statiche e rcal/rccal.
+
+**La cal si misura come regione contigua, non a finestre per funzione.** Le due
+finestre `papd-calsetup` e `papd-calcleanup` sono esistite per una sessione e sono
+state togliere: una finestra per funzione costringe a inseguire il cursore dei
+piani di lettura invece del difetto, perche' i piani sono posizionali e servono il
+valore giusto solo se il port fa le stesse read nello stesso ordine. Dentro una
+regione contigua quella condizione e' garantita per costruzione. La lista `CONTIG`
+di `phase_compare.py` sta accanto a `WINDOWS` e non da' un voto: da' la
+**struttura dei blocchi**, con il record da cui parte ciascuno. Un blocco che si
+accorcia e' una regressione anche se il totale sale.
 
 **Le catture sono due e servono a cose diverse.** `opinit-ch1-ch6-bw20.decoded`
 (70796 record) e' il riferimento di tutto quello che sta qui sopra: e' un init **a
@@ -97,7 +117,10 @@ l'altro ramo. Resta fuori il cuore, `a2`/`a3`, e con lui la cal PAPD vera:
 - **`Op.ep` è l'unico modo** di sapere da che record viene un'op: `load_vendor`
   scarta bookkeeping e ombre, quindi indice ≠ numero di record.
 - Ogni patch dietro un gate di revisione, verificato con `check_patch_gating.py`.
-  Eccezione dichiarata: `0010`, fix di mainline per ogni N-PHY.
+  Eccezioni dichiarate, tutte e sole per refusi di trascrizione da brcmsmac in
+  codice condiviso: `b43/0010` e la mainline
+  `b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7`. Un refuso non e'
+  una feature di questo hardware e dietro un gate non ci va.
 - Niente commenti "prima era così": quelli vanno nel messaggio di commit.
 - **Provenienza in trailer**: `Link:` per ogni URL, uno per riga — e' il nome che
   il kernel conosce, non `Reference:`/`Capture:`/`Tool:`. Il sorgente del kernel si
@@ -140,6 +163,10 @@ dell'altra. Con la prima sola, `sampleplay-tssi` e `sampleplay-iqlo` fanno 322/3
 
 
 Refusi di trascrizione da brcmsmac e di precedenza C, non buchi di feature:
+i due della cal PAPD sono `tbl_rf_control_override_rev7_over1` con due `val_mask`
+che non coprono il campo del proprio shift, e `one_to_many` `TX_PU` con quattro
+chiamate su cinque (`patches/mainline/`, dimostrati a tre voci: brcmsmac e la
+cattura concordano contro b43). Poi, in ordine:
 `0005` registro sbagliato, `0010` `<<` che lega più forte di `&` più un passo di
 fase troncato in una `u16`, `0011` dieci campi persi con la tabella "solo 2 GHz",
 `0012` tabelle inizializzate nel posto sbagliato. Vale sempre la pena confrontare
@@ -178,8 +205,39 @@ Il blob da' i nomi veri di brcmsmac: `a3` = `wlc_phy_papd_cal_gctrl_nphy` (2444 
    torna -1 non parte nemmeno `b43_nphy_save_cal()`, che nella sequenza di `0014`
    sta dietro quel controllo. **Non** sono "scritture pure verificabili per
    intero" come diceva questa voce: gli upload li decide la cal.
-2. I **piani di lettura per chiamata di cal**: con `0014` il port fa la cal RSSI
-   due volte per init, i piani ne coprono una sola, e la finestra `rssi-cal`
-   scende da 11/16 a 1/16 con coefficienti a zero. Finché non è sistemato, `0014`
-   non è verificata e il resto della cal non si misura.
-3. Init del radio: 412 voci contro 43 del vendore, dentro il 36% dell'init.
+2. **Il cursore dei piani di lettura e' avvelenato al primo hit**, e non e' la cal
+   RSSI chiamata due volte come diceva questa voce. Il cursore e' uno, globale e
+   monotono: il primo `planhit` di tutta la run e' `PHY 0x7a` servito dal record
+   **14999** — il vendore quel registro lo legge solo dentro la cal RX IQ, il port
+   all'init — e da li' in poi tutto cio' che il vendore ha letto prima del 15000 e'
+   irraggiungibile. Sulla run: **593 planhit contro 1815 planmiss**, e per esempio
+   `RAD 0x16b`, che ha una sola entry al record 553, la manca. Due strade, e la
+   prima e' quella che paga: **regioni contigue**, dove l'ordine delle read e' lo
+   stesso per costruzione (fatto per la cal PAPD, `CONTIG` in
+   `phase_compare.py`); oppure un cursore per indirizzo invece che globale. Vedi
+   `test/README.md`.
+3. **Il bbmult: b43 non scrive mai la cella 87 della tabella 15.** Il vendore in
+   ingresso alla cal PAPD ci legge `0x2c2c`, il port `0`, e la cleanup ripristina
+   uno zero. Il vendore quella cella la scrive 70 volte nella cattura, la prima a
+   #1219; b43 sulla tabella 15 scrive solo 0-17 e 32-49, la ladder della cal TX
+   IQ/LO. Trovato dal confronto sui valori letti, che ora c'e': `wrap.c` stampa il
+   valore servito e `canon_contig()` non riduce piu' niente.
+4. **Il confine fra `cal PAPD` e `cal RX IQ, ingresso` in `REGIONS` e' sbagliato.**
+   Sta a #14092/#14093 e taglia in mezzo la coda di `wlc_phy_txpwr_index_nphy`: le
+   prime 172 op della seconda regione sono l'upload dei gain e il port le fa
+   identiche. Lo 0% di quella riga e' l'assegnazione esclusiva dei blocchi della
+   global run, non la verita'. La cattura coi
+   RETVAL ripiegati il valore ce l'ha, quindi ogni read conta come divergenza e
+   `canon_contig()` in `phase_compare.py` la riduce all'indirizzo. E' una
+   riduzione che nasconde informazione vera: appena il trace porta il valore
+   servito, va togliere, e i valori letti diventano verificabili dentro una
+   regione.
+5. **`RAD.RD 0x81` in `papd_cal_setup`, senza spiegazione.** Quattro read in 70796
+   record, tutte dentro il setup, una per core per init, sempre fra le quattro
+   read AFE e le quattro mod sulle stesse. Il registro (`TR2G_CONFIG1_CORE0_NU`) e'
+   scritto una volta per init a #83 con `1` e mai piu', e le read tornano `1`;
+   brcmsmac non lo tocca. Nel driver **non c'e'**: un read di cui non sappiamo se
+   il valore serve non va in mainline. Si decide sul blob, guardando se il return
+   finisce in uno store o in un branch — lo stesso metodo con cui si e' chiusa la
+   colonna `do_init` dei 412 registri.
+6. Init del radio: 412 voci contro 43 del vendore, dentro il 36% dell'init.

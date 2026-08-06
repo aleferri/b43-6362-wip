@@ -1,0 +1,45 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: fix two RF control override value masks on N-PHY rev 7
+
+Two entries of tbl_rf_control_override_rev7_over1 carry a value mask that
+does not match their own shift: field 0x0100 has mask 0x0100 with shift
+11, and field 0x0200 has mask 0x0800 with shift 12. Every other entry of
+the three rev 7 tables has the mask covering exactly the field its shift
+lands in.
+
+brcmsmac has the two masks one place further along, (0x1 << 11) for field
+0x0100 and (0x1 << 12) for field 0x0200, and an MMIO capture of wl
+6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057 rev 8) agrees with
+brcmsmac: the setup of the PAPD calibration programs both fields, and the
+two modify operations it produces on 0x0340 carry mask 0x0800 and 0x1000.
+
+The effect is not confined to the bit that does not get written.
+b43_nphy_rf_ctl_override_rev7() clears the value mask and ORs the shifted
+value in, so for field 0x0100 it clears bit 8 of 0x0340 - which belongs
+to the low pass filter bandwidth field, mask 0x0700, that the same
+sequence programs a few operations earlier - and sets bit 11 regardless.
+Whether that destroys the bandwidth depends on its value: on the captured
+channel it does not, because there bit 8 is already clear.
+
+Verified: records #11800-#11805, from
+"PHY.OR   addr=0x0342 val=0x0100 (set 0x0100)"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n14969
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n14977
+Link: https://github.com/aleferri/b43-6362-wip/blob/a54f82b/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+@@ -3224,8 +3224,8 @@ static const struct nphy_rf_control_override_rev7
+ 	{ 0x0080, 0x340, 0x341, 0x0700, 8 },
+ 	{ 0x0800, 0x340, 0x341, 0x4000, 14 },
+ 	{ 0x0400, 0x340, 0x341, 0x2000, 13 },
+-	{ 0x0200, 0x340, 0x341, 0x0800, 12 },
+-	{ 0x0100, 0x340, 0x341, 0x0100, 11 },
++	{ 0x0200, 0x340, 0x341, 0x1000, 12 },
++	{ 0x0100, 0x340, 0x341, 0x0800, 11 },
+ 	{ 0x0040, 0x340, 0x341, 0x0040, 6 },
+ 	{ 0x0001, 0x340, 0x341, 0x0001, 0 },
+ };
