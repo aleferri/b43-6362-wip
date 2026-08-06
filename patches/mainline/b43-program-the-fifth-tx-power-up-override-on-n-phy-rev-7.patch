@@ -1,0 +1,36 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Thu, 6 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: program the fifth transmit power-up override on N-PHY
+ rev 7
+
+b43_nphy_rf_ctl_override_one_to_many() makes four calls for
+N_RF_CTL_OVER_CMD_TX_PU. brcmsmac's wlc_phy_rfctrl_override_1tomany_nphy()
+makes five: field (0x1 << 2) on override 2 sits between (0x1 << 0) on
+override 2 and (0x1 << 11) on override 1, and b43 does not have it.
+
+An MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057
+rev 8) shows the operations: the setup of the PAPD calibration switches
+the transmit power up on the core being calibrated and off on the other
+one, and each of those two calls produces a pair on 0x0346/0x0344 and
+0x0347/0x0345 with mask 0x0004 that the port does not emit.
+
+The other four commands of the one to many path have as many calls as
+brcmsmac, so this is the only one missing.
+
+Verified: records #11776-#11777 and #11786-#11787, from
+"PHY.OR   addr=0x0346 val=0x0004 (set 0x0004)"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n21406
+Link: https://github.com/aleferri/b43-6362-wip/blob/a54f82b/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -220,6 +220,7 @@ static void b43_nphy_rf_ctl_override_one_to_many(struct b43_wldev *dev,
+ 		b43_nphy_rf_ctl_override_rev7(dev, 0x4, value, core, off, 0);
+ 		b43_nphy_rf_ctl_override_rev7(dev, 0x2, value, core, off, 1);
+ 		b43_nphy_rf_ctl_override_rev7(dev, 0x1, value, core, off, 2);
++		b43_nphy_rf_ctl_override_rev7(dev, 0x4, value, core, off, 2);
+ 		b43_nphy_rf_ctl_override_rev7(dev, 0x0800, 1, core, off, 1);
+ 		break;
+ 	case N_RF_CTL_OVER_CMD_RX_GAIN:

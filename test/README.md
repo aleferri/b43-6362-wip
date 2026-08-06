@@ -37,7 +37,14 @@ Il repo non tiene una copia dei sorgenti del driver.
   `lib/math/cordic.c` — quest'ultimo vero, perché i valori del cordic finiscono
   nei registri e uno stub li falserebbe.
 - `wrap.c` implementa gli accessor (PHY, radio, MMIO, SHM, MAC) emettendo una
-  riga per op, con mirror di memoria per le write. Le `b43_ntab_*` invece stanno
+  riga per op, con mirror di memoria per le write. **E un mirror delle tabelle**,
+  `tbl_mirror`, keyed su `(id, offset)`: senza, una lettura di tabella passava
+  dalla porta dati `0x73` e si riprendeva l'ultima cella scritta da qualunque
+  parte invece di quella richiesta. Si vedeva sulla banda del filtro passa-basso
+  che la cal PAPD rilegge da `7/0x154`, e per due sessioni e' stato attribuito ai
+  piani di lettura e alla cattura sbagliata prima che qualcuno guardasse `wrap.c`.
+  Le `__wrap_b43_ntab_*` fanno girare la `__real_` comunque, perche' e' lei che
+  emette le op sulla porta: cambia solo il valore che torna. Le `b43_ntab_*` invece stanno
   in `tables_nphy.c` che compiliamo, quindi si intercettano al linker con
   `--wrap` e poi si chiama la `__real_`: nel trace escono l'etichetta `TBL.WR` e
   le `PHY.WR` su 0x72/0x73/0x74 che ne discendono, come nella cattura.
@@ -188,7 +195,7 @@ tutte:
 |---|---|---|---|
 | gain-control (`0008`+`0001`) | 87 | **87/87** | **ok** |
 | papd-comp (`0003`) | 16 | **16/16** | **ok** |
-| papd-tables (`0004`+`0012`) | 774 | 260/774 | mancano 256, in più 256: il vendore scrive le due tabelle epsilon con 64 scritture singole dove b43 fa un bulk di 64, e salva/azzera il bit 15 di `0x01`, che è di `wlc_phy_a4` |
+| papd-tables (`0004`+`0012`+`0015`) | 774 | **774/774** | **ok** |
 | ipa-bias (`0005`) | 3 | **3/3** | **ok** |
 | static-tables (`initpor`) | 1424 | **1424/1424** | **ok** |
 | static-tables-2 (`initpor`) | 806 | **806/806** | **ok** |
@@ -198,7 +205,46 @@ tutte:
 | chanswitch-ch6 (`0011`) | 39 | 33/39 | **nessuna op mancante**; la coda è sfasata di tre per gli MMIO che il vendore non registra |
 | tssi-setup | 19 | 5/19 | mancano 4, in più 15: il `0x17b` di troppo e lo sfasamento |
 | rssi-cal | 16 | 11/16 | mancano 5, in più 3: i nove coefficienti combaciano, le mancanti sono `PHY.RD` su `0x73`, che i piani escludono di proposito |
-| papd-digifilt, papd-calsetup | - | - | fasi della cal PAPD non portate: l'ancora non c'è, ed è lo stato atteso |
+| papd-digifilt (`0015`) | 15 | **15/15** | **ok** |
+
+### Regioni contigue: `CONTIG`
+
+Una fase di calibrazione **non si misura a finestre per funzione**, si misura come
+una regione contigua sola. Il motivo sono i piani di lettura: sono posizionali,
+quindi servono il valore che l'hardware ha dato solo se il port fa le stesse read
+nello stesso ordine del vendore. Dentro una regione contigua quella condizione e'
+vera per costruzione; con una finestra per funzione no, e si finisce a inseguire
+il cursore dei piani invece del difetto. Le finestre `papd-calsetup` e
+`papd-calcleanup` sono esistite una sessione e sono state togliere per questo.
+
+`CONTIG` sta accanto a `WINDOWS` e non da' un voto: da' la **struttura dei
+blocchi comuni**, ciascuno col record da cui parte, calcolata con `difflib` sui
+due flussi. Un blocco che si accorcia e' una regressione anche se il totale sale.
+Oggi ce ne sono due, la stessa fase in due catture: `papd-cal` (#10966-13918 della
+`opinit-*`) da **2486 op, 1836 in blocchi contigui, 74%**, il primo da 847;
+`papd-cal-freddo` (#18662-24096 della `full-init-*`) da **3727 op, le stesse 1836,
+49%**, stesso primo blocco. I buchi grossi sono `a3`/`a2`: 349 e 276 a caldo, 920 e
+930 a freddo, dove la cal e' completa. Una regione puo' dichiarare `capture=` come
+una finestra.
+
+C'e' anche `rxiq-cal` (#14093-22246), la fase che il port **non** ha, e serve a
+tenere onesta la tabella per regione: quella dice 0% e la regione trova un blocco
+da **172 op contigue a #14121**. Non e' una contraddizione ed e' istruttivo: quelle
+172 op sono `TBL.WR id=0x1a off=0x40 len=84`, l'upload dei gain, cioe' **la coda di
+`wlc_phy_txpwr_index_nphy` che il port fa identica** — il confine fra le due regioni
+in `REGIONS` sta a #14092/#14093 e passa in mezzo a quella coda. Da correggere. Lo
+0% della tabella nasce dall'assegnazione dei blocchi della global run, che e'
+esclusiva: un blocco lungo altrove si porta via le op.
+
+`canon_contig()` **non riduce piu' niente**, e questa e' la parte piu' severa del
+confronto. C'e' stata una riduzione che portava ogni read al suo indirizzo, perche'
+l'harness stampava `val=UNDEFINED` mentre la cattura coi RETVAL ripiegati il valore
+ce l'ha; ora `wrap.c` stampa il valore che ha servito, quindi un blocco dice che il
+port fa le stesse op, nello stesso ordine, **e legge le stesse cose**. Il prezzo e'
+visibile: `papd-cal` e' scesa da 1836 a 1819 op in blocchi e il primo blocco da 847
+a 791. Quelle 17 op sono informazione che prima era nascosta, e la prima e' il
+bbmult (`docs/papd-cal-map.md`). Guadagno collaterale: la finestra `papd-tables`
+e' passata da 513/774 a **774/774**.
 
 La colonna **run** è la sequenza consecutiva più lunga che combacia, su quante op
 ha la finestra: dice fin dove le due sequenze stanno insieme, che è più
@@ -354,6 +400,32 @@ mezza cattura e mezzo specchio.
 Rigenerato con `--max-len 512`, i due piani hanno 162 entry, il port ne consuma
 161, e i contatori vanno a **zero fuori posizione e zero saltate**. Ora i valori
 che la cal RSSI media vengono davvero dalla cattura.
+
+### Ma il cursore e' uno, ed e' avvelenato al primo hit
+
+Quel "zero fuori posizione" vale per `0x219` e `0x21a`, non per la run. Il cursore
+e' **globale e monotono**, e il primo `planhit` di tutta la run e' questo:
+
+    planhit PHY 0x007a rec 14999 cursore 0
+
+Il piano di `PHY 0x7a` ha tre entry, ai record `{14999, 18079, 22291}`: il vendore
+quel registro lo legge **solo dentro la cal RX IQ**, il port lo legge nell'init.
+Una read fuori ordine, e da li' in poi il cursore sta a 15000: tutto quello che il
+vendore ha letto prima del record 15000 diventa irraggiungibile per il resto della
+run. Si vede in chiaro su un indirizzo con una sola entry a inizio init:
+
+    planmiss RAD 0x016b cursore 26067 ultima 553
+
+Sulla run intera, flow `init`: **593 planhit contro 1815 planmiss**. Quindi i
+piani, oggi, servono il valore giusto a una minoranza delle read, e non perche'
+manchi capienza — il difetto del `--max-len` era un altro ed e' chiuso.
+
+Due strade. La prima e' quella che paga e non tocca l'harness: **regioni
+contigue**, dove l'ordine delle read e' lo stesso per costruzione (`CONTIG` sopra).
+La seconda e' un **cursore per indirizzo** invece di uno globale, che renderebbe
+una read fuori ordine un problema locale invece che una condanna per tutto quello
+che segue. Finche' non e' fatta nessuna delle due, un valore letto fuori da una
+regione contigua non e' un'osservazione: e' lo specchio.
 
 E con i valori letti giusti l'LSB che restava si e' rivelato **un difetto di
 mainline**, non un limite dell'harness: in `b43_nphy_rev3_rssi_cal()` il ramo

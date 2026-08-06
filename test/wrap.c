@@ -5,6 +5,13 @@
  * trace wl-diag decodificato e simula l'effetto minimo (mirror di memoria per
  * le write, valore programmato o mirror per le read). Nessun MMIO reale.
  *
+ * Le read stampano il valore che hanno SERVITO, non val=UNDEFINED. Il tracer del
+ * vendore lo mette in un record RETVAL a parte e merge_retvals.py lo ripiega
+ * sulla riga della read: finche' l'harness scriveva UNDEFINED, ogni read contava
+ * come divergenza per costruzione e il confronto sui valori letti non esisteva.
+ * Ora esiste, ed e' la parte piu' severa del confronto: dice se il port sta
+ * leggendo la stessa cosa, non solo se la sta chiedendo.
+ *
  * Gli accessor di phy_common.c e del core b43 non vengono compilati, quindi qui
  * si definiscono e basta. Le b43_ntab_* invece stanno in tables_nphy.c, che
  * compiliamo: quelle si intercettano al linker con --wrap e poi si chiama la
@@ -221,7 +228,7 @@ u16 b43_phy_read(struct b43_wldev *dev, u16 reg)
 
 	if (!plan_get(PLAN_PHY, reg, &val))
 		val = reg < MIRROR_PHY_SZ ? mirror_phy[reg] : 0;
-	fprintf(trace(), "cpu0 PHY.RD   addr=0x%04x val=UNDEFINED\n", reg);
+	fprintf(trace(), "cpu0 PHY.RD   addr=0x%04x val=0x%04x\n", reg, val);
 	return val;
 }
 
@@ -280,7 +287,7 @@ u16 b43_radio_read(struct b43_wldev *dev, u16 reg)
 
 	if (!plan_get(PLAN_RADIO, reg, &val))
 		val = reg < MIRROR_RADIO_SZ ? mirror_radio[reg] : 0;
-	fprintf(trace(), "cpu0 RAD.RD   addr=0x%04x val=UNDEFINED\n", reg);
+	fprintf(trace(), "cpu0 RAD.RD   addr=0x%04x val=0x%04x\n", reg, val);
 	return val;
 }
 
@@ -495,11 +502,86 @@ static u16 ntab_off(u32 offset)
 	return offset & 0x000003FF;
 }
 
+/* Mirror delle TABELLE, non dei registri.
+ *
+ * Serviva: mirror_phy tiene i registri, e una lettura di tabella passa dalla
+ * porta dati 0x73, quindi senza questo il port si riprendeva **l'ultima cella
+ * scritta da qualunque parte** invece di quella che aveva chiesto. Si vedeva
+ * sulla banda del filtro passa-basso, che la cal PAPD rilegge da 7/0x154: il
+ * port aveva appena azzerato le tabelle epsilon, quindi leggeva 0 dove il
+ * vendore legge 0x2c64. Non era ne' un difetto del driver ne' un problema dei
+ * piani di lettura, ed e' stato attribuito a entrambi prima di essere guardato.
+ *
+ * I piani non c'entrano e non devono: per una cella di tabella il valore giusto
+ * e' quello che la tabella contiene, che e' la stessa ragione per cui 0x72,
+ * 0x73 e 0x74 stanno fuori dai piani.
+ */
+#define TBL_MIRROR_IDS	64
+#define TBL_MIRROR_OFFS	1024
+
+static u32 tbl_mirror[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
+static u8 tbl_written[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
+
+static void tbl_mirror_set(u32 offset, u32 value)
+{
+	u16 id = ntab_id(offset), off = ntab_off(offset);
+
+	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS) {
+		tbl_mirror[id][off] = value;
+		tbl_written[id][off] = 1;
+	}
+}
+
+static int tbl_mirror_get(u32 offset, u32 *value)
+{
+	u16 id = ntab_id(offset), off = ntab_off(offset);
+
+	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS && tbl_written[id][off]) {
+		*value = tbl_mirror[id][off];
+		return 1;
+	}
+	return 0;
+}
+
+/* Le tre larghezze che b43_ntab_* distingue stanno nei bit alti dell'offset,
+ * come in tables_nphy.c: 8, 16 o 32 bit per cella.
+ */
+static void tbl_mirror_set_bulk(u32 offset, unsigned int nr, const void *data)
+{
+	const u8 *d8 = data;
+	const u16 *d16 = data;
+	const u32 *d32 = data;
+	unsigned int i;
+
+	for (i = 0; i < nr; i++) {
+		u32 v;
+
+		switch (offset & B43_NTAB_TYPEMASK) {
+		case B43_NTAB_8BIT:
+			v = d8[i];
+			break;
+		case B43_NTAB_16BIT:
+			v = d16[i];
+			break;
+		default:
+			v = d32[i];
+			break;
+		}
+		tbl_mirror_set(offset + i, v);
+	}
+}
+
 u32 __wrap_b43_ntab_read(struct b43_wldev *dev, u32 offset)
 {
+	u32 val, cell;
+
 	fprintf(trace(), "cpu0 TBL.RD   id=0x%04x off=0x%04x len=1\n",
 		ntab_id(offset), ntab_off(offset));
-	return __real_b43_ntab_read(dev, offset);
+	/* La __real_ gira comunque: e' lei che emette le op sulla porta. */
+	val = __real_b43_ntab_read(dev, offset);
+	if (tbl_mirror_get(offset, &cell))
+		return cell;
+	return val;
 }
 
 void __wrap_b43_ntab_read_bulk(struct b43_wldev *dev, u32 offset,
@@ -514,6 +596,7 @@ void __wrap_b43_ntab_write(struct b43_wldev *dev, u32 offset, u32 value)
 {
 	fprintf(trace(), "cpu0 TBL.WR   id=0x%04x off=0x%04x len=1\n",
 		ntab_id(offset), ntab_off(offset));
+	tbl_mirror_set(offset, value);
 	__real_b43_ntab_write(dev, offset, value);
 }
 
@@ -522,6 +605,7 @@ void __wrap_b43_ntab_write_bulk(struct b43_wldev *dev, u32 offset,
 {
 	fprintf(trace(), "cpu0 TBL.WR   id=0x%04x off=0x%04x len=%u\n",
 		ntab_id(offset), ntab_off(offset), nr_elements);
+	tbl_mirror_set_bulk(offset, nr_elements, _data);
 	__real_b43_ntab_write_bulk(dev, offset, nr_elements, _data);
 }
 
