@@ -45,7 +45,7 @@ esistono solo su G (`loctls`, `interfmode`).
 
 | voce | conseguenza |
 |---|---|
-| `main.c b43_calculate_link_quality`, `handle_irq_noise` | **nessuna misura del rumore di fondo**: `link_noise` resta al valore iniziale e mac80211 riceve una costante. Chiuso da `patches/b43/0006` |
+| `main.c b43_calculate_link_quality`, `handle_irq_noise` | **nessuna misura del rumore di fondo**: `link_noise` resta al valore iniziale e mac80211 riceve una costante. Chiuso da `patches/b43/MESSAGES.md#0006` |
 | `xmit.c b43_rssi_postprocess` (due voci) | la conversione del RSSI ha rami per G e per LP, non per N. Da guardare: è il numero che finisce in `ieee80211_rx_status.signal` |
 | `xmit.c b43_rx` (due voci) | la decodifica del PLCP e dei flag ha rami per B/G/LP. Da guardare insieme al punto sopra |
 | `main.c b43_calculate_link_quality` (top half) | vedi rumore |

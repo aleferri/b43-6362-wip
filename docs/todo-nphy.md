@@ -16,7 +16,7 @@ attribuisce.
 | registri | dove nella cattura | attribuzione |
 |---|---|---|
 | `0x1df, 0x1e1` = 0x1591 | #203-204, init radio iniziale | fase prima dell'init PHY, da guardare |
-| ~~`0x1d7, 0x1d9, 0x1db, 0x1dd`~~ | #680-683 | **chiusi**: soglie di carrier sense, `patches/b43/0008` |
+| ~~`0x1d7, 0x1d9, 0x1db, 0x1dd`~~ | #680-683 | **chiusi**: soglie di carrier sense, `patches/b43/MESSAGES.md#0008` |
 | `0x020, 0x021, 0x2a7, 0x2a8, 0x2e6, 0xc33` | #5614-5625 | fase non identificata |
 | `0x07b, 0x07e` (12 volte ciascuno) | #11769, #12819 | regione della calibrazione |
 | `0x29f, 0x2a0-0x2a4, 0x2be, 0x2e5, 0x348, 0x349, 0x358` | #12194-12324 | regione della calibrazione |
@@ -170,7 +170,7 @@ scritto per i 43217/43227/43228.
 per il campo `0x0800` che li pilota, ma nessun percorso del driver passa quel
 campo; il vendore li scrive 12 volte ciascuno durante la calibrazione. Non c'è
 niente da aggiungere senza sapere in che fase e con che valori, quindi
-`patches/b43/0007` mette una riga di TODO accanto alla voce morta e si va avanti.
+`patches/b43/MESSAGES.md#0007` mette una riga di TODO accanto alla voce morta e si va avanti.
 
 ## 3g. Il vcocal non mancava
 
@@ -214,7 +214,7 @@ save/restore delle calibrazioni. Non sono stub: girano.
 
 **Mancante per intero**: la **calibrazione PAPD**. b43 non ha nessuna funzione
 che la faccia — accende il motore (`PAPD_EN0`/`EN1`), ora gli inizializza le
-tabelle (`patches/b43/0004`) e calcola l'offset epsilon (`0009`), ma non calcola
+tabelle (`patches/b43/MESSAGES.md#0004`) e calcola l'offset epsilon (`0009`), ma non calcola
 mai gli epsilon. In brcmsmac il blocco è:
 
 | funzione | righe | cosa fa |

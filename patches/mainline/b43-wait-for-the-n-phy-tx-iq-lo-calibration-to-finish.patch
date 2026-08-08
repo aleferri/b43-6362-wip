@@ -1,0 +1,59 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Sat, 8 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: wait for the N-PHY TX I/Q LO calibration to finish
+
+b43_nphy_cal_tx_iq_lo() writes a calibration command to IQLOCAL_CMD and
+then polls the same register, meaning to wait until the engine is done
+before reading the results out of the IQLOCAL table. The test is
+inverted:
+
+	for (i = 0; i < 2000; i++) {
+		tmp = b43_phy_read(dev, B43_NPHY_IQLOCAL_CMD);
+		if (tmp & 0xC000)
+			break;
+		udelay(10);
+	}
+
+Bits 15 and 14 are set while the calibration runs, so the loop leaves on
+its first read, roughly ten microseconds after the command was issued.
+The driver then reads offsets 96 and up and stores them as the best
+coefficients, and repeats that for all twelve commands: what it stores
+is whatever the table held before the engine wrote to it.
+
+The reference spins the other way, waiting for the two bits to clear:
+
+	write_phy_reg(pi, 0xc0, cal_cmd);
+	SPINWAIT(((read_phy_reg(pi, 0xc0) & 0xc000) != 0), 20000);
+
+SPINWAIT() loops while its expression is true, and the budget is the
+same one this loop already has, 20000 us in steps of 10.
+
+An MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057
+rev 8) issues the same twelve commands in the same order and reads
+IQLOCAL_CMD 455 times between the first and the last. Before this change
+the driver reads it 12 times, once per command; after it, 455, and the
+matched operations over the calibration rise from 741 of 1570 to 1195.
+
+This is not specific to radio 2057 rev 8: the loop is shared by every
+N-PHY the driver drives, so it is deliberately not gated.
+
+Verified: records #8637-#10697, between the two writes of
+"PHY.WR   addr=0x00c2"
+Link: https://github.com/aleferri/b43-6362-wip/blob/d2c490d/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n25881
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/include/brcmu_utils.h?id=848acc8ffe1b#n16
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+index 22359bd9d..f3cdbdd8f 100644
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -5479,7 +5479,7 @@ static int b43_nphy_cal_tx_iq_lo(struct b43_wldev *dev,
+ 			b43_phy_write(dev, B43_NPHY_IQLOCAL_CMD, cmd);
+ 			for (i = 0; i < 2000; i++) {
+ 				tmp = b43_phy_read(dev, B43_NPHY_IQLOCAL_CMD);
+-				if (tmp & 0xC000)
++				if (!(tmp & 0xC000))
+ 					break;
+ 				udelay(10);
+ 			}

@@ -45,7 +45,14 @@ Il repo non tiene una copia dei sorgenti del driver.
   piani di lettura e alla cattura sbagliata prima che qualcuno guardasse `wrap.c`.
   Il mirror lo serve `tbl_port_get()` **alla porta dati**, cioe' dentro
   `b43_phy_read` per `0x73` e `0x74`, usando `(id << 10) | off` dall'ultima
-  scrittura su `0x72`. Prima lo serviva solo al valore di ritorno di
+  scrittura su `0x72`. Serve la cella **sempre**, anche se nessuno l'ha scritta —
+  `tbl_mirror` parte a zero e zero e' la risposta giusta, perche' quelle due
+  porte non sono registri e il loro mirror non significa niente — e in lettura
+  fa **avanzare l'indirizzo** come l'hardware: la read di `0x73` aggancia la
+  cella intera e incrementa, quella di `0x74` rende la word alta agganciata. Le
+  due porte si visitano in ordine opposto nei due versi (`0x73` poi `0x74` in
+  lettura, `0x74` poi `0x73` in scrittura), e senza l'aggancio l'incremento
+  sulla word bassa spingerebbe la lettura della word alta sulla cella dopo. Prima lo serviva solo al valore di ritorno di
   `b43_ntab_read`: il driver leggeva la cella giusta e il trace continuava a
   mostrare il mirror del registro, cioe' la misura diceva di no mentre il codice
   era a posto. Due sessioni di colpa data ai piani di lettura e alla cattura
@@ -141,7 +148,8 @@ questa cattura, perche' una cattura che parta dal power-on reset non c'e'.
 
 ## Cosa ha già trovato
 
-Con `patches/b43/0001` applicata al tree, il flow `init` riproduce il blocco di
+Col rollup applicato al tree, la modifica `patches/b43/MESSAGES.md#0001` fa
+riprodurre al flow `init` il blocco di
 gain control della cattura **op per op**: 0x1c e 0x32 con il bit 13, 0x289=0x46,
 0x283=0x44, 0x280=0x44, le otto table-op (LNA1, LNA2, TIA gain, gain bits per
 core) con i payload identici, i clip1 low gain code 0x37/0x2ad=0x74 e
@@ -163,7 +171,7 @@ moltiplicato per 2^16, e per tutte le frequenze che il driver chiede quel
 prodotto è un multiplo esatto di 65536, quindi il passo troncava a **zero** e i
 160 campioni uscivano tutti uguali; e `b43_nphy_load_samples()` mascherava con
 `0x3FF << 10` invece di spostare il valore mascherato, buttando via la componente
-in fase. `patches/b43/0010` chiude i due, e le 160 word diventano identiche alla
+in fase. `patches/b43/MESSAGES.md#0010` chiude i due, e le 160 word diventano identiche alla
 cattura. Senza la patch `sampleplay-iqlo` fa 2/322, con la patch 322/322: è la
 misura di quanto valga avere la finestra.
 
@@ -215,15 +223,15 @@ tutte:
 ### Le finestre, che sono due: `CONTIG`
 
 `CONTIG` ha **due** voci, la stessa macro operazione nei suoi due comportamenti:
-`up-ch1` (init a caldo, `opinit-*`, flow `init`) da **22951 op, 5791 in blocchi
-contigui, 25%**, e `up-ch1-freddo` (init completo, `full-init-*`, flow `initpor`)
-da **27571 op, 8746, 32%**. Due e non una perche' il tipo di calibrazione cambia
+`up-ch1` (init a caldo, `opinit-*`, flow `init`) da **22943 op, 16242 in blocchi
+contigui, 71%**, e `up-ch1-freddo` (init completo, `full-init-*`, flow `initpor`)
+da **27563 op, 17615, 64%**. Due e non una perche' il tipo di calibrazione cambia
 il comportamento — `full_cal` contro `soft`, e i buchi di `a3`/`a2` passano da 349
 e 276 op a 920 e 930 — quindi una fase di cal verificata contro una cattura sola
 valida un ramo e tace sull'altro. La seconda copre piu' della prima perche'
 contiene il download delle tabelle statiche.
 
-Con `patches/b43/0017` il port sceglie full o parziale come il riferimento invece
+Con `patches/b43/MESSAGES.md#0017` il port sceglie full o parziale come il riferimento invece
 di inchiodare `true`. Su queste due catture non cambia niente — sono entrambe di
 un'interfaccia che sale su un canale non calibrato, quindi il test viene `full` in
 tutte e due — ma ha fatto uscire un buco qui: `main.c` azzerava fra i due init
@@ -289,7 +297,7 @@ esattamente i campi 5 GHz della voce 5b.
 Un "ok" qui dice una cosa forte: in quella fase il port fa le stesse op, con gli
 stessi valori, nello stesso ordine. E paga: allargando la finestra
 `gain-control` da #685 a #680 sono venute fuori quattro scritture di soglie CRS
-che nessuno faceva (`patches/b43/0008`), e una `PHY.RD` di troppo nella guardia
+che nessuno faceva (`patches/b43/MESSAGES.md#0008`), e una `PHY.RD` di troppo nella guardia
 di `0001`, che leggeva `BANDCTL` dall'hardware dove b43 usa lo stato software. E le due divergenze note sono localizzate,
 non solo contate — la cattura dice che i dieci campi 5 GHz della voce 5b vanno
 scritti **in mezzo** alla sequenza (0x43 dopo 0x41, 0x4a dopo 0x47), non in coda.
@@ -361,10 +369,10 @@ altri 675 li scrive il core di b43, che non compiliamo — qui c'è solo il PHY.
 Cosa resta fuori, e perché:
 
 - **tabelle 26 e 27** a offset 576, la compensazione PAPD: era l'early return di
-  `b43_nphy_tx_gain_table_upload()`, chiuso da `patches/b43/0003`.
+  `b43_nphy_tx_gain_table_upload()`, chiuso da `patches/b43/MESSAGES.md#0003`.
 - **tabelle 31, 32, 33, 34**, cioè epsilon e scalare del PAPD: b43 accendeva il
   motore PAPD senza inizializzare le tabelle che legge. Chiuso da
-  `patches/b43/0004`.
+  `patches/b43/MESSAGES.md#0004`.
 - **i registri di gain 0x9a-0x9d, 0x129-0x12b, 0x1df, 0x1e1** e gli altri 28
   ancora scoperti (`--details` li elenca): da attribuire, non ancora guardati.
   I quattro radio che restano sono `0x17d`/`0x17e`/`0x19d`/`0x19e`, i
@@ -437,16 +445,48 @@ run. Si vede in chiaro su un indirizzo con una sola entry a inizio init:
 
     planmiss RAD 0x016b cursore 26067 ultima 553
 
-Sulla run intera, flow `init`: **593 planhit contro 1815 planmiss**. Quindi i
-piani, oggi, servono il valore giusto a una minoranza delle read, e non perche'
-manchi capienza — il difetto del `--max-len` era un altro ed e' chiuso.
+### Il cursore e' per indirizzo
 
-Due strade. La prima e' quella che paga e non tocca l'harness: **regioni
-contigue**, dove l'ordine delle read e' lo stesso per costruzione (`CONTIG` sopra).
-La seconda e' un **cursore per indirizzo** invece di uno globale, che renderebbe
-una read fuori ordine un problema locale invece che una condanna per tutto quello
-che segue. Finche' non e' fatta nessuna delle due, un valore letto fuori da una
-regione contigua non e' un'osservazione: e' lo specchio.
+La seconda delle due strade e' fatta, e la prima — **regioni contigue**, `CONTIG`
+sopra — resta e paga come prima. Ogni piano ha il suo cursore, e `plan_pos` e' solo
+il pavimento comune da cui partono, l'ingresso della regione sotto misura.
+
+L'invariante che regge e' **per indirizzo**: le read che il port fa di un indirizzo
+sono una sottosequenza di quelle che il vendore fa dello stesso indirizzo. Quella
+globale, sull'interleaving fra indirizzi diversi, non regge, e `PHY 0x7a` lo
+dimostra. Il prezzo e' l'altro verso: se il port salta una read di un indirizzo, i
+valori successivi **di quell'indirizzo** si sfasano di uno. Sfasa uno per volta
+invece di tutti, e un valore sfasato rompe la run come la rompe un'op mancante,
+quindi la misura per fase lo vede.
+
+Misurato, flow `init` contro `opinit-ch1-ch6-bw20`, colonne del report sommate:
+
+| | consumati | saltate | fuori posizione |
+|---|---|---|---|
+| cursore globale | 1496 | 923 | 8823 |
+| per indirizzo | 1035 | **0** | **524** |
+
+Contate invece come righe `planhit`/`planmiss` con `B43_TEST_PLANDBG=1`: da
+**585 servite e 18221 mancate** a **2074 e 1058**.
+
+**E il verdetto per fase si e' mosso di 13 op**, da 5911 a 5924, con i blocchi
+contigui da 16242 a 16392. Questo e' il risultato, non i contatori: servire al port
+tre volte e mezzo i valori della cattura non ha comprato quasi niente, quindi cio'
+che resta aperto **non e' l'harness che non risponde alle read**. E' la sequenza di
+op del port che diverge davvero.
+
+Ed e' stato subito vero: guardando la sequenza invece dei valori, la cal TX I/Q LO
+ha reso un difetto di mainline — le write combaciavano e mancavano 445 **read**,
+tutte su `0xc0`, perche' il polling aspettava il contrario di quello che doveva.
+Vedi `CLAUDE.md`. Ma il cursore per indirizzo e' cio' che rende quel fix
+misurabile: senza i valori del piano di `0xc0` serviti in ordine, il ciclo corretto
+non avrebbe modo di girare 455 volte.
+
+Una fase ha perso: `cal-tx-iqlo` da 333 a 331, e non e' l'assegnazione esclusiva —
+la regione da sola da' **746 su 1570 in 99 blocchi** col cursore globale e **741 in
+97** per indirizzo. Perdita vera di 5 op. Il meccanismo non e' stato attribuito: un
+valore che prima cadeva sul mirror e per caso combaciava, ora arriva dal piano e non
+combacia, e' l'ipotesi ovvia ma **non e' verificata**.
 
 E con i valori letti giusti l'LSB che restava si e' rivelato **un difetto di
 mainline**, non un limite dell'harness: in `b43_nphy_rev3_rssi_cal()` il ramo
@@ -493,7 +533,7 @@ e sono finite in tre modi diversi.
 
 **`r05f` era un bug vero**, in mainline: il ramo rev 7/8 dei workaround IPA scrive
 `IPA2G_GAIN_CORE0` dove il vendore scrive `IPA2G_IMAIN_CORE0`, e programma i due
-core con valori diversi dove il vendore usa lo stesso. `patches/b43/0005` lo
+core con valori diversi dove il vendore usa lo stesso. `patches/b43/MESSAGES.md#0005` lo
 sistema per il rev 8, dettaglio in `docs/gap-inventory.md`.
 
 **`o708` e `o70e` non erano confrontabili.** Sono `B43_SHM_SH_NPHY_TXPWR_INDX0/1`,

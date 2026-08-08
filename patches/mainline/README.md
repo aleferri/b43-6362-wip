@@ -17,6 +17,8 @@ delle altre, e non c'è nessuna ragione tecnica per pagare quel prezzo.
 | `b43-fix-two-rf-control-override-value-masks-on-n-phy-rev-7` | due `val_mask` di `tbl_rf_control_override_rev7_over1` non coprono il campo del proprio shift. Col campo `0x0100` il port azzera il bit 8 di `0x340`, che appartiene alla banda del filtro programmata poche op prima | 4 |
 | `b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7` | `one_to_many`, caso `TX_PU`: quattro chiamate contro cinque di brcmsmac, manca `(0x1 << 2)` su override 2 | 1 |
 | `b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` | il modo del test DAC e' un `u8` testato `== 1`, b43 lo restringe a `bool` in tre punti: qualunque modo sopra 1 accende la strada sbagliata | 5 |
+| `b43-wait-for-the-n-phy-tx-iq-lo-calibration-to-finish` | il polling su `IQLOCAL_CMD` esce quando i bit 15/14 sono **accesi**, cioe' mentre la cal gira, invece di aspettare che si spengano: `SPINWAIT` nel riferimento gira *mentre* l'espressione e' vera. Il driver rilegge i coefficienti ~10 us dopo il comando, dodici volte, e salva cio' che c'era prima | 1 |
+| `b43-take-the-n-phy-tx-iq-lo-results-out-instead-of-overwriting-them` | in coda alla cal, `write(96)` e `read(80)` hanno la direzione **scambiata**: il driver sovrascrive il risultato del motore col buffer vecchio e legge 80 invece di scriverlo. Le tre coppie che seguono nello stesso blocco sono giuste, ed e' cio' che lo fa sembrare un refuso | 2 |
 
 Le ultime due si dimostrano **a tre voci**: brcmsmac, la cattura e b43 dicono cose
 diverse, e le prime due dicono la stessa. Le righe della cattura stanno nel corpo
@@ -26,7 +28,7 @@ delle patch.
 `b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` sono le due qui che
 `reverse-tools/check_patch_gating.py` segna `NON GATEATA`, e **è corretto**: sta in
 `b43_nphy_rf_ctl_override_one_to_many()`, che gira su ogni N-PHY rev 7 e su. È la
-stessa eccezione dichiarata di `b43/0010` e per la stessa ragione — un refuso di
+stessa eccezione dichiarata di `b43/MESSAGES.md#0010` e per la stessa ragione — un refuso di
 trascrizione da brcmsmac non si mette dietro un gate di revisione, perché non è una
 feature di questo hardware. Le altre quattro non toccano codice condiviso: tre sono
 dati o aritmetica, una un guard.
@@ -43,9 +45,8 @@ logica rotta, e separarle darebbe due patch che nessuno può verificare.
 Con la prima applicata, le finestre `sampleplay-tssi` e `sampleplay-iqlo` di
 `test/phase_compare.py` fanno **322/322** entrambe: le due tabelle dei campioni
 diventano identiche alla cattura, parola per parola, senza niente della serie in
-`patches/b43/`. Per questo `patches/b43/0010` esiste ancora e porta le stesse due
-modifiche — quella serie si applica come un blocco e ne ha bisogno. Quando la patch
-va in mainline, `b43/0010` esce.
+`patches/b43/`. Il rollup di `patches/b43/` non porta piu' quelle
+due modifiche: si applica sopra queste, che le hanno gia'.
 
 La seconda non è in `patches/b43/`: cambia cosa programmano un radio 2057 rev 5 e
 un phy rev 7 in 5 GHz, e non abbiamo né l'uno né l'altro. Il razionale sta in
@@ -55,7 +56,7 @@ un phy rev 7 in 5 GHz, e non abbiamo né l'uno né l'altro. Il razionale sta in
 tree passa un modo diverso da 0 o 1, quindi da sola non cambia niente. Morde il
 primo chiamante con un modo vero, che e' la cal RX IQ — e la misura c'e': col
 `bool`, un tipo 2 costruisce le 160 word del tono su una banda di 80 o 82 invece di
-20, e il port perde **476 op** su `up-ch1`. Duplicata in `b43/0022` perche' quella
-serie si applica come un blocco.
+20, e il port perde **476 op** su `up-ch1`. Il rollup di `patches/b43/` si applica sopra
+questa e non la duplica.
 
 Nessuna ha girato su hardware.

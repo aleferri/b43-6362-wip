@@ -1,0 +1,2228 @@
+Subject: [WIP ROLLUP, NON DA INVIARE] b43: BCM6362, N-PHY rev 8, radio 2057 rev 8
+Date: Sat, 8 Aug 2026 00:00:00 +0000
+
+Non e' una patch: e' la serie di lavoro compressa in un file solo, per
+accorciare il giro di build mentre si costruisce. Si ridivide prima di
+mandare qualunque cosa, e i messaggi delle ventisei patch che stanno qui
+dentro sono in MESSAGES.md, da cui ripartire per la divisione.
+
+Baseline: patches/mainline/ (tutte e sette) su un tree pulito. Il rollup si
+applica DOPO quelle, non da solo, e questo e' un cambiamento rispetto a
+prima: la serie numerata si applicava anche su mainline pulito, con il
+conflitto atteso di 0010. Qui il conflitto non c'e' perche' 0010 e 0022 non
+sono nel diff.
+
+Cosa NON contiene, e perche' non manca niente:
+
+  0010  b43: fix the N-PHY sample table generation
+        Duplicato di mainline/b43-fix-two-defects-in-the-n-phy-sample-table-logic
+        a meno di due cast (u32) su valori che stanno in [0, 0x3ff] dopo
+        l'and, quindi senza effetto: cordic_iq.i e .q sono s32
+        (include/linux/cordic.h:36). Misurato senza 0010: le finestre
+        sampleplay-tssi e sampleplay-iqlo fanno 322/322 entrambe.
+
+  0022  b43: treat the N-PHY DAC test as a mode not a flag
+        Duplicato esatto di mainline/b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag,
+        riga per riga sulle stesse cinque sostituzioni.
+
+Verificato meccanicamente, non dedotto: da mainline applicata, questo diff
+riproduce byte per byte l'albero su cui sono state prese le misure, e il
+trace dell'harness e' identico (md5 3c23340b6076cffdfb7f531583fd5a0b su
+`./nphy_trace init dsl3580l`).
+
+Niente ha mai girato su hardware.
+
+check_patch_gating.py, contro un albero con le sole mainline applicate, segna
+tre punti NON GATEATI. Tutti e tre erano dichiarati nelle patch che li
+portavano, e la dichiarazione va qui perche' il tool ora vede un file solo:
+
+  b43_radio_2057_setup (phy_n.c)
+        Condivisa, ma qui subisce solo un'estrazione: le stesse quattro op sul
+        registro nello stesso ordine, dietro un nome (b43_radio_2057_vcocal),
+        perche' ora la vuole anche la coda della cal periodica. La finestra
+        chanswitch-ch6 non si muove.
+
+  b43_nphy_op_prepare_structs (phy_n.c)
+        Comune a ogni N-PHY, quindi le due righe che inizializzano a -1 il
+        record per core girano su tutti. Quel record lo legge un solo posto,
+        b43_nphy_txpwr_index(), che nessun'altra revisione raggiunge: altrove
+        e' scritto e mai letto. Ed e' il valore giusto e non quello comodo,
+        perche' zero direbbe che l'indice zero e' forzato.
+
+  b43_ppr_add (ppr.c)
+        E' il tool che vede la funzione nuova atterrare accanto, non una
+        modifica a quella: l'hunk aggiunge b43_ppr_apply_max_group() sopra e
+        non tocca niente di esistente. La funzione nuova non ha test di
+        revisione, come il resto del file: il gate sta nel chiamante, che
+        prova phy rev 8, radio rev 8 e la banda 2 GHz.
+
+Aggiunta la macchina a stati mphase in b43_nphy_cal_perical_phyinit(): i passi del
+riferimento - INIT, TX I/Q LO, PAPD, RX I/Q, RSSI, idle TSSI - ognuno con la
+parentesi che salva lo stato del controllo di potenza, lo spegne, esegue la fase e
+lo ripristina; ed e' il ripristino a programmare adj_pwr_tbl. Piu' il blocco
+differito in coda a b43_phy_initn(), perche' la parentesi ripristina cio' che trova
+e la' il controllo e' ancora spento: le due meta' servono insieme.
+
+Le sei fasi TX del riferimento restano UN passo, e la cattura e' il motivo: emette
+i dodici comandi di fila con una sola lettura del gain a #8505 invece di una per
+fase. Divisi in sei, la run appaiata della cal cade da 428 a 331 in 28 frammenti -
+misurato con la parentesi attorno a ogni pezzo e senza, quindi e' la divisione e non
+la parentesi.
+
+Portata la misura del tono della cal PAPD, che non c'era: wlc_phy_a1/a2/a3_nphy e
+wlc_phy_papd_decode_epsilon del riferimento, cioe' il passo del motore su un core,
+la ricerca del codice di gain che smette di clippare, e il lisciamento della
+tabella epsilon a finestra scorrevole. Solo il ramo rev 7 e oltre e solo la
+meta' 2 GHz: il chiamante prova phy rev 8, radio rev 8 e la banda.
+
+MISURATO: blocchi contigui 17532 -> 17838 (76% -> 78%), che e' sopra il valore di
+base per la prima volta. Il totale per fase resta 6558 contro 6602: la run piu'
+lunga di cal-papd non si muove, ma la forma passa da 794 2x334 172 2x78 +14 a
+794 2x334 220 178 +32, cioe' piu' op appaiate in piu' pezzi. adj_pwr_tbl resta 13.
+
+---
+
+Piu' le due parentesi per core attorno ai due passi del motore PAPD, ai quattro
+punti che la cattura apre (#12197 #12331 core 0, #13311 #13383 core 1), con la
+parentesi fattorizzata in b43_nphy_pwr_ctl_open/close() e usata anche dalla cal
+periodica. NON FANNO QUELLO CHE DOVEVANO: adj_pwr_tbl resta 13, i segmenti vanno
+da 14 a 20 contro i 9 del vendore, blocchi contigui 17838 -> 17831, totale 6558 ->
+6555. Le venti aperture leggono il gain, quindi il controllo era acceso, ma le
+chiusure non riprogrammano la tabella: dentro b43_nphy_tx_power_ctrl() c'e' una
+condizione sul ramo di abilitazione che non ho letto, ed e' il prossimo posto.
+
+---
+diff --git a/drivers/net/wireless/broadcom/b43/b43.h b/drivers/net/wireless/broadcom/b43/b43.h
+index c0d8fc0b2..0a0341e01 100644
+--- a/drivers/net/wireless/broadcom/b43/b43.h
++++ b/drivers/net/wireless/broadcom/b43/b43.h
+@@ -335,6 +335,11 @@ enum {
+ #define B43_SHM_SH_NPHY_TXIQW2		0x0704
+ #define B43_SHM_SH_NPHY_TXIQW3		0x0706
+ /* SHM_SHARED tx pwr ctrl */
++/* Power indication block: the ucode leaves one 32-bit complex power value per
++ * core here, low half first. Same offsets brcmsmac calls M_PWRIND_BLKS.
++ */
++#define B43_SHM_SH_PWRIND_BLKS		0x0308
++#define B43_SHM_SH_PWRIND(i)		(B43_SHM_SH_PWRIND_BLKS + 2 * (i))
+ #define B43_SHM_SH_NPHY_TXPWR_INDX0	0x0708
+ #define B43_SHM_SH_NPHY_TXPWR_INDX1	0x070E
+ 
+diff --git a/drivers/net/wireless/broadcom/b43/main.c b/drivers/net/wireless/broadcom/b43/main.c
+index 817448e58..7853e7afb 100644
+--- a/drivers/net/wireless/broadcom/b43/main.c
++++ b/drivers/net/wireless/broadcom/b43/main.c
+@@ -1397,16 +1397,65 @@ static void b43_jssi_write(struct b43_wldev *dev, u32 jssi)
+ 
+ static void b43_generate_noise_sample(struct b43_wldev *dev)
+ {
+-	b43_jssi_write(dev, 0x7F7F7F7F);
++	int i;
++
++	if (dev->phy.type == B43_PHYTYPE_N) {
++		/* The ucode reports through the power indication block on this
++		 * PHY, not through JSSI. Clear it so a stale sample cannot be
++		 * mistaken for a fresh one.
++		 */
++		for (i = 0; i < 4; i++)
++			b43_shm_write16(dev, B43_SHM_SHARED,
++					B43_SHM_SH_PWRIND(i), 0);
++	} else {
++		b43_jssi_write(dev, 0x7F7F7F7F);
++	}
+ 	b43_write32(dev, B43_MMIO_MACCMD,
+ 		    b43_read32(dev, B43_MMIO_MACCMD) | B43_MACCMD_BGNOISE);
+ }
+ 
++/* The ucode reports the measured complex power per core in the power indication
++ * block. Turn it into a noise floor the way brcmsmac does for this PHY: one
++ * 32-bit value per core, scaled down by the number of samples the ucode
++ * averaged, converted to dB and shifted by the fixed offset of the family.
++ */
++static void b43_nphy_noise_sample(struct b43_wldev *dev)
++{
++	s8 noise = -92;
++	int core;
++
++	for (core = 0; core < 2; core++) {
++		u32 pwr;
++		u8 msb, secondmsb = 0;
++		s8 dbm;
++
++		pwr = b43_shm_read16(dev, B43_SHM_SHARED,
++				     B43_SHM_SH_PWRIND(2 * core));
++		pwr |= (u32)b43_shm_read16(dev, B43_SHM_SHARED,
++					   B43_SHM_SH_PWRIND(2 * core + 1)) << 16;
++		if (!pwr)
++			continue;
++
++		pwr >>= 9;
++		msb = fls(pwr);
++		if (msb) {
++			msb--;
++			if (msb)
++				secondmsb = (pwr >> (msb - 1)) & 1;
++		}
++		dbm = 3 * msb + 2 * secondmsb - 103;
++		if (dbm > noise)
++			noise = dbm;
++	}
++
++	dev->stats.link_noise = noise;
++}
++
+ static void b43_calculate_link_quality(struct b43_wldev *dev)
+ {
+ 	/* Top half of Link Quality calculation. */
+ 
+-	if (dev->phy.type != B43_PHYTYPE_G)
++	if (dev->phy.type != B43_PHYTYPE_G && dev->phy.type != B43_PHYTYPE_N)
+ 		return;
+ 	if (dev->noisecalc.calculation_running)
+ 		return;
+@@ -1426,6 +1475,12 @@ static void handle_irq_noise(struct b43_wldev *dev)
+ 
+ 	/* Bottom half of Link Quality calculation. */
+ 
++	if (dev->phy.type == B43_PHYTYPE_N) {
++		b43_nphy_noise_sample(dev);
++		dev->noisecalc.calculation_running = false;
++		return;
++	}
++
+ 	if (dev->phy.type != B43_PHYTYPE_G)
+ 		return;
+ 
+diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
+index 4e6644c2d..71374035e 100644
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -51,6 +51,21 @@ struct nphy_iq_est {
+ 	u32 q1_pwr;
+ };
+ 
++/* What the PAPD calibration takes over for its own duration and has to put
++ * back afterwards.
++ */
++struct nphy_papd_restore_state {
++	u16 afectrl[2];
++	u16 afeoverride[2];
++	/* The vendor driver saves the transmit/receive coupling power-up and
++	 * then powers it down unconditionally, so only the attenuation is ever
++	 * put back. Kept to make the pair of reads visible.
++	 */
++	u16 pwrup[2];
++	u16 atten[2];
++	u16 bbmult;
++};
++
+ enum b43_nphy_rf_sequence {
+ 	B43_RFSEQ_RX2TX,
+ 	B43_RFSEQ_TX2RX,
+@@ -663,6 +678,15 @@ static void b43_radio_2057_chantab_upload(struct b43_wldev *dev,
+ 					  const struct b43_nphy_chantabent_rev7_2g *e_r7_2g)
+ {
+ 	if (e_r7_2g) {
++		/* The 2 GHz-only channel tables drop the 5 GHz tuning fields,
++		 * and with them their writes. On radio 2057 rev 8 the hardware
++		 * still wants them: brcmsmac carries one table for both bands
++		 * and its 2 GHz rows hold zero in those ten columns, and the
++		 * vendor driver writes all ten as zero on every channel
++		 * switch, interleaved with the 2 GHz ones rather than appended.
++		 */
++		bool tune_5g = dev->phy.rev == 8 && dev->phy.radio_rev == 8;
++
+ 		b43_radio_write(dev, R2057_VCOCAL_COUNTVAL0, e_r7_2g->radio_vcocal_countval0);
+ 		b43_radio_write(dev, R2057_VCOCAL_COUNTVAL1, e_r7_2g->radio_vcocal_countval1);
+ 		b43_radio_write(dev, R2057_RFPLL_REFMASTER_SPAREXTALSIZE, e_r7_2g->radio_rfpll_refmaster_sparextalsize);
+@@ -674,13 +698,31 @@ static void b43_radio_2057_chantab_upload(struct b43_wldev *dev,
+ 		b43_radio_write(dev, R2057_RFPLL_MMD1, e_r7_2g->radio_rfpll_mmd1);
+ 		b43_radio_write(dev, R2057_VCOBUF_TUNE, e_r7_2g->radio_vcobuf_tune);
+ 		b43_radio_write(dev, R2057_LOGEN_MX2G_TUNE, e_r7_2g->radio_logen_mx2g_tune);
++		if (tune_5g)
++			b43_radio_write(dev, R2057_LOGEN_MX5G_TUNE, 0);
+ 		b43_radio_write(dev, R2057_LOGEN_INDBUF2G_TUNE, e_r7_2g->radio_logen_indbuf2g_tune);
++		if (tune_5g)
++			b43_radio_write(dev, R2057_LOGEN_INDBUF5G_TUNE, 0);
+ 		b43_radio_write(dev, R2057_TXMIX2G_TUNE_BOOST_PU_CORE0, e_r7_2g->radio_txmix2g_tune_boost_pu_core0);
+ 		b43_radio_write(dev, R2057_PAD2G_TUNE_PUS_CORE0, e_r7_2g->radio_pad2g_tune_pus_core0);
++		if (tune_5g) {
++			b43_radio_write(dev, R2057_PGA_BOOST_TUNE_CORE0, 0);
++			b43_radio_write(dev, R2057_TXMIX5G_BOOST_TUNE_CORE0, 0);
++			b43_radio_write(dev, R2057_PAD5G_TUNE_MISC_PUS_CORE0, 0);
++		}
+ 		b43_radio_write(dev, R2057_LNA2G_TUNE_CORE0, e_r7_2g->radio_lna2g_tune_core0);
++		if (tune_5g)
++			b43_radio_write(dev, R2057_LNA5G_TUNE_CORE0, 0);
+ 		b43_radio_write(dev, R2057_TXMIX2G_TUNE_BOOST_PU_CORE1, e_r7_2g->radio_txmix2g_tune_boost_pu_core1);
+ 		b43_radio_write(dev, R2057_PAD2G_TUNE_PUS_CORE1, e_r7_2g->radio_pad2g_tune_pus_core1);
++		if (tune_5g) {
++			b43_radio_write(dev, R2057_PGA_BOOST_TUNE_CORE1, 0);
++			b43_radio_write(dev, R2057_TXMIX5G_BOOST_TUNE_CORE1, 0);
++			b43_radio_write(dev, R2057_PAD5G_TUNE_MISC_PUS_CORE1, 0);
++		}
+ 		b43_radio_write(dev, R2057_LNA2G_TUNE_CORE1, e_r7_2g->radio_lna2g_tune_core1);
++		if (tune_5g)
++			b43_radio_write(dev, R2057_LNA5G_TUNE_CORE1, 0);
+ 
+ 	} else {
+ 		b43_radio_write(dev, R2057_VCOCAL_COUNTVAL0, e_r7->radio_vcocal_countval0);
+@@ -714,6 +756,18 @@ static void b43_radio_2057_chantab_upload(struct b43_wldev *dev,
+ 	}
+ }
+ 
++/* brcmsmac's wlc_phy_radio205x_vcocal_nphy(), the radio 2057 path. The channel
++ * setup runs it, and so does the end of the periodic calibration.
++ */
++static void b43_radio_2057_vcocal(struct b43_wldev *dev)
++{
++	b43_radio_mask(dev, R2057_RFPLL_MISC_EN, ~0x01);
++	b43_radio_mask(dev, R2057_RFPLL_MISC_CAL_RESETN, ~0x04);
++	b43_radio_set(dev, R2057_RFPLL_MISC_CAL_RESETN, 0x4);
++	b43_radio_set(dev, R2057_RFPLL_MISC_EN, 0x01);
++	usleep_range(300, 600);
++}
++
+ static void b43_radio_2057_setup(struct b43_wldev *dev,
+ 				 const struct b43_nphy_chantabent_rev7 *tabent_r7,
+ 				 const struct b43_nphy_chantabent_rev7_2g *tabent_r7_2g)
+@@ -797,12 +851,7 @@ static void b43_radio_2057_setup(struct b43_wldev *dev,
+ 
+ 	usleep_range(50, 100);
+ 
+-	/* VCO calibration */
+-	b43_radio_mask(dev, R2057_RFPLL_MISC_EN, ~0x01);
+-	b43_radio_mask(dev, R2057_RFPLL_MISC_CAL_RESETN, ~0x04);
+-	b43_radio_set(dev, R2057_RFPLL_MISC_CAL_RESETN, 0x4);
+-	b43_radio_set(dev, R2057_RFPLL_MISC_EN, 0x01);
+-	usleep_range(300, 600);
++	b43_radio_2057_vcocal(dev);
+ }
+ 
+ /* Calibrate resistors in LPF of PLL?
+@@ -2481,7 +2530,46 @@ static void b43_nphy_gain_ctl_workarounds_rev19(struct b43_wldev *dev)
+ 
+ static void b43_nphy_gain_ctl_workarounds_rev7(struct b43_wldev *dev)
+ {
+-	/* TODO - should depend on phy->rev */
++	struct b43_phy *phy = &dev->phy;
++	static const u8 lna1_gain[] = { 0x08, 0x0d, 0x12, 0x19 };
++	static const u8 lna2_gain[] = { 0xfc, 0x06, 0x0a, 0x0f };
++	static const u8 tia_gain[] = {
++		0xff, 0x00, 0x03, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06,
++	};
++	static const u8 tia_gainbits[] = {
++		0x00, 0x01, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
++	};
++
++	/* Values are only known for radio rev 8 in 2 GHz, 20 MHz. */
++	if (phy->radio_rev != 8 || b43_is_40mhz(dev) ||
++	    b43_current_band(dev->wl) != NL80211_BAND_2GHZ)
++		return;
++
++	/* Set Clip 2 detect */
++	b43_phy_set(dev, B43_NPHY_C1_CGAINI, B43_NPHY_C1_CGAINI_CL2DETECT);
++	b43_phy_set(dev, B43_NPHY_C2_CGAINI, B43_NPHY_C2_CGAINI_CL2DETECT);
++
++	b43_phy_maskset(dev, B43_NPHY_BPHYCRSMINPOWER0, ~0x00FF, 0x46);
++	b43_phy_maskset(dev, B43_NPHY_CRSMINPOWERU0, ~0x00FF, 0x44);
++	b43_phy_maskset(dev, B43_NPHY_CRSMINPOWERL0, ~0x00FF, 0x44);
++
++	b43_ntab_write_bulk(dev, B43_NTAB8(0, 8), 4, lna1_gain);
++	b43_ntab_write_bulk(dev, B43_NTAB8(1, 8), 4, lna1_gain);
++	b43_ntab_write_bulk(dev, B43_NTAB8(0, 16), 4, lna2_gain);
++	b43_ntab_write_bulk(dev, B43_NTAB8(1, 16), 4, lna2_gain);
++	b43_ntab_write_bulk(dev, B43_NTAB8(0, 32), 10, tia_gain);
++	b43_ntab_write_bulk(dev, B43_NTAB8(1, 32), 10, tia_gain);
++	b43_ntab_write_bulk(dev, B43_NTAB8(2, 32), 10, tia_gainbits);
++	b43_ntab_write_bulk(dev, B43_NTAB8(3, 32), 10, tia_gainbits);
++
++	b43_phy_write(dev, B43_NPHY_REV3_C1_CLIP_LOGAIN_A, 0x74);
++	b43_phy_write(dev, B43_NPHY_REV3_C2_CLIP_LOGAIN_A, 0x74);
++	b43_phy_write(dev, B43_NPHY_REV3_C1_CLIP_LOGAIN_B, 0x18);
++	b43_phy_write(dev, B43_NPHY_REV3_C2_CLIP_LOGAIN_B, 0x18);
++
++	/* W1 clip threshold, per core */
++	b43_phy_maskset(dev, 0x300, ~0x003F, 24);
++	b43_phy_maskset(dev, 0x301, ~0x003F, 24);
+ }
+ 
+ static void b43_nphy_gain_ctl_workarounds_rev3(struct b43_wldev *dev)
+@@ -3025,7 +3113,6 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+ 				}
+ 				break;
+ 			case 7:
+-			case 8:
+ 				if (!b43_is_40mhz(dev)) {
+ 					b43_radio_write(dev, 0x5F, 0x14);
+ 					b43_radio_write(dev, 0xE8, 0x12);
+@@ -3034,6 +3121,26 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+ 					b43_radio_write(dev, 0xE8, 0x16);
+ 				}
+ 				break;
++			case 8:
++				if (!b43_is_40mhz(dev)) {
++					b43_radio_write(dev,
++							R2057_IPA2G_IMAIN_CORE0,
++							0x14);
++					b43_radio_write(dev,
++							R2057_IPA2G_IMAIN_CORE1,
++							0x14);
++				} else {
++					/* TODO: check these against a capture
++					 * from a device that runs 40 MHz. The
++					 * vendor driver does not use 40 MHz in
++					 * 2.4 GHz on the board this was taken
++					 * from, so they are the values this
++					 * path used before, unverified.
++					 */
++					b43_radio_write(dev, 0x5F, 0x16);
++					b43_radio_write(dev, 0xE8, 0x16);
++				}
++				break;
+ 			case 14:
+ 				for (core = 0; core < 2; core++) {
+ 					int o = core ? 0x85 : 0;
+@@ -3122,6 +3229,18 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+ 	noise_tbl[1] = b43_is_40mhz(dev) ? 0x14D : 0x18D;
+ 	b43_ntab_write_bulk(dev, B43_NTAB32(16, 0x7E), 2, noise_tbl);
+ 
++	/* The carrier sense thresholds are left at whatever the initvals put
++	 * there. Values captured from the vendor driver on radio 2057 rev 8 in
++	 * 2.4 GHz, 20 MHz; the other combinations have not been checked.
++	 */
++	if (phy->radio_rev == 8 && !b43_is_40mhz(dev) &&
++	    b43_current_band(dev->wl) == NL80211_BAND_2GHZ) {
++		b43_phy_mask(dev, B43_NPHY_CRSCTL_U, ~0x0020);
++		b43_phy_mask(dev, B43_NPHY_CRSCTL_L, ~0x0020);
++		b43_phy_maskset(dev, B43_NPHY_CRSTHRES_2U, ~0x00FF, 0x55);
++		b43_phy_maskset(dev, B43_NPHY_CRSTHRES_2L, ~0x00FF, 0x55);
++	}
++
+ 	b43_nphy_gain_ctl_workarounds(dev);
+ 
+ 	/* TODO
+@@ -3731,6 +3850,201 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+ 		b43_nphy_stay_in_carrier_search(dev, 0);
+ }
+ 
++/* The baseband multipliers the calibration works on: table 15 offsets 87 and
++ * 95. brcmsmac's wlc_phy_ipa_get_bbmult_nphy() and its set counterpart.
++ */
++static u16 b43_nphy_ipa_get_bbmult(struct b43_wldev *dev)
++{
++	return b43_ntab_read(dev, B43_NTAB16(15, 87));
++}
++
++static void b43_nphy_ipa_set_bbmult(struct b43_wldev *dev, u8 m0, u8 m1)
++{
++	u16 m0m1 = (m0 << 8) | m1;
++
++	b43_ntab_write(dev, B43_NTAB16(15, 87), m0m1);
++	b43_ntab_write(dev, B43_NTAB16(15, 95), m0m1);
++}
++
++/* Put one transmit chain on a chosen index of the power control table, the way
++ * brcmsmac's wlc_phy_txpwr_index_nphy() does for a non-negative index. The
++ * three tables the index selects sit 128 cells apart: the gain at 192, the IQ
++ * compensation at 320, the local oscillator compensation at 448, and on an
++ * internal PA the RF power offset at 576.
++ *
++ * A negative index means the other direction: hand the chain back the gain, the
++ * multiplier and the compensations it had before an index was first forced on
++ * it.
++ */
++static void b43_nphy_txpwr_index(struct b43_wldev *dev, u8 core_mask,
++				 s8 txpwrindex, bool restore_cals)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	struct b43_phy_n_txpwrindex *saved;
++	bool tx_pwr_ctrl_state;
++	u16 rad_gain, dac_gain, m1m2, tmp;
++	u16 iqcomp_a, iqcomp_b, regval[2];
++	u32 txgain, iqcomp, locomp;
++	s32 rfpwr_offset;
++	u8 bbmult, core, tbl;
++
++	if (nphy->hang_avoid)
++		b43_nphy_stay_in_carrier_search(dev, true);
++
++	for (core = 0; core < 2; core++) {
++		if (!(core_mask & (1 << core)))
++			continue;
++
++		tbl = core ? 27 : 26;
++		saved = &nphy->txpwrindex[core];
++
++		/* Hand the chain back what it had before an index was forced on
++		 * it. Nothing to hand back if nothing was forced.
++		 */
++		if (txpwrindex < 0) {
++			if (saved->index < 0)
++				continue;
++
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER1, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			b43_phy_write(dev, core ? B43_NPHY_AFECTL_DACGAIN2 :
++						  B43_NPHY_AFECTL_DACGAIN1,
++				      saved->AfeCtrlDacGain);
++
++			b43_ntab_write(dev, B43_NTAB16(7, 0x110 + core),
++				       saved->rad_gain);
++
++			m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 87));
++			if (core == 0)
++				m1m2 = (m1m2 & 0x00FF) | (saved->bbmult << 8);
++			else
++				m1m2 = (m1m2 & 0xFF00) | saved->bbmult;
++			b43_ntab_write(dev, B43_NTAB16(15, 87), m1m2);
++
++			if (restore_cals) {
++				regval[0] = saved->iqcomp_a;
++				regval[1] = saved->iqcomp_b;
++				b43_ntab_write_bulk(dev,
++						    B43_NTAB16(15, 80 + 2 * core),
++						    2, regval);
++				b43_ntab_write(dev, B43_NTAB16(15, 85 + core),
++					       saved->locomp);
++				b43_ntab_write(dev, B43_NTAB16(15, 93 + core),
++					       saved->locomp);
++			}
++
++			b43_nphy_tx_power_ctrl(dev, nphy->txpwrctrl);
++			saved->index_internal = saved->index_internal_save;
++			saved->index = -1;
++			continue;
++		}
++
++		/* First time an index is forced on this chain, remember what it
++		 * is being forced over.
++		 */
++		if (saved->index < 0) {
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER1, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			b43_phy_maskset(dev, B43_NPHY_AFECTL_OVER, ~0x0100,
++					saved->AfectrlOverride & 0x0100);
++			saved->AfeCtrlDacGain =
++				b43_phy_read(dev, core ?
++					     B43_NPHY_AFECTL_DACGAIN2 :
++					     B43_NPHY_AFECTL_DACGAIN1);
++			saved->rad_gain =
++				b43_ntab_read(dev, B43_NTAB16(7, 0x110 + core));
++			tmp = b43_ntab_read(dev, B43_NTAB16(15, 87));
++			saved->bbmult = (tmp >> (core ? 0 : 8)) & 0xFF;
++			b43_ntab_read_bulk(dev, B43_NTAB16(15, 80 + 2 * core),
++					   2, regval);
++			saved->iqcomp_a = regval[0];
++			saved->iqcomp_b = regval[1];
++			saved->locomp =
++				b43_ntab_read(dev, B43_NTAB16(15, 85 + core));
++			saved->index_internal_save = saved->index_internal;
++		}
++
++		tx_pwr_ctrl_state = nphy->txpwrctrl;
++		b43_nphy_tx_power_ctrl(dev, false);
++
++		txgain = b43_ntab_read(dev, B43_NTAB32(tbl, 192 + txpwrindex));
++		rad_gain = (txgain >> 16) & 0x1FFFF;
++		dac_gain = (txgain >> 8) & 0x3F;
++		bbmult = txgain & 0xFF;
++
++		b43_phy_maskset(dev, core ? B43_NPHY_AFECTL_OVER :
++					    B43_NPHY_AFECTL_OVER1,
++				~0x0100, 0x0100);
++		b43_phy_write(dev, core ? B43_NPHY_AFECTL_DACGAIN2 :
++					  B43_NPHY_AFECTL_DACGAIN1, dac_gain);
++
++		b43_ntab_write(dev, B43_NTAB16(7, 0x110 + core), rad_gain);
++
++		/* The multiplier lives in two cells, 87 and 95, and both get the
++		 * core's half read-modify-written - not one written and the other
++		 * copied. The capture shows the second one being read before it
++		 * is written, and with the same value in it as the first had, so
++		 * the two are kept in step rather than one being derived from the
++		 * other.
++		 *
++		 * Which callers write both is measured and it is not by phase: of
++		 * the 70 writes to 87 in the capture 40 have a write to 95 beside
++		 * them and 30 do not, and inside the gain sweep alone five are
++		 * paired and seven are not. The paired ones are the calls to this
++		 * function and the PAPD calibration; the bare ones are stopping
++		 * the sample playback and b43_nphy_tx_power_fix(), which write 87
++		 * alone and are left as they are.
++		 */
++		m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 87));
++		if (core == 0)
++			m1m2 = (m1m2 & 0x00FF) | (bbmult << 8);
++		else
++			m1m2 = (m1m2 & 0xFF00) | bbmult;
++		b43_ntab_write(dev, B43_NTAB16(15, 87), m1m2);
++
++		m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 95));
++		if (core == 0)
++			m1m2 = (m1m2 & 0x00FF) | (bbmult << 8);
++		else
++			m1m2 = (m1m2 & 0xFF00) | bbmult;
++		b43_ntab_write(dev, B43_NTAB16(15, 95), m1m2);
++
++		iqcomp = b43_ntab_read(dev, B43_NTAB32(tbl, 320 + txpwrindex));
++		iqcomp_a = (iqcomp >> 10) & 0x3FF;
++		iqcomp_b = iqcomp & 0x3FF;
++		if (restore_cals) {
++			regval[0] = iqcomp_a;
++			regval[1] = iqcomp_b;
++			b43_ntab_write_bulk(dev, B43_NTAB16(15, 80 + 2 * core),
++					    2, regval);
++		}
++
++		locomp = b43_ntab_read(dev, B43_NTAB32(tbl, 448 + txpwrindex));
++		if (restore_cals)
++			b43_ntab_write(dev, B43_NTAB16(15, 85 + core), locomp);
++
++		if (b43_nphy_ipa(dev)) {
++			rfpwr_offset = b43_ntab_read(dev,
++					B43_NTAB32(tbl, 576 + txpwrindex));
++			b43_phy_maskset(dev, core ? B43_NPHY_PAPD_EN1 :
++						    B43_NPHY_PAPD_EN0,
++					~0x1FF0 & 0xFFFF,
++					(((s16)rfpwr_offset) << 4) & 0x1FF0);
++			b43_phy_set(dev, core ? B43_NPHY_PAPD_EN1 :
++					        B43_NPHY_PAPD_EN0, 0x4);
++		}
++
++		b43_nphy_tx_power_ctrl(dev, tx_pwr_ctrl_state);
++
++		saved->index = txpwrindex;
++	}
++
++	if (nphy->hang_avoid)
++		b43_nphy_stay_in_carrier_search(dev, false);
++}
++
+ /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/TxPwrFix */
+ static void b43_nphy_tx_power_fix(struct b43_wldev *dev)
+ {
+@@ -3778,12 +4092,14 @@ static void b43_nphy_tx_power_fix(struct b43_wldev *dev)
+ 	    (txpi[0] < 40 || txpi[0] > 100 || txpi[1] < 40 || txpi[1] > 100))
+ 		txpi[0] = txpi[1] = 91;
+ 
+-	/*
++	/* The internal index is what the PAPD calibration puts back when it is
++	 * done, so it has to be remembered here. This was commented out for as
++	 * long as nothing could program an index.
++	 */
+ 	for (i = 0; i < 2; i++) {
+ 		nphy->txpwrindex[i].index_internal = txpi[i];
+ 		nphy->txpwrindex[i].index_internal_save = txpi[i];
+ 	}
+-	*/
+ 
+ 	for (i = 0; i < 2; i++) {
+ 		const u32 *table = b43_nphy_get_tx_gain_table(dev);
+@@ -4246,8 +4562,12 @@ static void b43_nphy_tx_gain_table_upload(struct b43_wldev *dev)
+ 		rf_pwr_offset_table = b43_ntab_get_rf_pwr_offset_table(dev);
+ 		if (!rf_pwr_offset_table)
+ 			return;
+-		/* TODO: Enable this once we have gains configured */
+-		return;
++		/* The offsets below are only known to be right on radio 2057
++		 * rev 8. Other rev 7+ radios keep the previous behaviour of
++		 * not programming the PAPD compensation table at all.
++		 */
++		if (phy->rev != 8 || phy->radio_rev != 8)
++			return;
+ 	}
+ 
+ 	for (i = 0; i < 128; i++) {
+@@ -5323,6 +5643,27 @@ static void b43_nphy_restore_cal(struct b43_wldev *dev)
+ 	b43_nphy_rx_iq_coeffs(dev, true, rxcal_coeffs);
+ }
+ 
++/* The phases of the reference's multi-phase calibration. The numbering is the
++ * one b43_nphy_cal_tx_iq_lo() already tests against: it takes the coefficients
++ * out of the table when mphase_cal_phase_id equals 7 on N-PHY rev 3 and up,
++ * which is the last of the six TX phases, and resumes from the saved best
++ * coefficients above 2.
++ */
++#define B43_NPHY_MPHASE_INIT		1
++#define B43_NPHY_MPHASE_TXPHASE0	2
++#define B43_NPHY_MPHASE_TXPHASE1	3
++#define B43_NPHY_MPHASE_TXPHASE2	4
++#define B43_NPHY_MPHASE_TXPHASE3	5
++#define B43_NPHY_MPHASE_TXPHASE4	6
++#define B43_NPHY_MPHASE_TXPHASE5	7
++#define B43_NPHY_MPHASE_PAPDCAL		8
++#define B43_NPHY_MPHASE_RXCAL		9
++#define B43_NPHY_MPHASE_RSSICAL		10
++#define B43_NPHY_MPHASE_IDLETSSI	11
++
++/* Twelve commands over the six TX phases. */
++#define B43_NPHY_MPHASE_TXCAL_NUMCMDS	2
++
+ /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/CalTxIqlo */
+ static int b43_nphy_cal_tx_iq_lo(struct b43_wldev *dev,
+ 				struct nphy_txgains target,
+@@ -5772,19 +6113,375 @@ static int b43_nphy_rev2_cal_rx_iq(struct b43_wldev *dev,
+ 	return ret;
+ }
+ 
++/* Hand the PHY over to the RX IQ calibration for one core and remember what has
++ * to go back. brcmsmac's wlc_phy_rxcal_physetup_nphy(), the N-PHY rev 7 and up
++ * path: there the transmit core is the one being calibrated rather than the
++ * other one, and four more registers are saved.
++ */
++static void b43_nphy_rxcal_phy_setup(struct b43_wldev *dev, u8 core)
++{
++	u16 *regs = dev->phy.n->tx_rx_cal_phy_saveregs;
++	u16 afectl = core ? B43_NPHY_AFECTL_C2 : B43_NPHY_AFECTL_C1;
++	u16 afeover = core ? B43_NPHY_AFECTL_OVER : B43_NPHY_AFECTL_OVER1;
++
++	regs[0] = b43_phy_read(dev, B43_NPHY_RFSEQCA);
++	regs[1] = b43_phy_read(dev, afectl);
++	regs[2] = b43_phy_read(dev, afeover);
++	regs[3] = b43_phy_read(dev, B43_NPHY_RFCTL_INTC1);
++	regs[4] = b43_phy_read(dev, B43_NPHY_RFCTL_INTC2);
++	regs[5] = b43_phy_read(dev, B43_NPHY_RFCTL_RSSIO1);
++	regs[6] = b43_phy_read(dev, B43_NPHY_RFCTL_RSSIO2);
++	regs[7] = b43_phy_read(dev, B43_NPHY_REV3_RFCTL_OVER0);
++	regs[8] = b43_phy_read(dev, B43_NPHY_REV3_RFCTL_OVER1);
++	regs[11] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER3);
++	regs[12] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER4);
++	regs[13] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER5);
++	regs[14] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER6);
++	regs[9] = b43_phy_read(dev, B43_NPHY_PAPD_EN0);
++	regs[10] = b43_phy_read(dev, B43_NPHY_PAPD_EN1);
++
++	/* The PAPD comparison goes off on both cores for the duration. */
++	b43_phy_mask(dev, B43_NPHY_PAPD_EN0, ~0x1);
++	b43_phy_mask(dev, B43_NPHY_PAPD_EN1, ~0x1);
++
++	/* Transmit on the core being calibrated, receive on the other one. */
++	b43_phy_maskset(dev, B43_NPHY_RFSEQCA, ~0x000F, 1 << core);
++	b43_phy_maskset(dev, B43_NPHY_RFSEQCA, ~0xF000 & 0xFFFF,
++			(1 << (1 - core)) << 12);
++
++	b43_phy_mask(dev, afectl, ~0x4);
++	b43_phy_set(dev, afeover, 0x4);
++
++	b43_nphy_rf_ctl_intc_override(dev, N_INTC_OVERRIDE_PA, 0, 3);
++
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, 0, false, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x200, 0, 0, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x400, 1, 0, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x1, 1, 0, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x2, 1, 0, false, 2);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x800, 0, 0, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x80,
++				      b43_is_40mhz(dev) ? 2 : 0, 0, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x80, 0, 0, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x20, 0, 0, false, 1);
++
++	b43_nphy_force_rf_sequence(dev, B43_RFSEQ_RX2TX);
++	b43_nphy_rf_ctl_intc_override(dev, N_INTC_OVERRIDE_TRSW, 0x1, core + 1);
++}
++
++/* brcmsmac's wlc_phy_rxcal_phycleanup_nphy(). */
++static void b43_nphy_rxcal_phy_cleanup(struct b43_wldev *dev, u8 core)
++{
++	u16 *regs = dev->phy.n->tx_rx_cal_phy_saveregs;
++
++	b43_phy_write(dev, B43_NPHY_RFSEQCA, regs[0]);
++	b43_phy_write(dev, core ? B43_NPHY_AFECTL_C2 : B43_NPHY_AFECTL_C1,
++		      regs[1]);
++	b43_phy_write(dev, core ? B43_NPHY_AFECTL_OVER : B43_NPHY_AFECTL_OVER1,
++		      regs[2]);
++	b43_phy_write(dev, B43_NPHY_RFCTL_INTC1, regs[3]);
++	b43_phy_write(dev, B43_NPHY_RFCTL_INTC2, regs[4]);
++	b43_phy_write(dev, B43_NPHY_RFCTL_RSSIO1, regs[5]);
++	b43_phy_write(dev, B43_NPHY_RFCTL_RSSIO2, regs[6]);
++	b43_phy_write(dev, B43_NPHY_REV3_RFCTL_OVER0, regs[7]);
++	b43_phy_write(dev, B43_NPHY_REV3_RFCTL_OVER1, regs[8]);
++	b43_phy_write(dev, B43_NPHY_REV7_RF_CTL_OVER3, regs[11]);
++	b43_phy_write(dev, B43_NPHY_REV7_RF_CTL_OVER4, regs[12]);
++	b43_phy_write(dev, B43_NPHY_REV7_RF_CTL_OVER5, regs[13]);
++	b43_phy_write(dev, B43_NPHY_REV7_RF_CTL_OVER6, regs[14]);
++	b43_phy_write(dev, B43_NPHY_PAPD_EN0, regs[9]);
++	b43_phy_write(dev, B43_NPHY_PAPD_EN1, regs[10]);
++}
++
++/* The coupler the RX IQ calibration measures through, on the core being
++ * calibrated. brcmsmac's wlc_phy_rxcal_radio_setup_nphy(), rev 7 and up: there
++ * it is the two transmit/receive coupling registers of that core and nothing
++ * else, the rest of that function being the radio 2056 path. The values differ
++ * from the ones the PAPD calibration uses - 0x3 and 0x7f against 0xc and 0xf0 -
++ * because this one couples a receive chain rather than driving a tone into it.
++ */
++static void b43_nphy_rxcal_radio_setup(struct b43_wldev *dev, u8 core)
++{
++	u16 *regs = dev->phy.n->tx_rx_cal_radio_saveregs;
++	u16 pwrup = core ? R2057_TX1_TXRXCOUPLE_2G_PWRUP :
++			   R2057_TX0_TXRXCOUPLE_2G_PWRUP;
++	u16 atten = core ? R2057_TX1_TXRXCOUPLE_2G_ATTEN :
++			   R2057_TX0_TXRXCOUPLE_2G_ATTEN;
++
++	regs[0] = b43_radio_read(dev, pwrup);
++	regs[1] = b43_radio_read(dev, atten);
++
++	b43_radio_write(dev, pwrup, 0x3);
++	b43_radio_write(dev, atten, 0x7F);
++}
++
++/* brcmsmac's wlc_phy_rxcal_radio_cleanup_nphy(). */
++static void b43_nphy_rxcal_radio_cleanup(struct b43_wldev *dev, u8 core)
++{
++	u16 *regs = dev->phy.n->tx_rx_cal_radio_saveregs;
++	u16 pwrup = core ? R2057_TX1_TXRXCOUPLE_2G_PWRUP :
++			   R2057_TX0_TXRXCOUPLE_2G_PWRUP;
++	u16 atten = core ? R2057_TX1_TXRXCOUPLE_2G_ATTEN :
++			   R2057_TX0_TXRXCOUPLE_2G_ATTEN;
++
++	b43_radio_write(dev, pwrup, regs[0]);
++	b43_radio_write(dev, atten, regs[1]);
++}
++
++/* One step of the receive gain ladder the RX IQ calibration walks: the two
++ * low pass filter biquad stages, the second and first low noise amplifier, and
++ * the transmit power index to drive the tone at. -1 there means drive it with a
++ * fixed gain instead of an index into the power control table.
++ */
++struct b43_nphy_rxcal_gain {
++	u16 hpvga;
++	u16 lpf_biq1;
++	u16 lpf_biq0;
++	u16 lna2;
++	u16 lna1;
++	s8 txpwrindex;
++};
++
++#define B43_NPHY_RXCAL_MAXGAININDEX	5
++#define B43_NPHY_RXCAL_TONEAMP		181
++#define B43_NPHY_RXCAL_TONEFREQ_20MHZ	2000
++#define B43_NPHY_RXCAL_TONEFREQ_40MHZ	4000
++
++enum b43_nphy_rxcal_dirn {
++	B43_NPHY_RXCAL_GAIN_INIT,
++	B43_NPHY_RXCAL_GAIN_UP,
++	B43_NPHY_RXCAL_GAIN_DOWN,
++};
++
++static const struct b43_nphy_rxcal_gain b43_nphy_rxcal_gaintbl_2ghz_rev7[] = {
++	{ 0, 0, 0, 0, 0, 10 },
++	{ 0, 0, 0, 1, 0, 10 },
++	{ 0, 0, 1, 2, 0, 10 },
++	{ 0, 0, 1, 3, 0, 10 },
++	{ 0, 0, 4, 3, 0, 10 },
++	{ 0, 0, 6, 3, 0, 10 },
++};
++
++/* Walk the gain ladder until the tone comes back at a workable power, then
++ * trim the second biquad stage so it lands on the power the calibration wants.
++ * brcmsmac's wlc_phy_rxcal_gainctrl_nphy_rev5(), the N-PHY rev 7 and up path.
++ *
++ * The rxgain output argument of the reference is not here: both its call sites
++ * pass NULL, so nothing ever reads what it would return.
++ *
++ * Neither is the 5 GHz ladder, and the caller keeps this to 2 GHz for it. The
++ * 5 GHz one asks for a fixed transmit gain rather than a power control index on
++ * four of its six steps, and that gain is built from a value b43 does not keep -
++ * the one the reference reads out of the transmit gain table, which this file
++ * computes inside an #if 0 and stores nowhere. A ladder step that cannot be
++ * programmed is worse than a ladder that stops at the band the capture covers.
++ */
++static void b43_nphy_rxcal_gainctrl(struct b43_wldev *dev, u8 rx_core,
++				    u8 cal_type)
++{
++	const struct b43_nphy_rxcal_gain *tbl = b43_nphy_rxcal_gaintbl_2ghz_rev7;
++	struct b43_phy_n_iq_comp save_comp, zero_comp = { };
++	struct nphy_iq_est est;
++	const u16 num_samps = 1024;
++	const u32 thresh_pwr = 10000;
++	const s16 desired_log2_pwr = 13;
++	u32 curr_pwr, optim_pwr = 0, prev_pwr = 0;
++	s16 actual_log2_pwr, delta_pwr;
++	u16 lpf_biq1, lpf_biq0, lna2, lna1;
++	u8 mix_tia_gain = 3;
++	s8 optim_idx = 0, prev_idx = 0, curr_idx = 3;
++	u8 dirn = B43_NPHY_RXCAL_GAIN_INIT;
++	bool done = false;
++	int fine_gain_idx;
++	u32 tone_freq;
++	/* Rev 7 and up transmit on the core being calibrated, earlier
++	 * revisions on the other one.
++	 */
++	u8 tx_core = rx_core;
++
++	b43_nphy_rx_iq_coeffs(dev, false, &save_comp);
++	b43_nphy_rx_iq_coeffs(dev, true, &zero_comp);
++
++	tone_freq = b43_is_40mhz(dev) ? B43_NPHY_RXCAL_TONEFREQ_40MHZ :
++					B43_NPHY_RXCAL_TONEFREQ_20MHZ;
++
++	do {
++		lpf_biq1 = tbl[curr_idx].lpf_biq1;
++		lpf_biq0 = tbl[curr_idx].lpf_biq0;
++		lna2 = tbl[curr_idx].lna2;
++		lna1 = tbl[curr_idx].lna1;
++
++		b43_nphy_rf_ctl_override_one_to_many(dev,
++				N_RF_CTL_OVER_CMD_RX_GAIN,
++				(lpf_biq1 << 12) | (lpf_biq0 << 8) |
++				(mix_tia_gain << 4) | (lna2 << 2) | lna1,
++				0x3, false);
++
++		b43_nphy_txpwr_index(dev, 1 << tx_core,
++				     tbl[curr_idx].txpwrindex, false);
++
++		b43_nphy_tx_tone(dev, tone_freq, B43_NPHY_RXCAL_TONEAMP, false,
++				 cal_type, false);
++
++		b43_nphy_rx_iq_est(dev, &est, num_samps, 32, false);
++		if (rx_core == 0)
++			curr_pwr = DIV_ROUND_CLOSEST(est.i0_pwr, num_samps) +
++				   DIV_ROUND_CLOSEST(est.q0_pwr, num_samps);
++		else
++			curr_pwr = DIV_ROUND_CLOSEST(est.i1_pwr, num_samps) +
++				   DIV_ROUND_CLOSEST(est.q1_pwr, num_samps);
++
++		switch (dirn) {
++		case B43_NPHY_RXCAL_GAIN_INIT:
++			prev_idx = curr_idx;
++			if (curr_pwr > thresh_pwr) {
++				dirn = B43_NPHY_RXCAL_GAIN_DOWN;
++				curr_idx--;
++			} else {
++				dirn = B43_NPHY_RXCAL_GAIN_UP;
++				curr_idx++;
++			}
++			break;
++		case B43_NPHY_RXCAL_GAIN_UP:
++			if (curr_pwr > thresh_pwr) {
++				done = true;
++				optim_pwr = prev_pwr;
++				optim_idx = prev_idx;
++			} else {
++				prev_idx = curr_idx;
++				curr_idx++;
++			}
++			break;
++		case B43_NPHY_RXCAL_GAIN_DOWN:
++			if (curr_pwr > thresh_pwr) {
++				prev_idx = curr_idx;
++				curr_idx--;
++			} else {
++				done = true;
++				optim_pwr = curr_pwr;
++				optim_idx = curr_idx;
++			}
++			break;
++		}
++
++		/* Walked off either end of the ladder: keep the last index that
++		 * was on it.
++		 */
++		if (curr_idx < 0 || curr_idx > B43_NPHY_RXCAL_MAXGAININDEX) {
++			done = true;
++			optim_pwr = curr_pwr;
++			optim_idx = prev_idx;
++		} else {
++			prev_pwr = curr_pwr;
++		}
++
++		b43_nphy_stop_playback(dev);
++	} while (!done);
++
++	lpf_biq1 = tbl[optim_idx].lpf_biq1;
++	lpf_biq0 = tbl[optim_idx].lpf_biq0;
++	lna2 = tbl[optim_idx].lna2;
++	lna1 = tbl[optim_idx].lna1;
++
++	/* brcmsmac's wlc_phy_nbits() is the bit length of the absolute value,
++	 * which is what fls() returns and what this file already uses for the
++	 * same job in b43_nphy_calc_rx_iq_comp().
++	 */
++	actual_log2_pwr = fls(optim_pwr);
++	delta_pwr = desired_log2_pwr - actual_log2_pwr;
++
++	fine_gain_idx = (int)lpf_biq1 + delta_pwr;
++	if (fine_gain_idx + (int)lpf_biq0 > 10)
++		lpf_biq1 = 10 - lpf_biq0;
++	else
++		lpf_biq1 = max(fine_gain_idx, 0);
++
++	b43_nphy_rf_ctl_override_one_to_many(dev, N_RF_CTL_OVER_CMD_RX_GAIN,
++			(lpf_biq1 << 12) | (lpf_biq0 << 8) |
++			(mix_tia_gain << 4) | (lna2 << 2) | lna1,
++			0x3, false);
++
++	b43_nphy_rx_iq_coeffs(dev, true, &save_comp);
++}
++
+ static int b43_nphy_rev3_cal_rx_iq(struct b43_wldev *dev,
+ 			struct nphy_txgains target, u8 type, bool debug)
+ {
+-	return -1;
++	struct b43_phy *phy = &dev->phy;
++	struct nphy_iqcal_params cal_params[2];
++	u16 gain_save[2], cal_gain[2];
++	u16 orig_bbcfg;
++	u8 rx_core_state;
++	u8 core;
++
++	/* Only radio 2057 rev 8 in 2 GHz has been looked at against a capture,
++	 * and the gain sweep only has the 2 GHz ladder.
++	 */
++	if (phy->rev != 8 || phy->radio_rev != 8 ||
++	    b43_current_band(dev->wl) != NL80211_BAND_2GHZ)
++		return -1;
++
++	orig_bbcfg = b43_phy_read(dev, B43_NPHY_BBCFG);
++	b43_phy_mask(dev, B43_NPHY_BBCFG, ~B43_NPHY_BBCFG_RSTRX & 0xFFFF);
++
++	b43_nphy_stay_in_carrier_search(dev, true);
++
++	/* The transmit gain of the two cores together, put back at the end, and
++	 * the gain the calibration wants in its place.
++	 */
++	b43_ntab_read_bulk(dev, B43_NTAB16(7, 0x110), 2, gain_save);
++	for (core = 0; core < 2; core++) {
++		b43_nphy_iq_cal_gain_params(dev, core, target,
++					    &cal_params[core]);
++		cal_gain[core] = cal_params[core].cal_gain;
++	}
++	b43_ntab_write_bulk(dev, B43_NTAB16(7, 0x110), 2, cal_gain);
++
++	rx_core_state = b43_nphy_get_rx_core_state(dev);
++
++	/* One core at a time: hand the PHY and the radio over, sweep the receive
++	 * gain until the tone comes back at a workable power, measure it and
++	 * compute the compensation, then take the PHY back.
++	 */
++	for (core = 0; core < 2; core++) {
++		b43_nphy_rxcal_phy_setup(dev, core);
++		b43_nphy_rxcal_radio_setup(dev, core);
++
++		if (rx_core_state & (1 << core)) {
++			b43_nphy_rxcal_gainctrl(dev, core, 0);
++
++			b43_nphy_tx_tone(dev, b43_is_40mhz(dev) ?
++					 B43_NPHY_RXCAL_TONEFREQ_40MHZ :
++					 B43_NPHY_RXCAL_TONEFREQ_20MHZ,
++					 B43_NPHY_RXCAL_TONEAMP, false, type,
++					 false);
++			b43_nphy_calc_rx_iq_comp(dev, 1 << core);
++			b43_nphy_stop_playback(dev);
++		}
++
++		b43_nphy_rxcal_radio_cleanup(dev, core);
++		b43_nphy_rxcal_phy_cleanup(dev, core);
++		b43_nphy_force_rf_sequence(dev, B43_RFSEQ_RESET2RX);
++	}
++
++	b43_phy_write(dev, B43_NPHY_BBCFG, orig_bbcfg);
++
++	b43_nphy_reset_cca(dev);
++	b43_nphy_rf_ctl_override_one_to_many(dev, N_RF_CTL_OVER_CMD_RX_GAIN, 0,
++					     0x3, true);
++	b43_nphy_force_rf_sequence(dev, B43_RFSEQ_RESET2RX);
++
++	b43_ntab_write_bulk(dev, B43_NTAB16(7, 0x110), 2, gain_save);
++
++	b43_nphy_stay_in_carrier_search(dev, false);
++
++	return 0;
+ }
+ 
+ /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/CalRxIq */
+ static int b43_nphy_cal_rx_iq(struct b43_wldev *dev,
+ 			struct nphy_txgains target, u8 type, bool debug)
+ {
+-	if (dev->phy.rev >= 7)
+-		type = 0;
+-
+ 	if (dev->phy.rev >= 3)
+ 		return b43_nphy_rev3_cal_rx_iq(dev, target, type, debug);
+ 	else
+@@ -5871,6 +6568,60 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+ 	b43_ppr_add(dev, ppr, -hw_gain);
+ #endif
+ 
++	/* Two more limits, one per number of transmit chains, and they are what
++	 * makes the per-rate table come out the way the hardware wants it.
++	 *
++	 * A dense constellation needs the PA further from saturation, and two
++	 * correlated streams on the same chain need more again: the groups that
++	 * use both chains - CDD, STBC and SDM - back off 3 dB more than the same
++	 * rates on one. That difference is the PA's, not the regulator's, which
++	 * is why it belongs here and not in the regulatory database.
++	 *
++	 * Both are minimums, so this can only ever ask for less power than the
++	 * limit above, never more.
++	 *
++	 * The 3 dB between the two is arithmetic, not a measurement: two chains
++	 * radiating together put out twice the power of one, so each comes down
++	 * by 10*log10(2) to leave the total where the limit is. 68 - 56 = 12
++	 * quarter-dB is that factor to two decimals, so the difference needs the
++	 * number of chains and not a table.
++	 *
++	 * TODO: derive the 68 instead of measuring it. In the vendor driver it is
++	 * a locale limit - that driver carries per-country tables compiled in -
++	 * so its home is the regulatory database and not this file. What does not
++	 * add up yet: the regulatory limit this driver is given for the band is
++	 * 20 dBm, and less this board's 2 dB of antenna gain that is 72
++	 * quarter-dBm rather than 68. The four that remain are unexplained, and
++	 * the disabled hw_gain block above would land on 72 as well. Two boards
++	 * cannot tell, because both have the same antenna gain and both give 68:
++	 * this wants a board whose antenna gain differs, to see whether the
++	 * ceiling follows it. Until then it is a measured number behind a
++	 * revision gate rather than a derived one everywhere.
++	 *
++	 * With both, the 84 entries come out 84 of 84 on one board and 82 of 84
++	 * on the other, whose SPROM offsets differ by a factor of four. It also
++	 * explains why the two-chain columns come out the same on both although
++	 * their SPROM values do not: 56 is below the SPROM value for every rate
++	 * in those groups, so it decides all of them.
++	 */
++	if (phy->rev == 8 && phy->radio_rev == 8 &&
++	    b43_current_band(dev->wl) == NL80211_BAND_2GHZ) {
++		b43_ppr_apply_max_group(dev, ppr->rates.cck,
++					B43_PPR_CCK_RATES_NUM, 68);
++		b43_ppr_apply_max_group(dev, ppr->rates.ofdm,
++					B43_PPR_OFDM_RATES_NUM, 68);
++		b43_ppr_apply_max_group(dev, ppr->rates.mcs_20,
++					B43_PPR_MCS_RATES_NUM, 68);
++		b43_ppr_apply_max_group(dev, ppr->rates.ofdm_20_cdd,
++					B43_PPR_OFDM_RATES_NUM, 56);
++		b43_ppr_apply_max_group(dev, ppr->rates.mcs_20_cdd,
++					B43_PPR_MCS_RATES_NUM, 56);
++		b43_ppr_apply_max_group(dev, ppr->rates.mcs_20_stbc,
++					B43_PPR_MCS_RATES_NUM, 56);
++		b43_ppr_apply_max_group(dev, ppr->rates.mcs_20_sdm,
++					B43_PPR_MCS_RATES_NUM, 56);
++	}
++
+ 	/* Make sure we didn't go too low */
+ 	b43_ppr_apply_min(dev, ppr, INT_TO_Q52(8));
+ 
+@@ -5995,6 +6746,674 @@ static void b43_nphy_superswitch_init(struct b43_wldev *dev, bool init)
+ }
+ 
+ /* http://bcm-v4.sipsolutions.net/802.11/PHY/Init/N */
++/* Initialise the tables the PAPD engine reads once it is enabled: the scalar
++ * lookup with its constants, and the epsilon tables cleared. Without this the
++ * engine runs on whatever the tables happened to contain.
++ */
++static void b43_nphy_papd_scalar_tables(struct b43_wldev *dev)
++{
++	b43_ntab_write_bulk(dev, B43_NTAB32(32, 0), 64, b43_ntab_papd_scaltbl);
++	b43_ntab_write_bulk(dev, B43_NTAB32(34, 0), 64, b43_ntab_papd_scaltbl);
++}
++
++/* The two epsilon tables, cleared one cell at a time, one core after the other,
++ * the way brcmsmac and the hardware's own driver do it. A bulk write leaves the
++ * same tables behind for one table address setup instead of 64, but it leans on
++ * the address incrementing by itself, which nothing here has tested.
++ */
++static void b43_nphy_papd_epsilon_tables_clear(struct b43_wldev *dev)
++{
++	int i;
++
++	for (i = 0; i < 64; i++)
++		b43_ntab_write(dev, B43_NTAB32(31, i), 0);
++	for (i = 0; i < 64; i++)
++		b43_ntab_write(dev, B43_NTAB32(33, i), 0);
++}
++
++/* The registers the PAPD calibration drives one core at a time. The first four
++ * are PHY registers, the last two radio ones, and the two address spaces are
++ * indexed by the same core number.
++ */
++static const struct {
++	u16 afectl;
++	u16 afeover;
++	u16 papd_en;
++	u16 cal_shifts;
++	u16 pwrup;
++	u16 atten;
++} b43_nphy_papd_regs[2] = {
++	{ B43_NPHY_AFECTL_C1, B43_NPHY_AFECTL_OVER1,
++	  B43_NPHY_PAPD_EN0, B43_NPHY_PAPD_CAL_SHIFTS0,
++	  R2057_TX0_TXRXCOUPLE_2G_PWRUP, R2057_TX0_TXRXCOUPLE_2G_ATTEN },
++	{ B43_NPHY_AFECTL_C2, B43_NPHY_AFECTL_OVER,
++	  B43_NPHY_PAPD_EN1, B43_NPHY_PAPD_CAL_SHIFTS1,
++	  R2057_TX1_TXRXCOUPLE_2G_PWRUP, R2057_TX1_TXRXCOUPLE_2G_ATTEN },
++};
++
++/* The transmit digital filter the PAPD calibration runs behind, which is not
++ * the one the PHY init leaves in place: row 3 of tbl_tx_filter_coef_rev4 at
++ * 20 MHz, row 4 at 40 MHz. brcmsmac's
++ * wlc_phy_ipa_restore_tx_digi_filts_nphy(). What the init programs goes back
++ * once the calibration is done, which is b43_nphy_int_pa_set_tx_dig_filters().
++ */
++static void b43_nphy_int_pa_restore_tx_dig_filters(struct b43_wldev *dev)
++{
++	if (b43_is_40mhz(dev))
++		b43_nphy_pa_set_tx_dig_filter(dev, 0x195,
++					      tbl_tx_filter_coef_rev4[4]);
++	else
++		b43_nphy_pa_set_tx_dig_filter(dev, 0x186,
++					      tbl_tx_filter_coef_rev4[3]);
++}
++
++/* Point the transmit chain of one core at the receive chain through the coupler
++ * and put a tone into it, which is the measurement the PAPD gain search runs
++ * on, keeping what has to be handed back. brcmsmac's
++ * wlc_phy_papd_cal_setup_nphy(), N-PHY rev 7 and up, 2 GHz.
++ */
++static void b43_nphy_papd_cal_setup(struct b43_wldev *dev,
++				    struct nphy_papd_restore_state *state,
++				    u8 core)
++{
++	u8 off_core = core ^ 1;
++
++	/* The low pass filter bandwidth stays where the channel put it. */
++	b43_nphy_rf_ctl_override_rev7(dev, 0x80, b43_nphy_read_lpf_ctl(dev, 0),
++				      0, false, 1);
++	/* Radio 2057 rev 7 and 8 want no transmit mixer gain of their own. */
++	b43_nphy_rf_ctl_override_rev7(dev, 0x800, 0, 1 << core, false, 0);
++
++	b43_nphy_rf_ctl_override_one_to_many(dev, N_RF_CTL_OVER_CMD_TX_PU, 1,
++					     1 << core, false);
++	b43_nphy_rf_ctl_override_one_to_many(dev, N_RF_CTL_OVER_CMD_TX_PU, 0,
++					     1 << off_core, false);
++
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, 0x3, false, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x4, 1, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x1, 0, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x2, 1, 1 << core, false, 2);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x100, 0, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x200, 1, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x400, 0, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 1, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x20, 0, 1 << core, false, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x10, 0, 1 << core, false, 1);
++
++	state->afectrl[core] =
++		b43_phy_read(dev, b43_nphy_papd_regs[core].afectl);
++	state->afeoverride[core] =
++		b43_phy_read(dev, b43_nphy_papd_regs[core].afeover);
++	state->afectrl[off_core] =
++		b43_phy_read(dev, b43_nphy_papd_regs[off_core].afectl);
++	state->afeoverride[off_core] =
++		b43_phy_read(dev, b43_nphy_papd_regs[off_core].afeover);
++
++	/* The core being calibrated drives the digital to analog converter
++	 * from the calibration, the other one keeps its own value.
++	 */
++	b43_phy_mask(dev, b43_nphy_papd_regs[core].afectl, ~0x4);
++	b43_phy_set(dev, b43_nphy_papd_regs[core].afeover, 0x4);
++	b43_phy_set(dev, b43_nphy_papd_regs[off_core].afectl, 0x4);
++	b43_phy_set(dev, b43_nphy_papd_regs[off_core].afeover, 0x4);
++
++	state->pwrup[core] =
++		b43_radio_read(dev, b43_nphy_papd_regs[core].pwrup);
++	state->atten[core] =
++		b43_radio_read(dev, b43_nphy_papd_regs[core].atten);
++	state->pwrup[off_core] =
++		b43_radio_read(dev, b43_nphy_papd_regs[off_core].pwrup);
++	state->atten[off_core] =
++		b43_radio_read(dev, b43_nphy_papd_regs[off_core].atten);
++
++	b43_radio_write(dev, b43_nphy_papd_regs[core].pwrup, 0xC);
++	b43_radio_write(dev, b43_nphy_papd_regs[core].atten, 0xF0);
++	b43_radio_write(dev, b43_nphy_papd_regs[off_core].pwrup, 0x0);
++	b43_radio_write(dev, b43_nphy_papd_regs[off_core].atten, 0xFF);
++
++	b43_nphy_tx_tone(dev, 4000, 181, false, false, false);
++
++	b43_phy_set(dev, b43_nphy_papd_regs[core].papd_en, 0x1);
++	b43_phy_set(dev, b43_nphy_papd_regs[core].cal_shifts, 0x2000);
++	b43_phy_mask(dev, b43_nphy_papd_regs[off_core].papd_en, ~0x1);
++	b43_phy_mask(dev, b43_nphy_papd_regs[off_core].cal_shifts, ~0x2000);
++}
++
++/* Give the PHY and the radio back what b43_nphy_papd_cal_setup() took, in the
++ * order brcmsmac's wlc_phy_papd_cal_cleanup_nphy() does. The value argument of
++ * the overrides is ignored once they are being switched off; it is kept as
++ * brcmsmac passes it so the two sequences read the same.
++ */
++static void b43_nphy_papd_cal_cleanup(struct b43_wldev *dev,
++				      struct nphy_papd_restore_state *state)
++{
++	u8 core;
++
++	b43_nphy_stop_playback(dev);
++
++	for (core = 0; core < 2; core++) {
++		b43_radio_write(dev, b43_nphy_papd_regs[core].pwrup, 0);
++		b43_radio_write(dev, b43_nphy_papd_regs[core].atten,
++				state->atten[core]);
++	}
++
++	b43_nphy_rf_ctl_override_rev7(dev, 0x4, 0, 0x3, true, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x2, 0, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x1, 0, 0x3, true, 2);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x4, 0, 0x3, true, 2);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x800, 1, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, 0x3, true, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x800, 0, 0x3, true, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x1000, 0, 0x3, true, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x4, 1, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x1, 0, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x2, 1, 0x3, true, 2);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x100, 0, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x200, 1, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x400, 0, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 1, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x20, 0, 0x3, true, 1);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x10, 0, 0x3, true, 1);
++
++	for (core = 0; core < 2; core++) {
++		b43_phy_write(dev, b43_nphy_papd_regs[core].afectl,
++			      state->afectrl[core]);
++		b43_phy_write(dev, b43_nphy_papd_regs[core].afeover,
++			      state->afeoverride[core]);
++	}
++
++	b43_nphy_ipa_set_bbmult(dev, state->bbmult >> 8, state->bbmult & 0xFF);
++
++	b43_nphy_rf_ctl_override_rev7(dev, 0x80, 0, 0, true, 1);
++}
++
++/* The PAPD calibration, brcmsmac's wlc_phy_a4(). Only the part that does not
++ * depend on the gain index search is here so far: the scalar and epsilon tables
++ * the PAPD engine reads. It belongs in the calibration and not in the PHY init -
++ * in an MMIO capture of wl 6.30.102.7 on this radio, table 32 appears exactly
++ * twice in 70796 records, once per interface init, both times inside the
++ * calibration and never during the init proper.
++ */
++/* La parentesi che il riferimento mette attorno a ogni passo che puo' muovere il
++ * gain: legge il tx gain originale, salva lo stato del controllo di potenza e lo
++ * spegne. La chiude b43_nphy_pwr_ctl_close(), e il ripristino e' quello che
++ * riprogramma la tabella di potenza aggiustata.
++ */
++static bool b43_nphy_pwr_ctl_open(struct b43_wldev *dev, u16 *orig_tx_gain)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	bool state = nphy->txpwrctrl;
++
++	if (state)
++		b43_ntab_read_bulk(dev, B43_NTAB16(7, 0x110), 2, orig_tx_gain);
++	else
++		orig_tx_gain[0] = orig_tx_gain[1] = 0;
++
++	b43_nphy_tx_power_ctrl(dev, false);
++	return state;
++}
++
++static void b43_nphy_pwr_ctl_close(struct b43_wldev *dev, bool state)
++{
++	b43_nphy_tx_power_ctrl(dev, state);
++}
++
++/* The gain codes the search below steps through, radio 2057 rev 7 and rev 8,
++ * 2 GHz. brcmsmac carries the rev 5 and the all-codes tables too; only the one
++ * this radio uses is here, since the caller tests the revision.
++ */
++static const u8 b43_nphy_pad_gain_codes_2057_rev7[] = {
++	15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1
++};
++
++#define B43_NPHY_PAPD_EPS_TBL_SIZE	64
++
++/* The epsilon table holds two thirteen bit signed fields per cell. */
++static void b43_nphy_papd_decode_epsilon(u32 epsilon, s32 *real, s32 *imag)
++{
++	*imag = epsilon >> 13;
++	if (*imag > 0xFFF)
++		*imag -= 0x2000;
++
++	*real = epsilon & 0x1FFF;
++	if (*real > 0xFFF)
++		*real -= 0x2000;
++}
++
++/* Smooths the epsilon table in place over a sliding window, decoding each cell,
++ * averaging the two fields across the window and writing the result back. Reads
++ * the whole table once and writes the smoothed range once, so the source cells
++ * are the unsmoothed ones throughout - a cell at a time would feed the average
++ * back into itself.
++ */
++static void b43_nphy_papd_smooth_epsilon(struct b43_wldev *dev, u8 core,
++					 u32 winsz, u32 start, u32 end)
++{
++	u16 tbl = core ? 33 : 31;
++	u32 *src, *dst;
++	u32 sz = end - start + 1;
++
++	u32 buf[2 * B43_NPHY_PAPD_EPS_TBL_SIZE];
++
++	src = buf;
++	dst = buf + B43_NPHY_PAPD_EPS_TBL_SIZE;
++
++	b43_ntab_read_bulk(dev, B43_NTAB32(tbl, 0),
++			   B43_NPHY_PAPD_EPS_TBL_SIZE, src);
++
++	do {
++		u32 lo, hi;
++		s32 n, real, imag, sum_real = 0, sum_imag = 0;
++
++		lo = end - min(end, winsz >> 1);
++		hi = min_t(u32, B43_NPHY_PAPD_EPS_TBL_SIZE - 1,
++			   end + (winsz >> 1));
++		n = hi - lo + 1;
++
++		do {
++			b43_nphy_papd_decode_epsilon(src[hi], &real, &imag);
++			sum_real += real;
++			sum_imag += imag;
++		} while (hi-- != lo);
++
++		sum_real /= n;
++		sum_imag /= n;
++		dst[end] = ((u32)sum_imag << 13) | ((u32)sum_real & 0x1FFF);
++	} while (end-- != start);
++
++	b43_ntab_write_bulk(dev, B43_NTAB32(tbl, start), sz, dst + start);
++}
++
++/* One pass of the PAPD engine on one core: program the transmit gain the caller
++ * wants measured, silence the other core, set the engine up and let it sweep.
++ * What it leaves behind is the epsilon table.
++ *
++ * Only the N-PHY rev 7 and up arm of the reference is here, and inside it only
++ * the 2 GHz half, because the caller tests phy rev 8, radio rev 8 and the band.
++ * The reference passes a whole gain structure and reads one field of it out of
++ * that arm, the pad gain, so that is what this takes.
++ */
++static void b43_nphy_papd_run_one(struct b43_wldev *dev, u16 pad_gain,
++				  bool gain_ctrl, u8 core)
++{
++	struct nphy_txgains gains;
++	u16 other = core ? 0 : 1;
++	u16 shifts = core ? B43_NPHY_PAPD_CAL_SHIFTS1 :
++			    B43_NPHY_PAPD_CAL_SHIFTS0;
++	u16 txgain, thresh_lo, thresh_hi, idx;
++	u8 m[2];
++	u32 zero = 0;
++	int i;
++
++	gains = b43_nphy_get_tx_gains(dev);
++	txgain = (gains.tx_lpf[core] << 15) | (gains.txgm[core] << 12) |
++		 (gains.pga[core] << 8) | (pad_gain << 3) | gains.ipa[core];
++
++	b43_nphy_rf_ctl_override_one_to_many(dev, N_RF_CTL_OVER_CMD_TX_GAIN,
++					     txgain, 1 << core, false);
++
++	/* Radio 2057 rev 8 in 2 GHz, 20 MHz: the multiplier the tone plays at.
++	 * The other core plays nothing, so the measurement only sees this one.
++	 */
++	m[core] = b43_is_40mhz(dev) ? 45 : 64;
++	m[other] = 0;
++	b43_nphy_ipa_set_bbmult(dev, m[0], m[1]);
++
++	thresh_hi = 63;
++	idx = 25;
++	thresh_lo = 25;
++	if (gain_ctrl)
++		thresh_lo = 60;
++
++	b43_phy_maskset(dev, core ? B43_PHY_N(0x29B) : B43_PHY_N(0x297),
++			~0x1, 1);
++	b43_phy_maskset(dev, other ? B43_PHY_N(0x29B) : B43_PHY_N(0x297),
++			~0x1, 0);
++	b43_phy_maskset(dev, shifts, ~0x2000, 0x2000);
++	b43_phy_maskset(dev, other ? B43_NPHY_PAPD_CAL_SHIFTS1 :
++				     B43_NPHY_PAPD_CAL_SHIFTS0, ~0x2000, 0);
++
++	b43_phy_write(dev, B43_PHY_N(0x2A1), 0x80);
++	b43_phy_write(dev, B43_PHY_N(0x2A2), 0x100);
++
++	b43_phy_maskset(dev, shifts, ~0x0070, 11 << 4);
++	b43_phy_maskset(dev, shifts, ~0x0700, 11 << 8);
++	b43_phy_maskset(dev, shifts, ~0x0007, 3);
++
++	b43_phy_write(dev, B43_PHY_N(0x2E5), 0x20);
++
++	b43_phy_maskset(dev, B43_PHY_N(0x2A0), ~0x003F, idx);
++	b43_phy_maskset(dev, B43_PHY_N(0x29F), ~0x003F, thresh_lo);
++	b43_phy_maskset(dev, B43_PHY_N(0x29F), ~0x3F00, thresh_hi << 8);
++
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 1, core ? 2 : 1, false, 0);
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, core ? 1 : 2, false, 0);
++
++	/* The engine clears this when the sweep is over. */
++	b43_phy_write(dev, B43_PHY_N(0x2BE), 1);
++	for (i = 0; i < 1000000; i++) {
++		if (!b43_phy_read(dev, B43_PHY_N(0x2BE)))
++			break;
++		udelay(10);
++	}
++
++	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, 0x3, false, 0);
++
++	b43_ntab_write(dev, B43_NTAB32(core ? 33 : 31, idx), zero);
++
++	b43_nphy_rf_ctl_override_one_to_many(dev, N_RF_CTL_OVER_CMD_TX_GAIN,
++					     txgain, 1 << core, true);
++}
++
++/* Walks the pad gain codes until the epsilon the engine reports stops clipping,
++ * and returns the code it settled on. One step at a time, up to twenty of them:
++ * clipping means too much gain, so the search backs off, and it stops on the
++ * first change of direction.
++ */
++static u8 b43_nphy_papd_gain_search(struct b43_wldev *dev, u8 start, u8 core)
++{
++	const u8 *codes = b43_nphy_pad_gain_codes_2057_rev7;
++	int last = ARRAY_SIZE(b43_nphy_pad_gain_codes_2057_rev7) - 1;
++	int idx = start;
++	bool clipped, was_clipped = false, first = true;
++	int i;
++
++	for (i = 0; i < 20; i++) {
++		s32 real, imag;
++		u32 cell;
++
++		b43_nphy_papd_run_one(dev, codes[idx], true, core);
++
++		cell = b43_ntab_read(dev, B43_NTAB32(core ? 33 : 31, 63));
++		b43_nphy_papd_decode_epsilon(cell, &real, &imag);
++
++		clipped = real == 4095 || real == -4096 ||
++			  imag == 4095 || imag == -4096;
++
++		if (!first && clipped != was_clipped) {
++			if (!clipped)
++				idx--;
++			break;
++		}
++
++		idx += clipped ? 1 : -1;
++		if (idx < 0 || idx > last) {
++			idx = (idx < 0) ? 0 : last;
++			break;
++		}
++
++		first = false;
++		was_clipped = clipped;
++	}
++
++	return codes[idx];
++}
++
++static void b43_nphy_papd_cal(struct b43_wldev *dev)
++{
++	struct b43_phy *phy = &dev->phy;
++	struct b43_phy_n *nphy = phy->n;
++	struct nphy_papd_restore_state state;
++	u16 bbcfg;
++	u8 core;
++
++	if (!b43_nphy_ipa(dev))
++		return;
++
++	/* Only radio 2057 rev 8 is known to want these constants. */
++	if (phy->rev != 8 || phy->radio_rev != 8)
++		return;
++
++	b43_nphy_papd_scalar_tables(dev);
++
++	/* The receive reset stays off while the calibration transmits into its
++	 * own receive chain, and whatever it was goes back at the end.
++	 */
++	bbcfg = b43_phy_read(dev, B43_NPHY_BBCFG);
++	b43_phy_mask(dev, B43_NPHY_BBCFG, ~B43_NPHY_BBCFG_RSTRX & 0xFFFF);
++
++	b43_nphy_papd_epsilon_tables_clear(dev);
++
++	/* Below here is the 2 GHz path only, which is the one the capture this
++	 * was built from exercises. The 5 GHz coupler constants differ and are
++	 * unverified.
++	 */
++	if (b43_current_band(dev->wl) != NL80211_BAND_2GHZ)
++		return;
++
++	b43_nphy_int_pa_restore_tx_dig_filters(dev);
++
++	state.bbmult = b43_nphy_ipa_get_bbmult(dev);
++
++	for (core = 0; core < 2; core++) {
++		u16 orig_tx_gain[2];
++		bool pwr_ctl;
++		u8 gain;
++
++		b43_nphy_papd_cal_setup(dev, &state, core);
++
++		/* Two passes of the engine per core, and each one inside its
++		 * own bracket: the capture opens one at #12197 and #12331 for
++		 * the first core and at #13311 and #13383 for the second, and
++		 * an open bracket is what lets the close reprogram the adjusted
++		 * power table.
++		 */
++		pwr_ctl = b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
++		gain = b43_nphy_papd_gain_search(dev, 0, core);
++		b43_nphy_pwr_ctl_close(dev, pwr_ctl);
++
++		pwr_ctl = b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
++		b43_nphy_papd_run_one(dev, gain, false, core);
++		b43_nphy_papd_smooth_epsilon(dev, core, 5, 0, 40);
++		b43_nphy_pwr_ctl_close(dev, pwr_ctl);
++
++		b43_nphy_papd_cal_cleanup(dev, &state);
++	}
++
++	/* The comparison shift the setup switched on for the core it was
++	 * calibrating goes off again: what stays on outside the calibration has
++	 * to be the driver's state, not the calibration's.
++	 */
++	b43_phy_mask(dev, B43_NPHY_PAPD_CAL_SHIFTS0, ~0x2000);
++	b43_phy_mask(dev, B43_NPHY_PAPD_CAL_SHIFTS1, ~0x2000);
++
++	b43_phy_write(dev, B43_NPHY_BBCFG, bbcfg);
++	b43_nphy_int_pa_set_tx_dig_filters(dev);
++
++	/* And the transmit chains go back to the index they were on. brcmsmac
++	 * does this at the end of wlc_phy_a4(), one core at a time, when the
++	 * power control was off for the calibration - which on this radio it
++	 * was, because the calibration turned it off itself.
++	 *
++	 * It matters beyond the two gain cells: the next tone saves the
++	 * baseband multiplier before it plays and puts it back after, so
++	 * leaving the calibration's index programmed leaks its multiplier into
++	 * everything downstream.
++	 */
++	if (!nphy->txpwrctrl) {
++		b43_nphy_txpwr_index(dev, 1 << 0,
++				     nphy->txpwrindex[0].index_internal, false);
++		b43_nphy_txpwr_index(dev, 1 << 1,
++				     nphy->txpwrindex[1].index_internal, false);
++	}
++}
++
++/* The offset the PAPD engine applies to the epsilon table. brcmsmac computes it
++ * at the end of its PAPD calibration as
++ *
++ *	offset = -60 + 27 + eps_offset - (padgain_delta[pad_gain] + 1) / 2
++ *
++ * where eps_offset is -1 for this radio in 2 GHz and pad_gain is the index the
++ * PAPD gain search settles on. b43 has no PAPD calibration, so the offset stays
++ * at zero and the engine runs 24 dB off.
++ *
++ * Until the calibration is there, use the index the vendor driver settles on,
++ * which an MMIO capture on a BCM6362 shows to be 15 for both cores: the offset
++ * that comes out, -24, is what it programs.
++ */
++static void b43_nphy_papd_epsilon_offset(struct b43_wldev *dev)
++{
++	struct b43_phy *phy = &dev->phy;
++	struct b43_phy_n *nphy = phy->n;
++	const s16 *delta;
++	int offset, core;
++
++	if (phy->rev != 8 || phy->radio_rev != 8 ||
++	    b43_current_band(dev->wl) != NL80211_BAND_2GHZ)
++		return;
++
++	delta = b43_ntab_get_rf_pwr_offset_table(dev);
++	if (!delta)
++		return;
++
++	offset = -60 + 27 - 1 - (delta[B43_NPHY_PAPD_CAL_PAD_GAIN] + 1) / 2;
++
++	for (core = 0; core < 2; core++)
++		nphy->papd_epsilon_offset[core] = offset;
++}
++
++/* Put both transmit chains on the power control index the calibrations want to
++ * run at, before the gains they aim for are read back. brcmsmac's
++ * wlc_phy_precal_txgain_nphy() for phy rev 7 and up with the internal transmit
++ * IQ/LO calibration.
++ *
++ * The index is 10, and it is not the one the reference would pick here: it keeps
++ * 10 for radio 2057 rev 3, 4 and 6 and 0 for everything else, which puts rev 8
++ * on the 0. The capture reads offset 0xca of the per-core power control table,
++ * which is 192 + 10, so on this radio the vendor driver uses 10. That grouping
++ * in brcmsmac predates this radio, the same way its rccal grouping does, so the
++ * capture decides it and not the grouping.
++ *
++ * The reference also remembers the index here, to hand it back after the
++ * transmit calibrations. b43 has nowhere to hand it back from, so remembering it
++ * would be a write with no reader.
++ */
++static void b43_nphy_precal_txgain(struct b43_wldev *dev)
++{
++	b43_nphy_txpwr_index(dev, 0x3, 10, false);
++}
++
++/* The vendor driver reaches its periodic calibration from the end of the PHY
++ * init, with PHY_PERICAL_PHYINIT, and with no phase pending it runs the whole
++ * sequence in one go: TX IQ/LO, then PAPD, then RX IQ, then the TX power
++ * coefficients, then RSSI. The RSSI one is part of it because the calibration
++ * type is not PHY_PERICAL_AUTO.
++ */
++static void b43_nphy_cal_perical_phyinit(struct b43_wldev *dev,
++					 struct nphy_txgains target)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	struct nphy_txgains cal_target = target;
++	u16 orig_tx_gain[2];
++	bool full;
++	u8 id;
++
++	/* Full or partial is not a constant: brcmsmac calibrates fully when the
++	 * channel is not the one the TX IQ/LO calibration last ran on, and
++	 * partially when it is, which is the same test b43_nphy_restore_cal()
++	 * makes before reusing the coefficients. Passing a constant true made
++	 * every channel look uncalibrated.
++	 *
++	 * The type the RX IQ calibration gets stays 2, the full one. brcmsmac
++	 * asks for 2 on the first calibration after an association and 0
++	 * afterwards, and b43 does not track that: 2 is the conservative half of
++	 * the choice, since 0 skips most of the calibration.
++	 */
++	full = !nphy->txiqlocal_coeffsvalid ||
++	       nphy->txiqlocal_chanspec.center_freq !=
++	       dev->phy.chandef->chan->center_freq ||
++	       nphy->txiqlocal_chanspec.channel_type !=
++	       cfg80211_get_chandef_type(dev->phy.chandef);
++
++	/* The reference runs this as a state machine, one phase per call of
++	 * wlc_phy_cal_perical_nphy_run(): INIT, six TX I/Q LO phases, PAPD, RX
++	 * I/Q, RSSI and idle TSSI. Every one of those calls brackets its phase
++	 * the same way - read the original transmit gain, save the transmit
++	 * power control state and turn it off, run the phase, put the control
++	 * back to what it was - and it is that last step which programs the
++	 * adjusted power table, 84 cells per chain. The capture programs it 36
++	 * times over the window.
++	 *
++	 * The phases run back to back here instead of one per timer tick, which
++	 * is the one thing not reproduced: nothing else in the driver is
++	 * prepared to be interrupted between them.
++	 */
++	nphy->mphase_txcal_cmdidx = 0;
++	nphy->mphase_txcal_numcmds = B43_NPHY_MPHASE_TXCAL_NUMCMDS;
++
++	for (id = B43_NPHY_MPHASE_INIT; id <= B43_NPHY_MPHASE_IDLETSSI; id++) {
++		nphy->mphase_cal_phase_id = id;
++
++		/* The six TX phases are one step here, and the capture is why.
++		 * The reference splits the twelve calibration commands over
++		 * them, two at a time; the capture issues all twelve back to
++		 * back, with a single gain read at #8505 opening the block
++		 * rather than one per phase. Split into six, the calibration
++		 * emits the per-chunk table and coefficient work between them
++		 * and the matched run falls from 428 to 331 in 28 fragments -
++		 * measured both with a bracket around each chunk and without,
++		 * so it is the split and not the bracket.
++		 */
++		if (id > B43_NPHY_MPHASE_TXPHASE0 &&
++		    id <= B43_NPHY_MPHASE_TXPHASE5)
++			continue;
++
++		bool restore_tx_gain = false;
++		bool tx_pwr_ctrl_state;
++
++		tx_pwr_ctrl_state = b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
++		target = b43_nphy_get_tx_gains(dev);
++
++		switch (id) {
++		case B43_NPHY_MPHASE_INIT:
++			b43_nphy_precal_txgain(dev);
++			cal_target = b43_nphy_get_tx_gains(dev);
++			break;
++		case B43_NPHY_MPHASE_TXPHASE0:
++			/* All twelve commands, and the coefficients come out of
++			 * the table at the end of the same call.
++			 */
++			if (b43_nphy_cal_tx_iq_lo(dev, cal_target, full, false))
++				id = B43_NPHY_MPHASE_IDLETSSI;
++			break;
++		case B43_NPHY_MPHASE_PAPDCAL:
++			b43_nphy_papd_cal(dev);
++			break;
++		case B43_NPHY_MPHASE_RXCAL:
++			if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0)
++				b43_nphy_save_cal(dev);
++			break;
++		case B43_NPHY_MPHASE_RSSICAL:
++			b43_nphy_tx_pwr_ctrl_coef_setup(dev);
++			b43_nphy_rssi_cal(dev);
++			b43_radio_2057_vcocal(dev);
++			restore_tx_gain = true;
++			break;
++		case B43_NPHY_MPHASE_IDLETSSI:
++			/* What the reference does on the first calibration
++			 * after an association, which an interface coming up
++			 * is. The power control table lands at #24391.
++			 */
++			b43_nphy_tx_power_ctl_idle_tssi(dev);
++			b43_nphy_tx_power_ctl_setup(dev);
++			break;
++		}
++
++		if (restore_tx_gain && tx_pwr_ctrl_state) {
++			b43_nphy_txpwr_index(dev, 1 << 0,
++					     nphy->cal_orig_pwr_idx[0], false);
++			b43_nphy_txpwr_index(dev, 1 << 1,
++					     nphy->cal_orig_pwr_idx[1], false);
++			nphy->txpwrindex[0].index = -1;
++			nphy->txpwrindex[1].index = -1;
++		}
++
++		b43_nphy_pwr_ctl_close(dev, tx_pwr_ctrl_state);
++	}
++
++	nphy->mphase_cal_phase_id = 0;
++}
++
+ static int b43_phy_initn(struct b43_wldev *dev)
+ {
+ 	struct ssb_sprom *sprom = dev->dev->bus_sprom;
+@@ -6007,6 +7426,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 
+ 	u16 clip[2];
+ 	bool do_cal = false;
++	bool deferred_cal = false;
+ 
+ 	if ((dev->phy.rev >= 3) &&
+ 	   (sprom->boardflags_lo & B43_BFL_EXTLNA) &&
+@@ -6097,6 +7517,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 	}
+ 
+ 	if (b43_nphy_ipa(dev)) {
++		b43_nphy_papd_epsilon_offset(dev);
+ 		b43_phy_set(dev, B43_NPHY_PAPD_EN0, 0x1);
+ 		b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ0, 0x007F,
+ 				nphy->papd_epsilon_offset[0] << 7);
+@@ -6190,14 +7611,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 					    nphy->txpwrindex[0].index_internal;
+ 					nphy->cal_orig_pwr_idx[1] =
+ 					    nphy->txpwrindex[1].index_internal;
+-					/* TODO N PHY Pre Calibrate TX Gain */
++					if (phy->rev == 8 &&
++					    phy->radio_rev == 8)
++						b43_nphy_precal_txgain(dev);
+ 					target = b43_nphy_get_tx_gains(dev);
+ 				}
+-				if (!b43_nphy_cal_tx_iq_lo(dev, target, true, false))
+-					if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0)
++				if (!b43_nphy_cal_tx_iq_lo(dev, target, true,
++							   false)) {
++					b43_nphy_papd_cal(dev);
++					if (b43_nphy_cal_rx_iq(dev, target,
++							       2, 0) == 0)
+ 						b43_nphy_save_cal(dev);
++				}
+ 			} else if (nphy->mphase_cal_phase_id == 0) {
+-				;/* N PHY Periodic Calibration with arg 3 */
++				/* Where wl schedules its periodic calibration,
++				 * through wlc_phy_cal_perical() with
++				 * PHY_PERICAL_PHYINIT. Scheduling is all that
++				 * happens here: it runs at the end of this
++				 * function, see deferred_cal.
++				 */
++				if (phy->rev == 8 && phy->radio_rev == 8)
++					deferred_cal = true;
+ 			}
+ 		} else {
+ 			b43_nphy_restore_cal(dev);
+@@ -6213,6 +7647,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 	if (phy->rev >= 3)
+ 		b43_nphy_spur_workaround(dev);
+ 
++	/* The reference only schedules the calibration above; the multi-phase
++	 * state machine runs it later, with transmit power control already back
++	 * to what it was. That matters and is not cosmetic: every phase of the
++	 * calibration saves the control state, turns it off and restores it,
++	 * and the restore is what programs the adjusted power table. Run where
++	 * it is scheduled, the control is still off, so all eleven restores put
++	 * back an off state and the table is never written.
++	 */
++	if (deferred_cal) {
++		b43_nphy_precal_txgain(dev);
++		target = b43_nphy_get_tx_gains(dev);
++		/* The forced index was only ever there to read those gains
++		 * off: the hardware goes back to what it had, while the
++		 * calibrations keep the gains. The capture hands it back here,
++		 * one core at a time, immediately after the read.
++		 */
++		b43_nphy_txpwr_index(dev, 1 << 0, -1, true);
++		b43_nphy_txpwr_index(dev, 1 << 1, -1, true);
++		b43_nphy_cal_perical_phyinit(dev, target);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -6474,6 +7929,12 @@ static void b43_nphy_op_prepare_structs(struct b43_wldev *dev)
+ 	nphy->perical = 2; /* avoid additional rssi cal on init (like wl) */
+ 	/* 128 can mean disabled-by-default state of TX pwr ctl. Max value is
+ 	 * 0x7f == 127 and we check for 128 when restoring TX pwr ctl. */
++	/* No index is forced on either chain yet, and zero would mean index
++	 * zero rather than none.
++	 */
++	nphy->txpwrindex[0].index = -1;
++	nphy->txpwrindex[1].index = -1;
++
+ 	nphy->tx_pwr_idx[0] = 128;
+ 	nphy->tx_pwr_idx[1] = 128;
+ 
+@@ -6654,6 +8115,63 @@ static void b43_nphy_op_switch_analog(struct b43_wldev *dev, bool on)
+ 	}
+ }
+ 
++/* The measurement the vendor driver takes on every channel it visits, on N-PHY
++ * rev 8: 100 samples of one core and then 100 of the other, inside the same
++ * eight register save and restore that frames b43_nphy_poll_rssi(). It is not
++ * that function - that one interleaves the two cores and reads the calibration's
++ * RSSI registers, which this radio uses too, elsewhere.
++ *
++ * The result goes into nphy->chan_meas and nothing reads it. That is deliberate:
++ * the capture says what is measured and how, and does not say what is computed
++ * from it, so inventing a consumer would be worse than leaving the value there
++ * for the code that identifies it.
++ *
++ * NOTHING CALLS THIS YET, and the call site is a measured question rather than an
++ * open one. Calling it at the end of the channel switch costs 74 operations of
++ * the window that compares an interface coming up against the capture, because
++ * the vendor driver does not take this measurement while bringing the interface
++ * up: it takes it on the channel switches of a scan, after the point that window
++ * ends. So it is not part of switch_channel, and where it does belong is above
++ * the PHY, in the code that drives a scan dwell.
++ */
++static void b43_nphy_rev8_chan_meas(struct b43_wldev *dev)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	static const u16 save_regs[] = {
++		B43_NPHY_AFECTL_OVER1, B43_NPHY_AFECTL_OVER,
++		B43_NPHY_AFECTL_C1, B43_NPHY_AFECTL_C2,
++		B43_NPHY_TXF_40CO_B1S0, B43_NPHY_TXF_40CO_B32S1,
++		B43_NPHY_RFCTL_LUT_TRSW_UP1, B43_NPHY_RFCTL_LUT_TRSW_UP2,
++	};
++	static const u16 meas_regs[] = {
++		B43_NPHY_REV8_MEAS_C1, B43_NPHY_REV8_MEAS_C2,
++	};
++	u16 saved[ARRAY_SIZE(save_regs)];
++	s32 buf[4] = { 0 };
++	unsigned int i, core;
++	u16 val;
++
++	for (i = 0; i < ARRAY_SIZE(save_regs); i++)
++		saved[i] = b43_phy_read(dev, save_regs[i]);
++
++	b43_nphy_rssi_select(dev, 5, N_RSSI_NB);
++
++	for (core = 0; core < ARRAY_SIZE(meas_regs); core++) {
++		for (i = 0; i < 100; i++) {
++			val = b43_phy_read(dev, meas_regs[core]);
++			buf[2 * core] += ((s8)((val & 0x3F) << 2)) >> 2;
++			buf[2 * core + 1] +=
++				((s8)(((val >> 8) & 0x3F) << 2)) >> 2;
++		}
++	}
++
++	nphy->chan_meas = (buf[0] & 0xFF) << 24 | (buf[1] & 0xFF) << 16 |
++			  (buf[2] & 0xFF) << 8 | (buf[3] & 0xFF);
++
++	for (i = 0; i < ARRAY_SIZE(save_regs); i++)
++		b43_phy_write(dev, save_regs[i], saved[i]);
++}
++
+ static int b43_nphy_op_switch_channel(struct b43_wldev *dev,
+ 				      unsigned int new_channel)
+ {
+diff --git a/drivers/net/wireless/broadcom/b43/phy_n.h b/drivers/net/wireless/broadcom/b43/phy_n.h
+index b96ded0ef..6c1244680 100644
+--- a/drivers/net/wireless/broadcom/b43/phy_n.h
++++ b/drivers/net/wireless/broadcom/b43/phy_n.h
+@@ -604,6 +604,15 @@
+ #define B43_NPHY_DSSSCCK_GAINSL			B43_PHY_N(0x1C8) /* DSSS/CCK gain settle length */
+ #define B43_NPHY_GPIO_LOOUT			B43_PHY_N(0x1C9) /* GPIO low out */
+ #define B43_NPHY_GPIO_HIOUT			B43_PHY_N(0x1CA) /* GPIO high out */
++/* The same two addresses carry a per-core measurement readback on N-PHY rev 8,
++ * not an output latch: in an MMIO capture of wl 6.30.102.7 on a BCM6362 they are
++ * read 3400 times in 70796 records and written zero times, and what comes back
++ * is a pair of sign-extended 6 bit fields, one of them noise around zero. The
++ * RSSI readback of the calibration is elsewhere and is used as well, 0x219 and
++ * 0x21A below, 648 reads in the same capture.
++ */
++#define B43_NPHY_REV8_MEAS_C1			B43_PHY_N(0x1C9) /* Measurement core 1 */
++#define B43_NPHY_REV8_MEAS_C2			B43_PHY_N(0x1CA) /* Measurement core 2 */
+ #define B43_NPHY_CRS_CHECK			B43_PHY_N(0x1CB) /* CRS check */
+ #define B43_NPHY_ML_LOGSS_RAT			B43_PHY_N(0x1CC) /* ML/logss ratio */
+ #define B43_NPHY_DUPSCALE			B43_PHY_N(0x1CD) /* Dup scale */
+@@ -835,6 +844,11 @@
+ #define B43_NPHY_RADAR_T2_MIN			B43_PHY_N(0x295)
+ #define B43_NPHY_TXPWRCTRLDAMPING		B43_PHY_N(0x296)
+ #define B43_NPHY_PAPD_EN0			B43_PHY_N(0x297) /* PAPD Enable0 TBD */
++/* Pad gain index the PAPD gain search settles on, from a capture of the vendor
++ * driver on radio 2057 rev 8 in 2.4 GHz. Placeholder for the search itself.
++ */
++#define B43_NPHY_PAPD_CAL_PAD_GAIN		15
++
+ #define B43_NPHY_EPS_TABLE_ADJ0			B43_PHY_N(0x298) /* EPS Table Adj0 TBD */
+ #define B43_NPHY_EPS_OVERRIDEI_0		B43_PHY_N(0x299)
+ #define B43_NPHY_EPS_OVERRIDEQ_0		B43_PHY_N(0x29A)
+@@ -932,6 +946,11 @@ struct b43_phy_n_pwr_ctl_info {
+ };
+ 
+ struct b43_phy_n {
++	/* The per-core measurement the channel switch takes, four sign-extended
++	 * 6 bit fields packed as the RSSI poll packs them. What the vendor
++	 * driver computes from it is not known, so nothing acts on it yet.
++	 */
++	s32 chan_meas;
+ 	u8 antsel_type;
+ 	u8 cal_orig_pwr_idx[2];
+ 	u8 measure_hold;
+@@ -974,7 +993,11 @@ struct b43_phy_n {
+ 	int tx_pwr_last_recalc_limit;
+ 
+ 	u8 txrx_chain;
+-	u16 tx_rx_cal_phy_saveregs[11];
++	/* The RX IQ calibration on N-PHY rev 7 and up saves four more PHY
++	 * registers than the earlier revisions - 0x342, 0x343, 0x346 and 0x347,
++	 * the RF control override enables - at indices 11 to 14.
++	 */
++	u16 tx_rx_cal_phy_saveregs[15];
+ 	u16 tx_rx_cal_radio_saveregs[22];
+ 
+ 	u16 rfctrl_intc1_save;
+diff --git a/drivers/net/wireless/broadcom/b43/ppr.c b/drivers/net/wireless/broadcom/b43/ppr.c
+index 26514cc3a..5bf4d779f 100644
+--- a/drivers/net/wireless/broadcom/b43/ppr.c
++++ b/drivers/net/wireless/broadcom/b43/ppr.c
+@@ -32,6 +32,23 @@ void b43_ppr_add(struct b43_wldev *dev, struct b43_ppr *ppr, int diff)
+ 	}
+ }
+ 
++/* Come b43_ppr_apply_max() ma su un gruppo solo di rate.
++ *
++ * Serve perche' il limite non e' uno: i gruppi che usano due catene - CDD, STBC
++ * e SDM - hanno bisogno di piu' arretramento degli stessi rate a una catena, e la
++ * differenza e' del PA, non del regolatore. brcmsmac ha la stessa forma in
++ * wlc_phy_txpwr_nphy_po_apply(), che lavora su un intervallo di rate.
++ */
++void b43_ppr_apply_max_group(struct b43_wldev *dev, u8 *rates, unsigned int num,
++			     u8 max)
++{
++	unsigned int i;
++
++	for (i = 0; i < num; i++)
++		if (rates[i] > max)
++			rates[i] = max;
++}
++
+ void b43_ppr_apply_max(struct b43_wldev *dev, struct b43_ppr *ppr, u8 max)
+ {
+ 	int i;
+diff --git a/drivers/net/wireless/broadcom/b43/ppr.h b/drivers/net/wireless/broadcom/b43/ppr.h
+index 094389f9f..682a2979c 100644
+--- a/drivers/net/wireless/broadcom/b43/ppr.h
++++ b/drivers/net/wireless/broadcom/b43/ppr.h
+@@ -37,6 +37,8 @@ void b43_ppr_clear(struct b43_wldev *dev, struct b43_ppr *ppr);
+ 
+ void b43_ppr_add(struct b43_wldev *dev, struct b43_ppr *ppr, int diff);
+ void b43_ppr_apply_max(struct b43_wldev *dev, struct b43_ppr *ppr, u8 max);
++void b43_ppr_apply_max_group(struct b43_wldev *dev, u8 *rates, unsigned int num,
++			     u8 max);
+ void b43_ppr_apply_min(struct b43_wldev *dev, struct b43_ppr *ppr, u8 min);
+ u8 b43_ppr_get_max(struct b43_wldev *dev, struct b43_ppr *ppr);
+ 
+diff --git a/drivers/net/wireless/broadcom/b43/radio_2057.c b/drivers/net/wireless/broadcom/b43/radio_2057.c
+index e761f899b..2e88dd925 100644
+--- a/drivers/net/wireless/broadcom/b43/radio_2057.c
++++ b/drivers/net/wireless/broadcom/b43/radio_2057.c
+@@ -73,111 +73,18 @@ static u16 r2057_rev7_init[][2] = {
+ 	{ 0x1B7, 0x05 }, { 0x1C2, 0xa0 },
+ };
+ 
+-/* Extracted from MMIO dump of 6.30.102.7 */
++/* Extracted from the blob's regs_2057_rev8: the entries it flags for init */
+ static u16 r2057_rev8_init[][2] = {
+-	{ 0x0000, 0x0008 }, { 0x0001, 0x0057 }, { 0x0002, 0x0020 }, { 0x0003, 0x001f },
+-	{ 0x0004, 0x0004 }, { 0x0005, 0x0002 }, { 0x0006, 0x0001 }, { 0x0007, 0x0001 },
+-	{ 0x0008, 0x0001 }, { 0x0009, 0x0069 }, { 0x000a, 0x0066 }, { 0x000b, 0x0006 },
+-	{ 0x000c, 0x0018 }, { 0x000d, 0x0003 }, { 0x000e, 0x0020 }, { 0x000f, 0x0020 },
+-	{ 0x0010, 0x0000 }, { 0x0011, 0x007c }, { 0x0012, 0x0042 }, { 0x0013, 0x00bd },
+-	{ 0x0014, 0x0007 }, { 0x0015, 0x0087 }, { 0x0016, 0x0008 }, { 0x0017, 0x0017 },
+-	{ 0x0018, 0x0007 }, { 0x0019, 0x0000 }, { 0x001a, 0x0002 }, { 0x001b, 0x0013 },
+-	{ 0x001c, 0x003e }, { 0x001d, 0x003e }, { 0x001e, 0x0096 }, { 0x001f, 0x0004 },
+-	{ 0x0020, 0x0000 }, { 0x0021, 0x0000 }, { 0x0022, 0x0017 }, { 0x0023, 0x0006 },
+-	{ 0x0024, 0x0001 }, { 0x0025, 0x0006 }, { 0x0026, 0x0004 }, { 0x0027, 0x000d },
+-	{ 0x0028, 0x000d }, { 0x0029, 0x0030 }, { 0x002a, 0x0032 }, { 0x002b, 0x0008 },
+-	{ 0x002c, 0x001c }, { 0x002d, 0x0002 }, { 0x002e, 0x0004 }, { 0x002f, 0x007f },
+-	{ 0x0030, 0x0027 }, { 0x0031, 0x0000 }, { 0x0032, 0x0000 }, { 0x0033, 0x0000 },
+-	{ 0x0034, 0x0000 }, { 0x0035, 0x0020 }, { 0x0036, 0x0018 }, { 0x0037, 0x0007 },
+-	{ 0x0038, 0x0066 }, { 0x0039, 0x0066 }, { 0x003a, 0x0066 }, { 0x003b, 0x0066 },
+-	{ 0x003c, 0x00ff }, { 0x003d, 0x00ff }, { 0x003e, 0x00ff }, { 0x003f, 0x00ff },
+-	{ 0x0040, 0x0016 }, { 0x0041, 0x0007 }, { 0x0042, 0x0029 }, { 0x0043, 0x0007 },
+-	{ 0x0044, 0x0006 }, { 0x0045, 0x0003 }, { 0x0046, 0x0001 }, { 0x0047, 0x0007 },
+-	{ 0x0048, 0x0088 }, { 0x0049, 0x0005 }, { 0x004a, 0x0077 }, { 0x004b, 0x0066 },
+-	{ 0x004c, 0x0066 }, { 0x004d, 0x0000 }, { 0x004e, 0x0004 }, { 0x004f, 0x000c },
+-	{ 0x0050, 0x0000 }, { 0x0051, 0x0070 }, { 0x0056, 0x0007 }, { 0x0057, 0x0000 },
+-	{ 0x0058, 0x0000 }, { 0x0059, 0x0088 }, { 0x005a, 0x0000 }, { 0x005b, 0x001f },
+-	{ 0x005c, 0x0020 }, { 0x005d, 0x0001 }, { 0x005e, 0x0030 }, { 0x005f, 0x0070 },
+-	{ 0x0060, 0x0000 }, { 0x0061, 0x0000 }, { 0x0062, 0x0033 }, { 0x0063, 0x000f },
+-	{ 0x0064, 0x0013 }, { 0x0065, 0x0000 }, { 0x0066, 0x00ee }, { 0x0069, 0x0000 },
+-	{ 0x006a, 0x007e }, { 0x006b, 0x003f }, { 0x006c, 0x007f }, { 0x006d, 0x0078 },
+-	{ 0x006e, 0x0058 }, { 0x006f, 0x0088 }, { 0x0070, 0x0008 }, { 0x0071, 0x000f },
+-	{ 0x0072, 0x00bc }, { 0x0073, 0x0008 }, { 0x0074, 0x0060 }, { 0x0075, 0x001a },
+-	{ 0x0076, 0x0070 }, { 0x0077, 0x0000 }, { 0x0078, 0x0000 }, { 0x0079, 0x0000 },
+-	{ 0x007a, 0x0033 }, { 0x007b, 0x001a }, { 0x007c, 0x0014 }, { 0x007d, 0x00ee },
+-	{ 0x0080, 0x003c }, { 0x0081, 0x0001 }, { 0x0082, 0x000a }, { 0x0083, 0x009d },
+-	{ 0x0084, 0x000a }, { 0x0085, 0x0000 }, { 0x0086, 0x0040 }, { 0x0087, 0x0040 },
+-	{ 0x0088, 0x0088 }, { 0x0089, 0x0010 }, { 0x008a, 0x00f0 }, { 0x008b, 0x0010 },
+-	{ 0x008c, 0x00f0 }, { 0x008d, 0x0000 }, { 0x008e, 0x0000 }, { 0x008f, 0x0010 },
+-	{ 0x0090, 0x0055 }, { 0x0091, 0x003f }, { 0x0092, 0x0036 }, { 0x0093, 0x0000 },
+-	{ 0x0094, 0x0000 }, { 0x0095, 0x0000 }, { 0x0096, 0x0087 }, { 0x0097, 0x0011 },
+-	{ 0x0098, 0x0000 }, { 0x0099, 0x0033 }, { 0x009a, 0x0088 }, { 0x009b, 0x0000 },
+-	{ 0x009c, 0x0087 }, { 0x009d, 0x0011 }, { 0x009e, 0x0000 }, { 0x009f, 0x0033 },
+-	{ 0x00a0, 0x0088 }, { 0x00a1, 0x0020 }, { 0x00a2, 0x003f }, { 0x00a3, 0x0044 },
+-	{ 0x00a4, 0x008c }, { 0x00a5, 0x006c }, { 0x00a6, 0x0022 }, { 0x00a7, 0x00be },
+-	{ 0x00a8, 0x0055 }, { 0x00aa, 0x000c }, { 0x00ab, 0x00aa }, { 0x00ac, 0x0002 },
+-	{ 0x00ad, 0x0000 }, { 0x00ae, 0x0010 }, { 0x00af, 0x0001 }, { 0x00b0, 0x0000 },
+-	{ 0x00b1, 0x0000 }, { 0x00b2, 0x0080 }, { 0x00b3, 0x0060 }, { 0x00b4, 0x0044 },
+-	{ 0x00b5, 0x0055 }, { 0x00b6, 0x0001 }, { 0x00b7, 0x0055 }, { 0x00b8, 0x0001 },
+-	{ 0x00b9, 0x0005 }, { 0x00ba, 0x0055 }, { 0x00bb, 0x0055 }, { 0x00c1, 0x0000 },
+-	{ 0x00c2, 0x0000 }, { 0x00c3, 0x0000 }, { 0x00c4, 0x0000 }, { 0x00c5, 0x0000 },
+-	{ 0x00c6, 0x0000 }, { 0x00c7, 0x0000 }, { 0x00c8, 0x0000 }, { 0x00c9, 0x0001 },
+-	{ 0x00ca, 0x0000 }, { 0x00cb, 0x0000 }, { 0x00cc, 0x0000 }, { 0x00cd, 0x0000 },
+-	{ 0x00ce, 0x005e }, { 0x00cf, 0x000c }, { 0x00d0, 0x000c }, { 0x00d1, 0x000c },
+-	{ 0x00d2, 0x0000 }, { 0x00d3, 0x002b }, { 0x00d4, 0x000c }, { 0x00d5, 0x0000 },
+-	{ 0x00d6, 0x0070 }, { 0x00db, 0x0007 }, { 0x00dc, 0x0000 }, { 0x00dd, 0x0000 },
+-	{ 0x00de, 0x0088 }, { 0x00df, 0x0000 }, { 0x00e0, 0x001f }, { 0x00e1, 0x0020 },
+-	{ 0x00e2, 0x0001 }, { 0x00e3, 0x0030 }, { 0x00e4, 0x0070 }, { 0x00e5, 0x0000 },
+-	{ 0x00e6, 0x0000 }, { 0x00e7, 0x0033 }, { 0x00e8, 0x000f }, { 0x00e9, 0x0013 },
+-	{ 0x00ea, 0x0000 }, { 0x00eb, 0x00ee }, { 0x00ee, 0x0000 }, { 0x00ef, 0x007e },
+-	{ 0x00f0, 0x003f }, { 0x00f1, 0x007f }, { 0x00f2, 0x0078 }, { 0x00f3, 0x0058 },
+-	{ 0x00f4, 0x0088 }, { 0x00f5, 0x0008 }, { 0x00f6, 0x000f }, { 0x00f7, 0x00bc },
+-	{ 0x00f8, 0x0008 }, { 0x00f9, 0x0060 }, { 0x00fa, 0x001a }, { 0x00fb, 0x0070 },
+-	{ 0x00fc, 0x0000 }, { 0x00fd, 0x0000 }, { 0x00fe, 0x0000 }, { 0x00ff, 0x0033 },
+-	{ 0x0100, 0x001a }, { 0x0101, 0x0014 }, { 0x0102, 0x00ee }, { 0x0105, 0x003c },
+-	{ 0x0106, 0x0001 }, { 0x0107, 0x000a }, { 0x0108, 0x009d }, { 0x0109, 0x000a },
+-	{ 0x010a, 0x0000 }, { 0x010b, 0x0040 }, { 0x010c, 0x0040 }, { 0x010d, 0x0088 },
+-	{ 0x010e, 0x0010 }, { 0x010f, 0x00f0 }, { 0x0110, 0x0010 }, { 0x0111, 0x00f0 },
+-	{ 0x0112, 0x0000 }, { 0x0113, 0x0000 }, { 0x0114, 0x0010 }, { 0x0115, 0x0055 },
+-	{ 0x0116, 0x003f }, { 0x0117, 0x0036 }, { 0x0118, 0x0000 }, { 0x0119, 0x0000 },
+-	{ 0x011a, 0x0000 }, { 0x011b, 0x0087 }, { 0x011c, 0x0011 }, { 0x011d, 0x0000 },
+-	{ 0x011e, 0x0033 }, { 0x011f, 0x0088 }, { 0x0120, 0x0000 }, { 0x0121, 0x0087 },
+-	{ 0x0122, 0x0011 }, { 0x0123, 0x0000 }, { 0x0124, 0x0033 }, { 0x0125, 0x0088 },
+-	{ 0x0126, 0x0020 }, { 0x0127, 0x003f }, { 0x0128, 0x0044 }, { 0x0129, 0x008c },
+-	{ 0x012a, 0x006c }, { 0x012b, 0x0022 }, { 0x012c, 0x00be }, { 0x012d, 0x0055 },
+-	{ 0x012f, 0x000c }, { 0x0130, 0x00aa }, { 0x0131, 0x0002 }, { 0x0132, 0x0000 },
+-	{ 0x0133, 0x0010 }, { 0x0134, 0x0001 }, { 0x0135, 0x0000 }, { 0x0136, 0x0000 },
+-	{ 0x0137, 0x0080 }, { 0x0138, 0x0060 }, { 0x0139, 0x0044 }, { 0x013a, 0x0055 },
+-	{ 0x013b, 0x0001 }, { 0x013c, 0x0055 }, { 0x013d, 0x0001 }, { 0x013e, 0x0005 },
+-	{ 0x013f, 0x0055 }, { 0x0140, 0x0055 }, { 0x0146, 0x0000 }, { 0x0147, 0x0000 },
+-	{ 0x0148, 0x0000 }, { 0x0149, 0x0000 }, { 0x014a, 0x0000 }, { 0x014b, 0x0000 },
+-	{ 0x014c, 0x0000 }, { 0x014d, 0x0000 }, { 0x014e, 0x0001 }, { 0x014f, 0x0000 },
+-	{ 0x0150, 0x0000 }, { 0x0151, 0x0000 }, { 0x0154, 0x000c }, { 0x0155, 0x000c },
+-	{ 0x0156, 0x000c }, { 0x0157, 0x0000 }, { 0x0158, 0x002b }, { 0x0159, 0x0084 },
+-	{ 0x015a, 0x0015 }, { 0x015b, 0x000f }, { 0x015c, 0x0000 }, { 0x015d, 0x0000 },
+-	{ 0x015e, 0x0000 }, { 0x015f, 0x0000 }, { 0x0160, 0x0000 }, { 0x0161, 0x0000 },
+-	{ 0x0162, 0x0000 }, { 0x0163, 0x0000 }, { 0x0164, 0x0000 }, { 0x0165, 0x0000 },
+-	{ 0x0166, 0x0000 }, { 0x0167, 0x0000 }, { 0x0168, 0x0000 }, { 0x0169, 0x0000 },
+-	{ 0x016a, 0x0000 }, { 0x016b, 0x0000 }, { 0x016c, 0x0000 }, { 0x016d, 0x0000 },
+-	{ 0x0170, 0x0000 }, { 0x0171, 0x0077 }, { 0x0172, 0x0077 }, { 0x0173, 0x0077 },
+-	{ 0x0174, 0x0077 }, { 0x0175, 0x0000 }, { 0x0176, 0x0003 }, { 0x0177, 0x0037 },
+-	{ 0x0178, 0x0003 }, { 0x0179, 0x0000 }, { 0x017a, 0x0021 }, { 0x017b, 0x0002 },
+-	{ 0x017c, 0x0000 }, { 0x017d, 0x00aa }, { 0x017e, 0x0000 }, { 0x017f, 0x00aa },
+-	{ 0x0180, 0x0000 }, { 0x0190, 0x0000 }, { 0x0191, 0x0077 }, { 0x0192, 0x0077 },
+-	{ 0x0193, 0x0077 }, { 0x0194, 0x0077 }, { 0x0195, 0x0000 }, { 0x0196, 0x0003 },
+-	{ 0x0197, 0x0037 }, { 0x0198, 0x0003 }, { 0x0199, 0x0000 }, { 0x019a, 0x0021 },
+-	{ 0x019b, 0x0002 }, { 0x019c, 0x0000 }, { 0x019d, 0x00aa }, { 0x019e, 0x0000 },
+-	{ 0x019f, 0x00aa }, { 0x01a0, 0x0000 }, { 0x01a1, 0x0002 }, { 0x01a2, 0x000f },
+-	{ 0x01a3, 0x000f }, { 0x01a4, 0x0000 }, { 0x01a5, 0x0000 }, { 0x01a6, 0x0000 },
+-	{ 0x01a7, 0x0002 }, { 0x01a8, 0x000f }, { 0x01a9, 0x000f }, { 0x01aa, 0x0000 },
+-	{ 0x01ab, 0x0000 }, { 0x01ac, 0x0000 }, { 0x01ad, 0x0084 }, { 0x01ae, 0x0060 },
+-	{ 0x01af, 0x0047 }, { 0x01b0, 0x0047 }, { 0x01b1, 0x0000 }, { 0x01b2, 0x0000 },
+-	{ 0x01b3, 0x0000 }, { 0x01b4, 0x0000 }, { 0x01b5, 0x0000 }, { 0x01b6, 0x0000 },
+-	{ 0x01b7, 0x0005 }, { 0x01b8, 0x0000 }, { 0x01b9, 0x0000 }, { 0x01ba, 0x0000 },
+-	{ 0x01bb, 0x0000 }, { 0x01bc, 0x0000 }, { 0x01bd, 0x0000 }, { 0x01be, 0x0000 },
+-	{ 0x01bf, 0x0000 }, { 0x01c0, 0x0000 }, { 0x01c1, 0x0000 }, { 0x01c2, 0x00a0 },
+-	{ 0x01c3, 0x0000 }, { 0x01c4, 0x0000 }, { 0x01c5, 0x0000 }, { 0x01c6, 0x0000 },
+-	{ 0x01c7, 0x0000 }, { 0x01c8, 0x0000 }, { 0x01c9, 0x0000 }, { 0x01ca, 0x0000 },
++	{ 0x0042, 0x0029 }, { 0x0048, 0x0088 }, { 0x0051, 0x0070 }, { 0x0059, 0x0088 },
++	{ 0x005c, 0x0020 }, { 0x0062, 0x0033 }, { 0x0063, 0x000f }, { 0x0064, 0x0013 },
++	{ 0x0066, 0x00ee }, { 0x006e, 0x0058 }, { 0x0075, 0x001a }, { 0x007b, 0x001a },
++	{ 0x007c, 0x0014 }, { 0x007d, 0x00ee }, { 0x0081, 0x0001 }, { 0x0091, 0x003f },
++	{ 0x0092, 0x0036 }, { 0x00a1, 0x0020 }, { 0x00c9, 0x0001 }, { 0x00d6, 0x0070 },
++	{ 0x00de, 0x0088 }, { 0x00e1, 0x0020 }, { 0x00e8, 0x000f }, { 0x00e9, 0x0013 },
++	{ 0x00eb, 0x00ee }, { 0x00f3, 0x0058 }, { 0x00fa, 0x001a }, { 0x0100, 0x001a },
++	{ 0x0101, 0x0014 }, { 0x0102, 0x00ee }, { 0x0106, 0x0001 }, { 0x0116, 0x003f },
++	{ 0x0117, 0x0036 }, { 0x0126, 0x0020 }, { 0x014e, 0x0001 }, { 0x017b, 0x0002 },
++	{ 0x019b, 0x0002 }, { 0x01b7, 0x0005 }, { 0x01c2, 0x00a0 },
+ };
+ 
+ /* Extracted from MMIO dump of 6.30.223.141 */
+diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.c b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+index 22da74136..258762d32 100644
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
+@@ -2928,14 +2928,36 @@ static const s16 b43_ntab_rf_pwr_offset_2057_rev9_5g[] = {
+  * PAD-gain selector byte differs), so the same gain index maps to
+  * the same physical PAD gain code on both revisions.
+  */
++/* PAPD scalar lookup, common to the N-PHY revisions that have PAPD.
++ * Same values brcmsmac writes from nphy_papd_scaltbl.
++ */
++const u32 b43_ntab_papd_scaltbl[] = {
++	0x0ae2002f, 0x0a3b0032, 0x09a70035, 0x09220038,
++	0x0887003c, 0x081f003f, 0x07a20043, 0x07340047,
++	0x06d2004b, 0x067a004f, 0x06170054, 0x05bf0059,
++	0x0571005e, 0x051e0064, 0x04d3006a, 0x04910070,
++	0x044c0077, 0x040f007e, 0x03d90085, 0x03a1008d,
++	0x036f0095, 0x033d009e, 0x030b00a8, 0x02e000b2,
++	0x02b900bc, 0x029200c7, 0x026d00d3, 0x024900e0,
++	0x022900ed, 0x020a00fb, 0x01ec010a, 0x01d0011a,
++	0x01b7012a, 0x019e013c, 0x0187014f, 0x01720162,
++	0x015d0177, 0x0149018e, 0x013701a5, 0x012601be,
++	0x011501d9, 0x010501f5, 0x00f70212, 0x00e90232,
++	0x00dc0253, 0x00d00276, 0x00c4029c, 0x00b902c3,
++	0x00af02ed, 0x00a5031a, 0x009c0349, 0x0093037a,
++	0x008b03af, 0x008303e7, 0x007c0422, 0x00750461,
++	0x006e04a3, 0x006804ea, 0x00620534, 0x005d0583,
++	0x005805d7, 0x0053062f, 0x004e068d, 0x004a06f1,
++};
++
+ static const s16 b43_ntab_rf_pwr_offset_2057_rev8_2g[] = {
+-	-109, -109, -82, -68, -58,
+-	-50,  -44, -39, -35, -31,
+-	-28,  -26, -23, -21, -19,
+-	-17,  -16, -14, -13, -11,
+-	-10,   -9,  -8,  -7,  -5,
+-	 -5,   -4,  -3,  -2,  -1,
+-	 -1,    0,
++	-122, -122,  -95,  -80,  -69,
++	 -61,  -54,  -49,  -43,  -39,
++	 -35,  -32,  -28,  -26,  -23,
++	 -21,  -18,  -16,  -15,  -13,
++	 -11,  -10,   -8,   -7,   -6,
++	  -5,   -4,   -3,   -2,   -1,
++	  -1,    0,
+ };
+ 
+ /* Extracted from MMIO dump of 6.30.223.248
+@@ -3184,6 +3206,7 @@ static const struct nphy_rf_control_override_rev7
+ 	{ 0x0040, 0x07A, 0x07D, 0x0040, 6 },
+ 	{ 0x0080, 0x07A, 0x07D, 0x0080, 7 },
+ 	{ 0x0400, 0x0F8, 0x0FA, 0x0070, 4 },
++	/* TODO: unused field, the vendor writes 0x07B/0x07E during cal */
+ 	{ 0x0800, 0x07B, 0x07E, 0xFFFF, 0 },
+ 	{ 0x1000, 0x07C, 0x07F, 0xFFFF, 0 },
+ 	{ 0x6000, 0x348, 0x349, 0x00FF, 0 },
+diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.h b/drivers/net/wireless/broadcom/b43/tables_nphy.h
+index 3876786d2..73b62887a 100644
+--- a/drivers/net/wireless/broadcom/b43/tables_nphy.h
++++ b/drivers/net/wireless/broadcom/b43/tables_nphy.h
+@@ -195,6 +195,7 @@ const u32 *b43_nphy_get_tx_gain_table(struct b43_wldev *dev);
+ const s16 *b43_ntab_get_rf_pwr_offset_table(struct b43_wldev *dev);
+ 
+ extern const s8 b43_ntab_papd_pga_gain_delta_ipa_2g[];
++extern const u32 b43_ntab_papd_scaltbl[];
+ 
+ extern const u16 tbl_iqcal_gainparams[2][9][8];
+ extern const struct nphy_txiqcal_ladder ladder_lo[];

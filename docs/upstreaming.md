@@ -71,18 +71,19 @@ dentro `b43_nphy_op_prepare_structs` la becca.
 ./reverse-tools/check_patch_gating.py --tree ~/src/linux patches/b43/*.patch
 ```
 
-Con l'albero pulito quel comando **non valuta 0009 e 0012**: le due hanno bisogno
-della loro catena (0002 -> 0004 -> 0009) e lo strumento le liquida con
-`(patch non applicabile)`, che il contatore finale non conta. Per averne il
-verdetto si applicano prima le dipendenze:
+Finche' la serie sta nel rollup il verdetto e' **uno per tutto il rollup**, e si
+prende sopra le mainline, non sull'albero pulito — sull'albero pulito lo strumento
+lo liquida con `(patch non applicabile)`, che il contatore finale non conta:
 
 ```sh
-cd ~/src/linux && for n in 0002 0004; do git apply .../patches/b43/$n-*.patch; done
-check_patch_gating.py --tree ~/src/linux patches/b43/0009-*.patch   # poi 0009 per 0012
+cd ~/src/linux && for p in .../patches/mainline/*.patch; do git apply "$p"; done
+check_patch_gating.py --tree ~/src/linux .../patches/b43/rollup.diff
 ```
 
-Cosi' fatto: `0009` e `0012` aggiungono ciascuna una funzione nuova piu' una riga
-in `b43_phy_initn`, dentro `if ((dev->phy.rev >= 3) && ...`.
+Da' **tre** punti non gateati, tutti e tre dichiarati in testa a `rollup.diff`:
+`b43_radio_2057_setup`, `b43_nphy_op_prepare_structs`, `b43_ppr_add`. Il verdetto
+per patch torna con la ri-divisione; la catena di dipendenze che serve a rifarlo
+(`0002 -> 0004 -> 0009`, e `0012` dietro `0009`) sta in `CLAUDE.md`.
 
 ## Non proponibile ora: HT
 

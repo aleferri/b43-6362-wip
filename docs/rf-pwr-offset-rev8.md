@@ -3,7 +3,7 @@
 **Chiusa dalla cattura: i valori in mainline sono sbagliati.** Ricalcolando dalla
 cattura le 128 celle che quella tabella alimenta, i valori rev 7 le predicono
 tutte e 128, quelli in tree ne predicono 5. La correzione è
-`patches/b43/0002`, e `patches/b43/0003` abilita il percorso che le scrive.
+`patches/b43/MESSAGES.md#0002`, e `#0003` abilita il percorso che le scrive.
 
 Sotto resta la storia, perché il modo in cui si è chiusa è più istruttivo del
 risultato: non con una misura di potenza in laboratorio, ma ricalcolando dal

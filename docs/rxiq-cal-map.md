@@ -111,7 +111,7 @@ poi ogni iterazione ha il suo tono, ed e' il `cal RX IQ, sweep di gain`
 
 ## Cosa e' portato, e cosa no
 
-`patches/b43/0018`: il guscio di `wlc_phy_cal_rxiq_nphy_rev3`,
+`patches/b43/MESSAGES.md#0018`: il guscio di `wlc_phy_cal_rxiq_nphy_rev3`,
 `b43_nphy_txpwr_index()` e lo sweep. `up-ch1` da 5791 a **11552 op su 22951**, tre
 iterazioni per core come la cattura, ognuna come run di 85, 103, 85 e 420 op
 appaiate; `0019` (gain di pre-calibrazione) e `0020` (indice di potenza rimesso dopo la cal

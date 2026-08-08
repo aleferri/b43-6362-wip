@@ -18,7 +18,7 @@ sono confronti veri; le altre sono ancora lettura a mano del codice.
 | chantab, campi 5 GHz | 10 `RAD.WR` a 0 | **0** | **assenti nel port**, confermato dall'harness | voce aperta, `docs/trace-init-2g.md` |
 | `b43_radio_2057_setup`, loopfilter | nessuna scrittura extra | — | ok | i valori arrivano dalla chantab |
 | `b43_nphy_gain_ctl_workarounds_rev7`, mainline | 21 op | **0** | stub vuoto | non scrive niente |
-| la stessa, con `patches/b43/0001` | 21 op | **21** | **match posizionale, payload inclusi** | 8 table-op con valori identici |
+| la stessa, con `patches/b43/MESSAGES.md#0001` | 21 op | **21** | **match posizionale, payload inclusi** | 8 table-op con valori identici |
 | workaround AFE (tbl 8) | 4 `TBL.WR` | — | da verificare | tabella 8 = AFECTRL, altro workaround |
 | `si_pmu_spuravoid` | 0 record | — | — | il vendore non lo chiama su questo SoC |
 
@@ -105,11 +105,11 @@ inizializza `0004`.
 - [x] harness del port esistente e confrontabile con `test/compare.py`
 - [x] piani di lettura dai `RETVAL` della cattura — fatti, e misurato che non
       spostano la copertura: il residuo è strutturale
-- [x] tabelle 26 e 27: erano l'early return del percorso PAPD, `patches/b43/0003`
+- [x] tabelle 26 e 27: erano l'early return del percorso PAPD, `patches/b43/MESSAGES.md#0003`
 - [x] tabelle 31, 32, 33, 34: epsilon e scalare del PAPD, mai inizializzate,
-      `patches/b43/0004`
+      `patches/b43/MESSAGES.md#0004`
 - [x] le tre voci che il port tocca e il vendore no: una era un bug
-      (`patches/b43/0005`), una non era confrontabile (object memory), una era
+      (`patches/b43/MESSAGES.md#0005`), una non era confrontabile (object memory), una era
       un artefatto dell'harness
 - [ ] attribuire i 28 registri PHY ancora scoperti (0x9a-0x9d, 0x129-0x12b,
       0x1df, 0x1e1 e altri) e i quattro radio, che sono i `TXRXCOUPLE_2G` del

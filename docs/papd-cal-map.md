@@ -19,7 +19,7 @@ Regione del primo init: **#10962 - #14092**, ~3100 record.
 | record | cosa | dove sta in brcmsmac |
 |---|---|---|
 | #10962-10965 | ingresso: `0x1e7` and, array di workaround, `0x8f`/`0xa5` or | `wlc_phy_a4`, stay-in-carriersearch e txpwrctrl off |
-| #10966-11225 | tabella scalare su 32 e 34, 64 valori per core | `wlc_phy_a4`, già portata da `patches/b43/0004` |
+| #10966-11225 | tabella scalare su 32 e 34, 64 valori per core | `wlc_phy_a4`, già portata da `patches/b43/MESSAGES.md#0004` |
 | #11226-11228 | RD `0x01`, MOD `0x01` bit 15 | `wlc_phy_a4`, salvataggio dello spur |
 | #11229-11484 | epsilon core 0 (tabella 31): **64 scritture singole** a zero | idem, già in `0004` |
 | #11485-11740 | epsilon core 1 (tabella 33), stessa forma | idem, già in `0004` |
@@ -88,7 +88,7 @@ divergenza nota, non come buco.
 
 ## Cosa dice questa mappa
 
-**Le prime tre fasi sono già fatte.** Scalare ed epsilon sono `patches/b43/0004`.
+**Le prime tre fasi sono già fatte.** Scalare ed epsilon sono `patches/b43/MESSAGES.md#0004`.
 Non è una coincidenza: erano la parte senza matematica, cioè l'unica che si
 poteva portare guardando solo i valori.
 
@@ -121,7 +121,7 @@ la conseguenza.
 
 ## Ordine di lavoro
 
-I punti 1 e 2 sono **fatti**, `patches/b43/0015`, e sono venuti fuori insieme
+I punti 1 e 2 sono **fatti**, `patches/b43/MESSAGES.md#0015`, e sono venuti fuori insieme
 perche' nessuno dei due sta in piedi da solo: un setup senza cleanup lascia
 accesi gli override RF, quelli AFE e il coupler, e il filtro della cal fuori
 dalla cal e' peggio che non toccarlo.
@@ -163,7 +163,7 @@ con maschera `0xff80` (#13842 e #13847 in coda alla cal, e lo stesso valore
 all'init in #286 e #288), cioè **-24** nel campo a 9 bit segnato, da cui
 `delta[i] = -21`, che nella tabella dei valori rev7 è l'**indice 15**.
 
-`patches/b43/0009` valuta la formula — la tabella ce l'ha già `0002` — con
+`patches/b43/MESSAGES.md#0009` valuta la formula — la tabella ce l'ha già `0002` — con
 l'indice come costante presa dalla cattura. Il port ora scrive `0xf400`, identico
 al vendore, dove prima scriveva `0`: 24 dB di differenza sulla predistorsione.
 Quando arriverà la ricerca del gain (punto 3 qui sopra), l'indice arriva da lei e
@@ -181,7 +181,7 @@ troncava a zero e i 160 campioni uscivano tutti uguali. In più
 `b43_nphy_load_samples()` scriveva `samples[i].i & 0x3FF << 10`, dove `<<` lega
 più forte di `&`, buttando via la componente in fase.
 
-`patches/b43/0010` chiude i due. Contro la cattura, sul tono a 2500 kHz ampiezza
+`patches/b43/MESSAGES.md#0010` chiude i due. Contro la cattura, sul tono a 2500 kHz ampiezza
 250 della cal TX IQ/LO (#8638):
 
 | | parole sbagliate su 160 |

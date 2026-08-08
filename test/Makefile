@@ -9,7 +9,7 @@
 #   make KDIR=~/src/linux gainctl    esegue il flow e scrive trace.gainctl.out
 #   make compare FLOW=gainctl REF=... confronta col trace vendor
 #
-# I sorgenti sono i .c di mainline: se ci applichi patches/b43/0001 e ricostruisci,
+# I sorgenti sono i .c di mainline: se ci applichi patches/b43/rollup.diff e ricostruisci,
 # il diff col trace vendor ti dice se la patch riproduce il device.
 
 KDIR  ?= $(HOME)/src/linux

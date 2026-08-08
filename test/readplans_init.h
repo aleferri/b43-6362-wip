@@ -2,6 +2,7 @@
  *
  * GENERATO da reverse-tools/gen_readplans.py: non modificare a mano.
  *   sorgente: opinit-ch1-ch6-bw20.decoded
+ *   invocazione: gen_readplans.py ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded --range 132 26100 --max-len 512
  *   read con RETVAL appaiato: 2089 su 2089
  *   indirizzi con un piano: 149
  *
@@ -10,6 +11,12 @@
  * servire le read del port in ordine di cattura invece che a srotolare una
  * coda: il port ne fa meno del vendore, e senza la posizione ogni fase che
  * dipende da una lettura calcola su valori di un'altra fase.
+ *
+ * In coda i piani per CELLA di tabella, per le sole celle che l'hardware
+ * scrive dentro la finestra: quelle il cursore non ce l'hanno, perche'
+ * la risposta giusta e' la n-esima che il vendore ha letto da quella
+ * cella e non dipende dall'ordine fra celle diverse.
+ *   celle con un piano: 7
  */
 #ifndef _READPLANS_INIT_H
 #define _READPLANS_INIT_H
@@ -1320,6 +1327,34 @@ static const u16 plan_init_phy_0c9[] = {
 static const u32 plan_init_phy_0c9_rec[] = {
 	26099,
 };
+static const u16 plan_init_cell_0f_060[] = {
+	0x0000, 0x0000, 0x0060, 0x0060, 0x0059, 0x0059, 0x0059, 0x0059,
+	0x0059, 0x0059, 0x0059, 0x0059, 0x0059, 0x0059,
+};
+static const u16 plan_init_cell_0f_061[] = {
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0013, 0x0013, 0x0013, 0x0013,
+	0x0013, 0x0013, 0x0013, 0x0013, 0x0013, 0x0013,
+};
+static const u16 plan_init_cell_0f_062[] = {
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0xffa0, 0xffa0, 0xffa6, 0xffa6, 0xffa6, 0xffa6,
+};
+static const u16 plan_init_cell_0f_063[] = {
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0xfffc, 0xfffc, 0xfffc, 0xfffc,
+};
+static const u16 plan_init_cell_0f_067[] = {
+	0x0000, 0x0100, 0x0100, 0x0100, 0x0100, 0x0100, 0x0100, 0x0100,
+	0x0100, 0x0100, 0x0100, 0x0100, 0x0100,
+};
+static const u16 plan_init_cell_0f_068[] = {
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x00ff,
+	0x00ff, 0x00ff, 0x00ff, 0x00ff, 0x00ff,
+};
+static const u16 plan_init_cell_0f_06a[] = {
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xfd00, 0xfd00,
+	0xfd00, 0xfd00, 0xfd00, 0xfd00, 0xfd00,
+};
 
 static inline void b43_test_load_readplans(void)
 {
@@ -1472,6 +1507,13 @@ static inline void b43_test_load_readplans(void)
 	b43_test_plan_phy_reads(0x01b7, plan_init_phy_1b7, plan_init_phy_1b7_rec, ARRAY_SIZE_TEST(plan_init_phy_1b7));
 	b43_test_plan_phy_reads(0x00c8, plan_init_phy_0c8, plan_init_phy_0c8_rec, ARRAY_SIZE_TEST(plan_init_phy_0c8));
 	b43_test_plan_phy_reads(0x00c9, plan_init_phy_0c9, plan_init_phy_0c9_rec, ARRAY_SIZE_TEST(plan_init_phy_0c9));
+	b43_test_plan_table_cell(15, 0x060, plan_init_cell_0f_060, ARRAY_SIZE_TEST(plan_init_cell_0f_060));
+	b43_test_plan_table_cell(15, 0x061, plan_init_cell_0f_061, ARRAY_SIZE_TEST(plan_init_cell_0f_061));
+	b43_test_plan_table_cell(15, 0x062, plan_init_cell_0f_062, ARRAY_SIZE_TEST(plan_init_cell_0f_062));
+	b43_test_plan_table_cell(15, 0x063, plan_init_cell_0f_063, ARRAY_SIZE_TEST(plan_init_cell_0f_063));
+	b43_test_plan_table_cell(15, 0x067, plan_init_cell_0f_067, ARRAY_SIZE_TEST(plan_init_cell_0f_067));
+	b43_test_plan_table_cell(15, 0x068, plan_init_cell_0f_068, ARRAY_SIZE_TEST(plan_init_cell_0f_068));
+	b43_test_plan_table_cell(15, 0x06a, plan_init_cell_0f_06a, ARRAY_SIZE_TEST(plan_init_cell_0f_06a));
 }
 
 #endif

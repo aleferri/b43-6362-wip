@@ -7,7 +7,9 @@ in `docs/INDEX.md`, qui c'è solo ciò che serve per non ripetere errori già fa
 
 Portare in b43 il supporto **BCM6362 / N-PHY rev 8 / radio 2057 rev 8**, guidati
 da una cattura MMIO del driver proprietario `wl 6.30.102.7`. Sette patch già
-merged in mainline (`docs/upstream-status.md`), quattordici in `patches/b43/`. **Niente
+merged in mainline (`docs/upstream-status.md`), nove candidate in
+`patches/mainline/`, ventisei compresse nel rollup di
+`patches/b43/`. **Niente
 ha mai girato su hardware**: tutto è verificato riproducendo la cattura in un
 harness che compila il vero `phy_n.c`.
 
@@ -16,27 +18,34 @@ harness che compila il vero `phy_n.c`.
 ```sh
 sh scripts/fetch-upstream-state.sh ~/src/linux      # sparse, ~60 MB, sha 848acc8ffe1b
 cd ~/src/linux
-for p in .../patches/mainline/*.patch; do git apply "$p"; done   # tutte e sei
-for p in .../patches/b43/0*.patch; do git apply "$p"; done       # 0010 conflitta, e va bene
+for p in .../patches/mainline/*.patch; do git apply "$p"; done   # tutte e nove
+git apply .../patches/b43/rollup.diff                            # applica pulito
 cd test && make KDIR=~/src/linux && make KDIR=~/src/linux warncheck
 ./phase_compare.py --vendor ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
 ```
 
+`patches/b43/` e' **un file solo**, `rollup.diff`, finche' si costruisce: la serie
+si ridivide prima di mandare qualunque cosa, e i messaggi delle ventisei patch che
+contiene stanno in `patches/b43/MESSAGES.md`. Le citazioni per numero nei documenti
+e in `phase_compare.py` risolvono contro quel file.
+
+Il rollup vuole `mainline/` **prima** e non applica da solo, perche' non contiene
+`0010` e `0022`: erano duplicati delle due mainline omonime, quindi il conflitto
+atteso non c'e' piu'. Il costo e' che `check_patch_gating.py` da' un verdetto
+unico per tutto il rollup invece di uno per patch; i tre punti non gateati e le
+loro dichiarazioni sono in testa a `rollup.diff`.
+
 **`patches/mainline/` fa parte del baseline, e per un giro questa sezione non lo
 diceva.** Con la sola serie `b43/` le due finestre danno **5769** e **8724**, non
-5791 e 8746: le 22 op di differenza sono due delle cinque patch mainline, misurate
+5791 e 8746: le 22 op di differenza sono due delle nove patch mainline, misurate
 una per volta — `rf-control-override-value-masks` vale **+14** e
 `fifth-tx-power-up-override` **+8**, le altre tre zero. Se il numero non torna,
-guardare qui prima di cercare altrove.
+guardare qui prima di cercare altrove. **I due valori assoluti sono di prima di
+`0025`/`0026` e oggi non tornano** — la stessa misura da 15158 e 16353; il delta di
+22 op non e' stato rifatto, quindi vale come ordine di grandezza e non come misura.
 
-L'ordine giusto e' mainline **prima**: cosi' applicano tutte e cinque, e poi
-`b43/0010` conflitta perche' `mainline/...sample-table-logic` porta le stesse due
-modifiche — e' il conflitto atteso, quello che `patches/mainline/README.md` dice da
-sempre. Applicando la serie prima, il conflitto si sposta sulla patch mainline; il
-tree che ne esce e' lo stesso e i numeri anche, verificato.
-
-Dentro la serie le patch **vanno applicate in ordine**. La catena di dipendenze,
-misurata con `git apply` sull'albero pulito: 0004 dipende da **0002** (contesto in
+La catena di dipendenze dentro la serie serve alla **ri-divisione**, non al build:
+misurata con `git apply` sull'albero pulito, 0004 dipende da **0002** (contesto in
 `tables_nphy.c`), 0009 da 0004, 0012 da **0009**. 0003 non serve a nessuna delle
 tre.
 
@@ -55,9 +64,9 @@ tre.
 
 ## Stato
 
-`13 finestre: 0 da guardare, 4 divergenze note` piu' **due** finestre vere:
-**Il verdetto e' la tabella per fase di `phase_compare.py`: 4271 op su 18826, il
-23%.** Non il totale in blocchi contigui, che dice 15281 su 22943 (67%) e che **non
+`16 finestre: 0 da guardare, 5 divergenze note` piu' **due** finestre vere:
+**Il verdetto e' la tabella per fase di `phase_compare.py`: 6602 op su 18808, il
+35%.** Non il totale in blocchi contigui, che dice 17838 su 22943 (78%) e che **non
 e' una misura**: su `up-ch1` 774 blocchi su 879 stanno sotto le 16 op e valgono
 ~1900 op del totale. Sommare frammenti da due op e chiamarla copertura e' contare il
 sommerso nel PIL.
@@ -67,31 +76,440 @@ oppure — eccezione dichiarata finche' il port non le espone — una macro oper
 delimitata da un marcatore citato. Il numero per fase e' **uno**, la run contigua
 piu' lunga dentro la fase, quindi nessun frammento lo muove.
 
-| fase | op | run |
-|---|---|---|
-| `gain-table` | 1540 | **1540 100%** |
-| `pwr-setup` | 432 | 266 62% |
-| `idle-tssi` | 660 | 334 51% |
-| `cal-papd` | 2662 | 847 32% |
-| `coda-idle-tssi` | 1139 | 334 29% |
-| `cal-tx-iqlo` | 1570 | 333 21% |
-| `cal-rssi-2` | 960 | 83 9% |
-| `cal-rx-iq` | 5617 | 420 7% |
-| `perical-ingresso` | 1402 | 103 7% |
-| `coeff-setup-2` | 1073 | 10 1% |
-| `coeff-setup` | 1055 | **0 0%** |
-| `recalc-txpower` (**phy_ops vera**) | 716 | **1 0%** |
+| fase | op | run | blocchi |
+|---|---|---|---|
+| `gain-table` | 1540 | **1540 100%** | `1540` |
+| `coeff-setup-2` | 1073 | **1066 99%** | `1066` |
+| `pwr-setup` | 432 | 266 62% | `266` |
+| `idle-tssi` | 660 | 334 51% | `334 123 85 41` |
+| `coeff-setup` | 1037 | **1037 100%** | `1037` |
+| `coda-idle-tssi` | 1139 | 432 38% | `432 334 41 31` |
+| `cal-papd` | 2662 | 847 32% | `847 2x334 147 86` |
+| `cal-tx-iqlo` | 1570 | 443 28% | `443 331 268 80` |
+| `cal-rssi-2` | 960 | 98 10% | `98 14x27 21 3x20` |
+| `cal-rx-iq` | 5617 | 420 7% | **`6x420 2x360 6x119 12x85`** |
+| `perical-ingresso` | 1402 | 119 8% | `2x119 100 90 2x88` |
+| `recalc-txpower` (**phy_ops vera**) | 716 | **0 0%** | *nessuno* |
 
-Tre cose che questa tabella ha ribaltato e che i totali avevano coperto per giri
-interi: `coeff-setup` fa **zero** — i blocchi da 256 op che contavo cadono fuori
-dalla fase, quindi tre sessioni di lavoro su quella fase girano attorno a op che non
-stanno dove il vendore le mette; `recalc_txpower`, che e' una `phy_ops` **vera** e
-non una macro, fa **1 su 716**; e la cal RX IQ fa **7%**, non 85% — le sei iterazioni
-dello sweep sono vere e hanno la forma giusta, ma la run piu' lunga dentro la fase e'
-**una** iterazione. L'unica fase che torna per intero e' `gain-table`, 1540 su 1540.
+Due fasi tornano per intero, `gain-table` e `coeff-setup`. E la seconda e' la
+lezione di questa tabella, perche' per tre sessioni ha detto **zero** e la colpa
+era dello strumento: `tbl_port_get()` in `wrap.c` non faceva avanzare l'indirizzo
+in lettura, quindi una read in blocco rendeva N volte la stessa cella, e per una
+cella che nessuno aveva scritto cadeva sul mirror del **registro** 0x73, cioe'
+sull'ultima word versata da qualunque altra tabella. La read che apre la funzione
+(`15/0x50 len=7`) prendeva sette volte `0xff86`, la coda di un offset epsilon PAPD,
+dove il vendore legge sette zeri, e il port versava `0x000e1b86` in 512 celle. Il
+codice del port era giusto e nel posto giusto da sempre.
+
+Da cui la regola, che e' costata tre sessioni: **quando una fase fa zero e le op ci
+sono, sospettare il valore prima del punto di chiamata.** I quattro blocchi si
+trovavano con un `grep` sull'indirizzo di porta — `0x6940`, `0x6d40`, `0x69c0`,
+`0x6dc0` — nello stesso ordine sui due lati; bastava guardarli.
+
+Col mirror che serve le celle e' venuta fuori una cosa dell'**hardware**, non del
+port: in 26/27 oltre l'offset 576 la rilettura e' il valore scritto **mascherato a
+9 bit**, misurato su cinque celle su cinque (`0x24a`, `0x24c`, `0x25e` sui due
+core: scritto `0xffffffe9`, riletto `0x01e9`; scritto `0xffffffbb`, riletto
+`0x01bb`). I due lati scrivono lo **stesso** valore, e il mirror tiene i 32 bit
+interi. **Non e' stato mascherato di proposito**: cinque celle di una regione in
+una cattura non giustificano una larghezza dentro lo strumento, e la divergenza
+e' inerte — il solo consumatore e' `b43_nphy_txpwr_index()`, che fa
+`(((s16)v) << 4) & 0x1ff0`, e `0xffffffe9` e `0x01e9` danno entrambi `0x1e90`.
+Costa due op sulla finestra `txpwr-index` e sta dichiarata la'.
+
+### E buttava via il risultato
+
+In coda alla stessa funzione il motore ha lasciato il risultato in `15/96` e il
+driver deve prenderlo da la' e installarlo in `15/80`, dove il resto del driver
+cerca i coefficienti. Le due chiamate hanno la **direzione scambiata**:
+`write(96)` poi `read(80)`, dove il riferimento fa `read(96)` poi `write(80)`.
+Quindi il driver sovrascrive il risultato del motore col buffer vecchio e legge
+80 invece di scriverlo. Le tre coppie che seguono nello stesso blocco sono
+giuste. La cattura conferma il riferimento: `#10640 TBL.WR id=0x000f off=0x0050
+len=4`, primo valore `0x0059`.
+`patches/mainline/b43-take-the-n-phy-tx-iq-lo-results-out-instead-of-overwriting-them.patch`.
+
+Chiuderla ha chiuso `coeff-setup-2`, **da 514 a 1066 su 1073**, e la regione
+`8505-10733` e' passata da 1195 a **1308 su 1570 (83%) in 50 blocchi**, da 85.
+
+Per un giro ha **rotto `coeff-setup`, da 1037 a 514**, e la colpa era del seme:
+la cal ora lascia `0x59` in `15/0x50` come deve, ma l'init non tracciato che
+l'harness fa prima di quello tracciato lo lasciava li' anche all'ingresso della
+finestra, mentre il vendore a `#3738` legge **zero** e ci arriva solo a `#10640`.
+`gen_seed.py` non aveva **nessun supporto per le celle di tabella**. Ora ce l'ha,
+e `coeff-setup` e' tornata a 1037 su 1037.
+
+Per le celle il confine del seme e' **per forza** diverso da quello dei registri,
+e vale sapere perche'. Per i registri si guarda solo prima della finestra; una
+cella come `15/0x50` non e' scritta da nessuna parte nella cattura, perche' il
+download statico che l'ha riempita e' di un boot precedente, e prima di `--before`
+non c'e' niente da guardare. Il suo stato all'ingresso e' osservabile **solo dalla
+prima read dentro la finestra**. Due condizioni tengono onesta la regola: si semina
+la cella che nessuna write per porta ha toccato prima di quella read — se la
+finestra ci ha scritto, il valore e' cio' che la finestra deve calcolare — e il cui
+valore **non cambia** fra le read, perche' se cambia e' l'hardware che ci scrive
+dentro la finestra ed e' lavoro di un piano. Sono **39 celle**; le 5 che restano
+fuori dalle 44 a valore fisso sono proprio quelle che una write per porta aveva
+toccato.
+
+### La cal TX I/Q LO aspettava il contrario
+
+`b43_nphy_cal_tx_iq_lo()` scrive un comando su `IQLOCAL_CMD` e poi fa polling
+sullo stesso registro per aspettare che il motore finisca, prima di rileggere i
+coefficienti. Il test era **invertito**: `if (tmp & 0xC000) break;` esce quando i
+due bit sono **accesi**, cioe' *mentre* la cal gira. Il riferimento gira al
+contrario, `SPINWAIT(((read_phy_reg(pi, 0xc0) & 0xc000) != 0), 20000)`, e
+`SPINWAIT` cicla **mentre** l'espressione e' vera. Quindi b43 usciva alla prima
+read, ~10 us dopo il comando, e salvava come coefficienti migliori cio' che la
+tabella conteneva prima che il motore ci scrivesse — dodici volte, una per
+comando.
+
+Le due liste di comandi erano identiche da sempre, dodici valori nello stesso
+ordine, e questo e' cio' che ha portato al difetto: le **write** combaciavano
+(699 contro 698 nel corpo della cal), le tabelle combaciavano (94/95 e 20/20), e
+mancavano **445 read**. Tutte su un indirizzo: `0xc0`, 455 volte nel vendore e 12
+nel port. Il piano di lettura c'era ed era completo, 455 entry: non era capienza.
+
+Corretta la condizione, il port fa **455 read su 455**, esatte, e la regione
+`8505-10733` passa da **741 su 1570 in 97 blocchi a 1195 in 85**.
+`patches/mainline/b43-wait-for-the-n-phy-tx-iq-lo-calibration-to-finish.patch`,
+non gateata perche' il ciclo e' di ogni N-PHY.
+
+**E la tabella per fase non si e' mossa di un'op.** `cal-tx-iqlo` resta 331 su
+1570, il totale resta 5924. Le 454 op guadagnate stanno in una dozzina di blocchi
+da ~65, uno per comando, e la run piu' lunga dentro la fase e' ancora lo stesso
+blocco da 323 di prima. La metrica per fase e' fatta di proposito per ignorare i
+frammenti, e qui il prezzo di quella scelta si vede: **sotto-riporta un fix
+giusto**. Il verdetto in questo caso e' la struttura dei blocchi, che e' migliorata
+in entrambi i versi — piu' op appaiate e blocchi piu' lunghi — e i blocchi contigui
+su `up-ch1` da 16392 a 16846. Prima di dire che un cambiamento non serve perche' la
+fase non si muove, guardare i blocchi.
+
+`recalc_txpower`, che e' una `phy_ops` **vera** e non una macro, fa **0 su 716**, e
+la regione da sola dice 295 su 716 in 10 blocchi con una run da 266: e'
+l'assegnazione esclusiva, misurata identica prima e dopo il fix. La colonna blocchi
+per quella fase e' **vuota**, e questo conferma che lo zero e' reale nel run
+globale: la' dentro non c'e' nessun blocco da 16 op in su.
+
+### adj_pwr_tbl: 36 contro 3, ed e' la parentesi per fase di mphase
+
+`b43_nphy_tx_power_ctrl()` scrive la tabella di potenza aggiustata — 26/0x40 e
+27/0x40, 84 celle, 85 op per scrittura — **solo nel ramo di abilitazione**. Sulla
+finestra `up-ch1` il vendore la programma **36 volte** per tabella, il port **3**.
+Sono ~5600 op del vendore, il 27% della finestra, che il port non emette affatto,
+ed e' l'asimmetria piu' grossa che resta.
+
+Il meccanismo e' chiaro e non e' in discussione. `b43_nphy_txpwr_index()` fa
+`tx_pwr_ctrl_state = nphy->txpwrctrl`, disabilita, lavora, e ripristina: se al
+momento della chiamata il controllo era **spento**, il ripristino rispegne e la
+tabella non si scrive. `b43_phy_initn()` spegne a monte del blocco di cal e
+riaccende in coda, e la cal gira **in mezzo**, quindi tutti quei ripristini non
+fanno niente. Il port tocca `0x1e7` 52 volte contro le 12 del vendore, e con
+`PHY.AND 0x1fff`/`0x7fff`, cioe' il ramo di spegnimento.
+
+**Provato a differire il blocco gateato dopo `b43_nphy_tx_power_ctrl(dev,
+tx_pwr_state)`, in fondo a `initn`, dove il riferimento lo ha di fatto — la' e'
+solo schedulato e gira dalla macchina mphase, a controllo gia' ripristinato. Il
+risultato e' NEGATIVO e la modifica NON e' in albero:**
+
+| | prima | differita |
+|---|---|---|
+| `adj_pwr_tbl` 26/0x40 | 3 | 13 |
+| `perical-ingresso` | 119, `2x119 100 90 2x88` | 172, **`5x172`** |
+| `cal-rx-iq` | 420, **`6x420`** | 360, **`6x332`** |
+| totale per fase | 6602 | 6592 |
+| **blocchi contigui** | **17532 (76%)** | **15148 (66%)** |
+
+Le 88 op che ogni iterazione dello sweep perde sono **una scrittura di
+`adj_pwr_tbl`** che il port infila dentro l'iterazione e il vendore non ha: il
+vendore la scrive all'**ingresso** di `cal_rx_iq` (#15109, #15332, #15920) ma non
+dentro ogni iterazione.
+
+**Cercarla dentro `cal_rx_iq` e' escluso, e con una prova secca**:
+`b43_nphy_rev3_cal_rx_iq()` (72 righe) e l'implementazione vera del riferimento,
+`wlc_phy_cal_rxiq_nphy_rev3()` (159 righe), hanno **zero** chiamate a
+`tx_power_ctrl`/`txpwrctrl_enable` e a `txpwr_index`. Nessuno dei due tocca il
+controllo di potenza la' dentro, quindi quelle scritture vengono dal **chiamante**.
+
+E dove cadono lo dice il conteggio, che e' il punto da cui ripartire. Delle 36:
+
+| dove | quante |
+|---|---|
+| `cal-rx-iq` | 12 |
+| `perical-ingresso` | 7 |
+| `coda-idle-tssi` | 6 |
+| `cal-papd` | 5 |
+| `recalc-txpower` | 2 |
+| init, prima delle fasi | 2 |
+| `coeff-setup`, `cal-tx-iqlo` | 1 ciascuna |
+
+Sono **sparse su tutte le fasi**, non concentrate in un punto: e' la macchina a stati
+mphase che fra una fase e l'altra passa dal ripristino del controllo di potenza, e
+l'espansione inline di b43 le fa di fila senza quella parentesi per fase. Quindi non
+e' una chiamata mancante da aggiungere: e' la differenza fra una macchina a stati e
+un blocco sequenziale, e chiuderla vuole riprodurre la parentesi per fase — un
+lavoro di struttura, non una patch. **Due ipotesi facili sono state escluse con dei
+numeri: spostare tutto in fondo a `initn`, e cercare dentro `cal_rx_iq`.**
+
+### La macchina a stati mphase, ricostruita e IN ALBERO
+
+`wlc_phy_cal_perical_nphy_run()` e' chiamata una volta per fase, e ognuna fa la
+stessa parentesi: legge il tx gain da `7/0x110`, salva `nphy_txpwrctrl` e lo
+**spegne**, esegue la sua fase, e in coda `txpwrctrl_enable(tx_pwr_ctrl_state)`.
+E' quel ripristino a scrivere `adj_pwr_tbl`. Ricostruita in
+`b43_nphy_cal_perical_phyinit()`, piu' il blocco differito in coda a `initn`
+perche' le due meta' sono **accoppiate** — la parentesi ripristina cio' che trova,
+e la' il controllo e' spento.
+
+Serviva anche `mphase_txcal_numcmds`, che non era impostata da nessuna parte: con
+`mphase=true` il ciclo dei comandi girava a vuoto.
+
+| | base | **in albero** | vendore |
+|---|---|---|---|
+| `adj_pwr_tbl` 26/0x40 | 3 | **18** | 36 |
+| `perical-ingresso` | `2x119 100 90 2x88` | **`6x172`** | |
+| `cal-rx-iq` | `6x420` | `6x420` | |
+| `cal-tx-iqlo` | 443, 8 piccoli | **428, 11 piccoli** | |
+| totale per fase | **6602** | **6558** | |
+| blocchi contigui | 17532 | **17838** | |
+
+**E' piu' bassa di prima, e sta in albero comunque.** Il numero da battere resta
+6602.
+
+### La misura del tono della cal PAPD, portata
+
+`wlc_phy_a1/a2/a3_nphy` e `wlc_phy_papd_decode_epsilon` non c'erano: il motore
+girava sulle tabelle azzerate e `b43_nphy_papd_cal()` lo dichiarava nel proprio
+commento. Portate come `b43_nphy_papd_run_one()` (un passo del motore su un core),
+`b43_nphy_papd_gain_search()` (il codice di pad gain che smette di clippare, un
+passo per volta fino a venti) e `b43_nphy_papd_smooth_epsilon()` (la media a
+finestra scorrevole sulla tabella epsilon), piu' il decoder dei due campi da 13 bit.
+
+Solo il ramo rev 7 e oltre e solo la meta' 2 GHz, perche' il chiamante prova phy
+rev 8, radio rev 8 e la banda: gli altri rami sarebbero peso morto. Gli helper
+c'erano gia' tutti — `ipa_set_bbmult`, `rf_ctl_override_one_to_many`,
+`rf_ctl_override_rev7`, `get_tx_gains`.
+
+**Blocchi contigui da 17532 a 17838 (76% -> 78%): il primo numero di questa serie
+sopra il valore di base.** Il motore ora sweepa davvero, 405 scritture su `0x2be`.
+Il totale per fase resta 6558 contro 6602 — la run piu' lunga di `cal-papd` non si
+muove — ma la forma passa da `794 2x334 172 2x78 +14` a `794 2x334 220 178 +32`.
+`adj_pwr_tbl` resta 13 su 36, quindi la parentesi di quelle due sotto-calibrazioni
+non e' ancora quella del vendore: i segmenti sono 14 contro 9.
+
+### Le sei fasi TX sono UN passo, e come si e' scoperto
+
+Divise in sei con `mphase=true`, `cal-tx-iqlo` cade da 428 a **331 in 28
+frammenti**. La prima spiegazione — le parentesi di troppo — era **sbagliata**:
+togliendo cinque parentesi e lasciando la divisione, il numero resta 331. E' la
+**divisione** dei dodici comandi in sei pezzi da due, che fa emettere alla cal il
+lavoro per pezzo fra l'uno e l'altro. La cattura li ha contigui, con una sola
+lettura del gain a #8505 invece di una per fase.
+
+Due misure per separare due cause che sembravano una: senza quella seconda misura
+avrei attribuito 97 op alla cosa sbagliata.
+
+### Contati i due versi: il port programma la tabella VUOTA
+
+I due versi si distinguono dal **payload**, non dalla forma ne' dalla distanza: lo
+spegnimento versa 84 zeri, l'accensione il contenuto di `nphy->adj_pwr_tbl`.
+Ricostruito con `trace_tables.collect()`, che rende i valori:
+
+| | accensioni (payload con contenuto) | spegnimenti (84 zeri) |
+|---|---|---|
+| vendore | **12** | 60 |
+| port | **0** | 26 |
+
+Il vendore torna: 12 + 60 = 72, cioe' 36 per ciascuna delle due tabelle, che e' il
+conteggio di prima letto bene. Il port fa 13 accensioni per tabella e **tutte con
+payload nullo**: in tutto il trace non c'e' **una sola** scrittura non nulla su
+26/0x40.
+
+Quindi il buco non e' nel numero di riprogrammazioni ne' nella parentesi: e'
+`nphy->adj_pwr_tbl` che **e' vuota quando viene programmata**. La riempiono due
+punti in `b43_nphy_tx_power_ctl_setup()`, riga 4006 da `nphy->tx_power_offset[]` e
+riga 4031 per gruppo di catene, e uno dei due non arriva a valorizzarla — o non
+gira, o gira su offset a zero.
+
+E' un difetto di **valore**, non di struttura, ed e' il primo bersaglio di questo
+filo che sia definito senza dipendere da un conteggio di op: la prova e' che una
+grandezza che deve essere non nulla e' nulla, e si verifica leggendo
+`tx_power_offset[]` prima della chiamata. `phase_compare.py` non lo poteva vedere
+perche' le op ci sono e sono nel posto giusto — combaciano anche, essendo zeri
+contro zeri per 84 celle.
+### Perche' e' vuota: tx_power_offset ha un solo scrittore, e non gira
+
+`nphy->tx_power_offset[]` viene riempita in **un posto solo**, dentro
+`b43_nphy_op_recalc_txpower()`, subito prima della chiamata a
+`b43_nphy_tx_power_ctl_setup()` che la spande sulle 84 celle. Il commento la' sopra
+lo dice gia': senza quel riempimento le 84 celle escono a zeri comunque sia
+programmata la SPROM.
+
+Quindi non c'e' nessun difetto da correggere in `tx_power_ctl_setup()`: e'
+`recalc_txpower` che nella misura **non gira**, ed e' la stessa ragione per cui la
+fase `recalc-txpower` fa 0 su 716 con la colonna blocchi **vuota**. Le due cose che
+sembravano indipendenti sono una.
+
+`--flow full` **non cambia niente**: stessi 17831 e 6555, e `recalc-txpower` resta
+0 con la colonna vuota. Quindi o quel flow non fa cio' che il nome dice, o
+`phase_compare.py` lo ignora e gira sempre `init`. E' la prima cosa da guardare, sta
+in `test/main.c` fra i flow e in come `phase_compare.py` passa `--flow`, ed e' una
+domanda sull'harness da poche righe di lettura — non una da misurare.
+
+Se il flow si sistema, si muovono insieme `recalc-txpower` (716 op, oggi zero) e il
+payload di `adj_pwr_tbl` su tutte le accensioni, che sono 13 per tabella.
+
+
+
+I due versi si distinguono dal **payload**, non dalla forma ne' dalla distanza: lo
+spegnimento versa 84 zeri, l'accensione il contenuto di `nphy->adj_pwr_tbl`.
+Ricostruito con `trace_tables.collect()`, che rende i valori:
+
+| | accensioni (payload con contenuto) | spegnimenti (84 zeri) |
+|---|---|---|
+| vendore | **12** | 60 |
+| port | **0** | 26 |
+
+Il vendore torna: 12 + 60 = 72, cioe' 36 per ciascuna delle due tabelle, che e' il
+conteggio di prima letto bene. Il port fa 13 accensioni per tabella e **tutte con
+payload nullo**: in tutto il trace non c'e' **una sola** scrittura non nulla su
+26/0x40.
+
+Quindi il buco non e' nel numero di riprogrammazioni ne' nella parentesi: e'
+`nphy->adj_pwr_tbl` che **e' vuota quando viene programmata**. La riempiono due
+punti in `b43_nphy_tx_power_ctl_setup()`, riga 4006 da `nphy->tx_power_offset[]` e
+riga 4031 per gruppo di catene, e uno dei due non arriva a valorizzarla — o non
+gira, o gira su offset a zero.
+
+E' un difetto di **valore**, non di struttura, ed e' il primo bersaglio di questo
+filo che sia definito senza dipendere da un conteggio di op: la prova e' che una
+grandezza che deve essere non nulla e' nulla, e si verifica leggendo
+`tx_power_offset[]` prima della chiamata. `phase_compare.py` non lo poteva vedere
+perche' le op ci sono e sono nel posto giusto — combaciano anche, essendo zeri
+contro zeri per 84 celle.
+
+### RITRATTAZIONE 2: il 13 contro 36 non era un confronto
+
+Esteso `segment_marker.py` a una **sequenza** di marcatori, per distinguere la
+parentesi (lettura di `7/0x110` seguita dallo spegnimento) dalla sola lettura. E la
+sequenza sul vendore da' **zero** segmenti, che e' l'informazione.
+
+Il motivo: in b43 i due versi di `b43_nphy_tx_power_ctrl()` hanno **forme d'op
+diverse**. L'accensione usa `b43_ntab_write_bulk()`, che l'harness traccia come
+`TBL.WR id=26 off=0x40 len=84`; lo spegnimento scrive a mano
+`b43_phy_write(TABLE_ADDR, 0x6840)` piu' 84 `DATALO`, e di `TBL.WR` non ne emette.
+Il tracer del vendore invece aggancia la funzione di tabella, quindi vede **tutti e
+due i versi allo stesso modo**.
+
+I conteggi, sulla finestra `up-ch1`:
+
+| | `TBL.WR 26/0x40 len=84` | `0x72 = 0x6840` grezzo |
+|---|---|---|
+| vendore | 36 | **36** |
+| port | 13 | **54** |
+
+Le 36 del vendore sono **accensioni piu' spegnimenti**, non accensioni. E il port
+ne fa 13 + 54 = **67**, cioe' piu' del vendore, non meno. **Il «13 contro 36» non
+era un confronto fra le stesse due cose**, e tutto quello che ci ho appeso sopra —
+che mancassero 23 riprogrammazioni della tabella, che la parentesi di mphase fosse
+la causa, i due tentativi di ricostruirla — poggiava su quel numero.
+
+Cosa resta valido: la macchina a stati mphase e il porting della cal PAPD, perche'
+sono misurati sui blocchi contigui e sulle fasi, non su quel conteggio. Cosa cade:
+l'obiettivo «portare `adj_pwr_tbl` da 18 a 36». Non c'e' niente da portare a 36.
+
+Per rifare il confronto per davvero serve contare i due versi separatamente **su
+entrambi i lati**, e sul vendore i due versi si distinguono solo dal contesto,
+perche' l'op e' identica. Il candidato e' la coppia «`TBL.WR 26/0x40 len=84` seguita
+da `TBL.WR 27/0x40 len=84`»: l'accensione le fa consecutive, lo spegnimento le
+separa con altre op. Da verificare, non verificato.
+
+### RITRATTAZIONE: quel marcatore non e' della parentesi
+
+Il ramo di abilitazione di `b43_nphy_tx_power_ctrl()` scrive `adj_pwr_tbl`
+**senza nessuna condizione**: le due `b43_ntab_write_bulk(26/64)` e `(27/64)` sono
+la prima cosa dell'`else`. Quindi non c'e' nessun test nascosto da trovare, e il
+13 e' esattamente il numero di volte che il controllo viene **acceso**. Quello non
+era mai in dubbio.
+
+Il difetto sta nel marcatore. `TBL.RD 7/0x110 len=2` **non e' della parentesi**:
+lo legge anche `b43_nphy_get_tx_gains()`, e con la condizione **opposta** —
+la parentesi legge se `nphy->txpwrctrl` e' **vero**, `get_tx_gains()` legge se e'
+**falso**. E la parentesi chiama `get_tx_gains()` subito dopo aver spento, quindi
+una parentesi con il controllo acceso produce **due** letture e una con il
+controllo spento **una**.
+
+Percio' i «9 contro 20» di `segment_marker.py` non contano parentesi: contano una
+somma di due cose con condizioni opposte, e **la conclusione che il vendore ha nove
+parentesi non e' sostenuta da quella misura**. Le quattro parentesi PAPD del
+commit precedente sono state messe su quella base, ed e' per questo che non hanno
+mosso `adj_pwr_tbl`: la base era sbagliata, non l'esecuzione.
+
+Cosa serve per rifarla: un marcatore che distingua i due lettori. La parentesi si
+riconosce dalla lettura di `7/0x110` **seguita** dallo spegnimento del controllo,
+cioe' dalla coppia, non dalla singola op. `segment_marker.py` accetta una regex su
+una riga sola, quindi va esteso a una sequenza — ed e' un lavoro sullo strumento
+prima che sul driver.
+
+### Con le fasi allineate, la parentesi diventa un marcatore
+
+La lettura del tx gain che apre ogni invocazione sta dentro un
+`if (txpwrctrl != OFF)`, quindi `TBL.RD 7/0x110 len=2` marca **le parentesi in cui
+il controllo di potenza era acceso**. Segmentando i due trace su quella —
+`reverse-tools/segment_marker.py`, nuovo — il vendore ne ha **9** e il port **20**.
+
+Le nove del vendore, e dove cadono:
+
+| record | fase | quante |
+|---|---|---|
+| #3732 | init | 1 |
+| #7038, #8080 | `perical-ingresso` | 2 |
+| #8505 | `cal-tx-iqlo` | **1, non sei** |
+| #12197, #12331, #13311, #13383 | `cal-papd` | **4** |
+| #14977 | `cal-rx-iq` | 1 |
+
+**Quindi la granularita' non e' una-per-fase-mphase, e la mia e' sbagliata in due
+versi opposti.** Le sei parentesi sulle fasi TX sono di troppo: il vendore ne ha
+**una** per tutto il blocco TX I/Q LO, ed e' per questo che `cal-tx-iqlo` fa 331
+con undici passi e 428 con sei — dividerla spezza una sequenza che nella cattura e'
+contigua. E ne **mancano quattro dentro `cal-papd`**, che sta a 847 su 2662.
+
+Il conto quadra con il controllo di potenza spento durante le fasi TX: il marcatore
+non c'e' perche' la lettura non avviene, non perche' la fase non giri. Il port
+invece ha il controllo acceso la' dentro, e i sette segmenti da 198 op che
+`segment_marker.py` mostra alternati alle sei fasi sono la parentesi che gira a
+vuoto.
+
+Cosa manca, quindi, in ordine di grandezza e non piu' a naso: **una** parentesi sul
+blocco TX invece di sei, e **quattro** dentro `b43_nphy_papd_cal()` dove oggi non ce
+n'e' nessuna.
+
+### La run sbaglia in un verso, e ci sono cascato io
+
+La colonna **blocchi** c'e' perche' la run prende il **massimo**, quindi una fase
+che ripete N volte la stessa sequenza non puo' superare ~1/N per costruzione,
+quanto bene la riproduca. E sono tutte le cal.
+
+`cal-rx-iq` e' il caso limite: la run dice **7%** e la forma dice **`6x420`**, cioe'
+le sei iterazioni dello sweep appaiate una per una, esatte. Misurata da sola con il
+pavimento dei piani al suo ingresso, la regione fa **5418 su 5617, il 96%**, e la
+sotto-regione dello sweep **4676 su 4735, il 99%**. Quella fase non e' un buco: e'
+riprodotta, e cio' che resta sono ~140 op nell'**ingresso**, non nello sweep.
+
+Questa pagina lo diceva gia' — «le sei iterazioni dello sweep sono vere e hanno la
+forma giusta, ma la run piu' lunga e' **una** iterazione» — e la tabella lo
+nascondeva, perche' mostrava solo `7%`. Ci sono cascato leggendo la tabella e ho
+chiamato `cal-rx-iq` il buco piu' grosso rimasto: non lo era. Da cui la colonna.
+
+Due avvertenze sul misurare una regione **da sola**, che non e' un'altra vista
+dello stesso run ma un run **diverso**: `--global-run` riposiziona il pavimento dei
+piani all'ingresso di quella regione, e si vede nei due versi. `cal-rx-iq` da sola
+fa 96% contro il 7% della run; `coeff-setup-2` da sola fa **330 (30%)** contro
+1066 (99%) nel run globale. Non sono confrontabili, e nessuno dei due numeri e'
+sbagliato.
 
 Il totale vecchio resta stampato sopra la tabella, e serve a vedere quanto sommerso
-c'e': 15281 contro 4271.
+c'e': 17532 contro 6602.
 
 `up-ch1-freddo` **e' scesa di 75 con `0024`**, ed e' l'assegnazione che
 redistribuisce: della fase che `0024` aggiunge, la finestra fredda contiene le
@@ -233,7 +651,7 @@ Il totale della global run **non si guarda**: e' oscillato 5953 → 7075 → 578
 cambiamenti che hanno solo migliorato la fedelta', perche' l'assegnazione dei
 blocchi e' esclusiva e un blocco lungo altrove si porta via le op. Il numero da
 guardare e' `up-ch1`. La cal PAPD e' salita da 26% a 68% perche' il suo guscio c'e'
-(`patches/b43/0015`): restano fuori `a3`/`a2`, due buchi da 349 e 276 op.
+(`patches/b43/MESSAGES.md#0015`): restano fuori `a3`/`a2`, due buchi da 349 e 276 op.
 
 `cal RX IQ, ingresso` e' scesa da 5% a 0%: le 84 op che prima risultavano
 appaiate erano coincidenze posizionali, non codice, e lo spostamento del resto le
@@ -258,8 +676,8 @@ ramo e non dice niente dell'altro.
 
 | finestra | cattura | flow | op | in blocchi |
 |---|---|---|---|---|
-| `up-ch1` | `opinit-*`, init a caldo | `init` | 22951 | **5791, 25%** |
-| `up-ch1-freddo` | `full-init-*`, init completo | `initpor` | 27571 | **8746, 32%** |
+| `up-ch1` | `opinit-*`, init a caldo | `init` | 22943 | **17838, 78%** |
+| `up-ch1-freddo` | `full-init-*`, init completo | `initpor` | 27563 | **17293, 63%** |
 
 `up-ch1` comincia dove comincia `switch_channel` — la `CHANSPEC` di **#132**, che
 il tracer emette e il port no — e finisce col **MAC abilitato che trasmette**,
@@ -272,7 +690,7 @@ e' il MAC abilitato ma il limite di confrontabilita': quella cattura ha un buco 
 download delle tabelle statiche, che a caldo non c'e' — si vedono come blocchi da
 **1424** e **806** op, che sono le due vecchie finestre `static-tables`.
 
-**Il parametro giusto adesso c'e': `patches/b43/0017`.**
+**Il parametro giusto adesso c'e': `patches/b43/MESSAGES.md#0017`.**
 `b43_nphy_cal_perical_phyinit()` non inchioda piu' `true`: calcola full o parziale
 come il riferimento, cioe' `fullcal = (canale != canale dell'ultima cal TX IQ/LO)`,
 lo stesso test che `b43_nphy_restore_cal()` fa gia' prima di riusare i
@@ -433,7 +851,7 @@ perche' sia la leva. Non farlo sembrare la leva.
   scarta bookkeeping e ombre, quindi indice ≠ numero di record.
 - Ogni patch dietro un gate di revisione, verificato con `check_patch_gating.py`.
   Eccezioni dichiarate, tutte e sole per refusi di trascrizione da brcmsmac in
-  codice condiviso: `b43/0010` e la mainline
+  codice condiviso: `b43/MESSAGES.md#0010` e la mainline
   `b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7`. Un refuso non e'
   una feature di questo hardware e dietro un gate non ci va.
 - Niente commenti "prima era così": quelli vanno nel messaggio di commit.
@@ -516,7 +934,7 @@ Il record del blob e' `{u16 address; u16 init; u8 do_init; u8 pad}`, sei byte, e
 voci su 412 hanno il flag**. b43 aveva ereditato indirizzo e valore (412 su 412
 identici) e perso la colonna. La cattura combacia col flag esattamente: 39 su 39, e i
 4 registri in piu' vengono da altro codice. Lo stub da 54 che impianta il radio e' il
-set `do_init` di **brcmsmac**, che e' piu' vecchio. `patches/b43/0013`, non provata su
+set `do_init` di **brcmsmac**, che e' piu' vecchio. `patches/b43/MESSAGES.md#0013`, non provata su
 hardware. Vedi `docs/gap-inventory.md` 4h.
 
 ## Due blob, e quale usare
@@ -570,7 +988,7 @@ Il blob da' i nomi veri di brcmsmac: `a3` = `wlc_phy_papd_cal_gctrl_nphy` (2444 
    inquadra `wlc_phy_poll_rssi_nphy`. I due indirizzi in `phy_n.h` sono
    `GPIO_LOOUT`/`HIOUT`, ma su rev 8 non sono latch di uscita: **3400 letture e
    zero scritture** in 70796 record, e il valore e' una coppia di campi da 6 bit
-   con segno, uno rumore attorno a zero. `patches/b43/0015` aggiunge i nomi
+   con segno, uno rumore attorno a zero. `patches/b43/MESSAGES.md#0015` aggiunge i nomi
    `B43_NPHY_REV8_MEAS_C1/C2` accanto ai vecchi e la funzione
    `b43_nphy_rev8_chan_meas()`.
 
@@ -607,15 +1025,16 @@ Il blob da' i nomi veri di brcmsmac: `a3` = `wlc_phy_papd_cal_gctrl_nphy` (2444 
    torna -1 non parte nemmeno `b43_nphy_save_cal()`, che nella sequenza di `0014`
    sta dietro quel controllo. **Non** sono "scritture pure verificabili per
    intero" come diceva questa voce: gli upload li decide la cal.
-2. **Il cursore dei piani di lettura e' avvelenato al primo hit**, e non e' la cal
-   RSSI chiamata due volte come diceva questa voce. Il cursore e' uno, globale e
-   monotono: il primo `planhit` di tutta la run e' `PHY 0x7a` servito dal record
-   **14999** — il vendore quel registro lo legge solo dentro la cal RX IQ, il port
-   all'init — e da li' in poi tutto cio' che il vendore ha letto prima del 15000 e'
-   irraggiungibile. Sulla run: **593 planhit contro 1815 planmiss**, e per esempio
-   `RAD 0x16b`, che ha una sola entry al record 553, la manca. Due strade, e la
-   prima e' quella che paga: **regioni contigue**, dove l'ordine delle read e' lo
-   stesso per costruzione (fatto per la cal PAPD, `CONTIG` in
+2. **Il cursore dei piani era avvelenato al primo hit, ed e' chiuso: ora e' per
+   indirizzo.** Era uno, globale e monotono, e il primo `planhit` di tutta la run
+   era `PHY 0x7a` servito dal record **14999** — il vendore quel registro lo legge
+   solo dentro la cal RX IQ, il port all'init — da cui tutto sotto il 15000
+   irraggiungibile. Chiuso: `saltate` da 923 a **0**, `fuori posizione` da 8823 a
+   **524**. **Ma il verdetto per fase si e' mosso di 13 op**, da 5911 a 5924: servire
+   al port tre volte e mezzo i valori della cattura non compra niente, quindi cio'
+   che resta aperto non e' l'harness che non risponde. Resta buona la prima delle due
+   strade: **regioni contigue**, dove l'ordine delle read e' lo stesso per
+   costruzione (fatto per la cal PAPD, `CONTIG` in
    `phase_compare.py`); oppure un cursore per indirizzo invece che globale. Vedi
    `test/README.md`.
 3. **Quale read sfasa i piani dentro una regione.** Il cursore si puo' posizionare

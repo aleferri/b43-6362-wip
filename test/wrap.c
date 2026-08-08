@@ -79,13 +79,23 @@ struct plan {
 	int iter;
 	int skipped;		/* entry saltate perche' precedono il cursore */
 	int misses;		/* read senza nessuna entry dal cursore in poi */
+	u32 pos;		/* il cursore di QUESTO indirizzo */
 };
 
-/* Cursore sul numero di record della cattura. Le read del port sono una
- * SOTTOSEQUENZA di quelle del vendore -- il port ne fa meno, non altre -- quindi
- * l'ordine globale e' l'informazione che riallinea. Con un contatore per
- * indirizzo basta una read in meno prima di una fase per sfasare tutti i valori
- * di quella fase.
+/* Il cursore e' PER INDIRIZZO, e plan_pos e' solo il pavimento comune da cui
+ * ognuno parte: l'ingresso della regione sotto misura, vedi b43_test_plans_reset.
+ *
+ * L'invariante che regge e' per indirizzo: le read che il port fa di UN indirizzo
+ * sono una sottosequenza di quelle che il vendore fa dello stesso indirizzo, ne fa
+ * meno e nello stesso ordine. Quella globale, sull'interleaving fra indirizzi
+ * diversi, non regge, ed e' misurabile: con un cursore solo il primo hit e' PHY
+ * 0x7a servito dal record 14999, che da un cursore a zero salta a 15000 e rende
+ * irraggiungibile ogni voce sotto quel record per ogni altro indirizzo.
+ *
+ * Il prezzo e' l'altro verso: se il port salta una read di un indirizzo, i valori
+ * successivi DI QUELL'INDIRIZZO si sfasano di uno. Sfasa un indirizzo per volta
+ * invece di tutti, e un valore sfasato rompe la run come la rompe un'op mancante,
+ * quindi la misura per fase lo vede.
  */
 static u32 plan_pos;
 
@@ -119,6 +129,7 @@ static void plan_add(enum plan_kind kind, u16 addr, const u16 *vals,
 			plans[i].iter = 0;
 			plans[i].skipped = 0;
 			plans[i].misses = 0;
+			plans[i].pos = plan_pos;
 			return;
 		}
 	}
@@ -126,7 +137,8 @@ static void plan_add(enum plan_kind kind, u16 addr, const u16 *vals,
 		b43_test_log("ERR", "troppi piani di lettura");
 		return;
 	}
-	plans[nr_plans++] = (struct plan){ kind, addr, vals, recs, cap, 0, 0, 0 };
+	plans[nr_plans++] = (struct plan){ kind, addr, vals, recs, cap, 0, 0, 0,
+					   plan_pos };
 }
 
 void b43_test_plan_phy_reads(u16 addr, const u16 *v, const u32 *r, int cap)
@@ -144,22 +156,81 @@ void b43_test_plan_mmio_reads(u16 addr, const u16 *v, const u32 *r, int cap)
 	plan_add(PLAN_MMIO, addr, v, r, cap);
 }
 
+/* Piani per CELLA di tabella. Servono per le celle che scrive l'hardware dentro
+ * la finestra - i risultati del motore di calibrazione in 15/96.. - e per quelle
+ * sole: il mirror non ha modo di saperle, perche' nessuna write per porta le ha
+ * mai toccate e il loro valore cambia fra una read e l'altra. Si trovano con
+ * `trace_tables.py --hw-written`, che sulla finestra up-ch1 ne conta sette su 51
+ * non riproducibili; le altre 44 hanno valore fisso e sono stato da prima della
+ * finestra, che e' lavoro del seed e non di un piano.
+ *
+ * Il cursore e' per cella e nient'altro, come dice test_harness.h: non c'e' un
+ * ordine globale da rispettare, perche' il motore scrive quella cella e la
+ * risposta giusta e' la n-esima che il vendore ha letto da quella cella.
+ *
+ * Solo tabelle a 16 bit: le celle in gioco sono di IQLOCAL, che e' u16.
+ */
+#define MAX_CELL_PLANS 64
+
+struct cell_plan {
+	u16 id;
+	u16 off;
+	const u16 *vals;
+	int cap;
+	int iter;
+	int over;		/* read oltre la fine del piano */
+};
+
+static struct cell_plan cell_plans[MAX_CELL_PLANS];
+static int nr_cell_plans;
+
+void b43_test_plan_table_cell(u16 id, u16 off, const u16 *vals, int n)
+{
+	int i;
+
+	for (i = 0; i < nr_cell_plans; i++) {
+		if (cell_plans[i].id == id && cell_plans[i].off == off) {
+			cell_plans[i].vals = vals;
+			cell_plans[i].cap = n;
+			cell_plans[i].iter = 0;
+			cell_plans[i].over = 0;
+			return;
+		}
+	}
+	if (nr_cell_plans == MAX_CELL_PLANS) {
+		b43_test_log("ERR", "troppi piani per cella");
+		return;
+	}
+	cell_plans[nr_cell_plans++] = (struct cell_plan){ id, off, vals, n, 0, 0 };
+}
+
+/* Vero se un piano copre questa cella e ha ancora un valore da dare. */
+static bool cell_plan_get(u16 id, u16 off, u16 *val)
+{
+	int i;
+
+	for (i = 0; i < nr_cell_plans; i++) {
+		if (cell_plans[i].id != id || cell_plans[i].off != off)
+			continue;
+		if (cell_plans[i].iter >= cell_plans[i].cap) {
+			cell_plans[i].over++;
+			return false;
+		}
+		*val = cell_plans[i].vals[cell_plans[i].iter++];
+		return true;
+	}
+	return false;
+}
+
 void b43_test_plans_reset(void)
 {
 	const char *from = getenv("B43_TEST_PLAN_FROM");
 
 	nr_plans = 0;
-	/* Il cursore parte da dove dice B43_TEST_PLAN_FROM, cioe' dal primo record
-	 * della regione sotto misura.
-	 *
-	 * Serve perche' il cursore e' uno, globale e monotono: una sola read che il
-	 * port fa dove il vendore non la fa lo porta in avanti di migliaia di
-	 * record, e da li' tutto quello che il vendore ha letto prima diventa
-	 * irraggiungibile. Misurato sulla run intera: 593 hit contro 1815 miss, e
-	 * il primo hit e' PHY 0x7a servito dal record 14999. Dentro una regione
-	 * contigua il problema non c'e', perche' l'ordine delle read e' lo stesso:
-	 * posizionare il cursore all'ingresso della regione e' quello che rende i
-	 * piani utili invece che decorativi.
+	nr_cell_plans = 0;
+	/* Il pavimento da cui parte il cursore di ogni piano: il primo record della
+	 * regione sotto misura, da B43_TEST_PLAN_FROM. Serve a non far servire a una
+	 * fase i valori che il vendore ha letto prima di entrarci.
 	 */
 	plan_pos = from ? (u32)strtoul(from, NULL, 0) : 0;
 }
@@ -175,6 +246,7 @@ void b43_test_plans_report(FILE *f)
 			names[plans[i].kind], plans[i].addr,
 			plans[i].iter, plans[i].cap, plans[i].skipped,
 			plans[i].misses);
+
 }
 
 /* Ritorna true e riempie val se un piano copre questo indirizzo. */
@@ -193,7 +265,7 @@ static bool plan_get(enum plan_kind kind, u16 addr, u16 *val)
 
 		/* La prima entry che nella cattura viene dal cursore in poi. */
 		for (j = plans[i].iter; j < plans[i].cap; j++)
-			if (plans[i].recs[j] >= plan_pos)
+			if (plans[i].recs[j] >= plans[i].pos)
 				break;
 		plans[i].skipped += j - plans[i].iter;
 		plans[i].iter = j;
@@ -205,7 +277,7 @@ static bool plan_get(enum plan_kind kind, u16 addr, u16 *val)
 			if (plan_dbg)
 				fprintf(stderr, "planmiss %s 0x%04x cursore %u "
 					"ultima %u\n", plan_kind_name(kind), addr,
-					plan_pos,
+					plans[i].pos,
 					plans[i].cap ?
 					plans[i].recs[plans[i].cap - 1] : 0);
 			return false;
@@ -214,8 +286,8 @@ static bool plan_get(enum plan_kind kind, u16 addr, u16 *val)
 		if (plan_dbg)
 			fprintf(stderr, "planhit %s 0x%04x rec %u cursore %u\n",
 				plan_kind_name(kind), addr, plans[i].recs[j],
-				plan_pos);
-		plan_pos = plans[i].recs[j] + 1;
+				plans[i].pos);
+		plans[i].pos = plans[i].recs[j] + 1;
 		plans[i].iter = j + 1;
 		return true;
 	}
@@ -256,21 +328,37 @@ void b43_test_mirror_radio_set(u16 reg, u16 val)
 static u32 tbl_mirror[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
 static u16 tbl_hi_pending;
 static int tbl_hi_valid;
+/* Il lato lettura: la cella agganciata dall'ultima 0x73, da cui 0x74 prende la
+ * word alta. Vedi tbl_port_get. */
+static u32 tbl_latch;
+static int tbl_latch_valid;
+/* Letture di 0x74 senza una 0x73 che le preceda: non ne fa nessuna larghezza di
+ * b43_ntab_read, quindi se il contatore sale c'e' un accesso alla porta dati che
+ * non passa da la' e va guardato invece di cadere sul mirror in silenzio. */
+static int tbl_hi_unlatched;
 /* Vero mentre gira il corpo vero di una b43_ntab_*: quelle passano anche loro da
  * 0x72/0x73/0x74, e il mirror l'hanno gia' aggiornato per offset, quindi
  * riapplicarlo dalla porta lo farebbe due volte, con l'auto-incremento che sposta
  * la seconda applicazione sulla cella dopo. */
 static int in_ntab;
-static u8 tbl_written[TBL_MIRROR_IDS][TBL_MIRROR_OFFS];
+
+/* Il valore che una cella di tabella aveva all'ingresso della finestra. Come gli
+ * altri mirror_set: si applica dopo l'init a freddo e prima di quello misurato,
+ * quindi dice cio' che la finestra non puo' sapere e non copre niente di cio' che
+ * il codice sotto misura programma da se'.
+ */
+void b43_test_mirror_table_set(u16 id, u16 off, u32 val)
+{
+	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS)
+		tbl_mirror[id][off] = val;
+}
 
 static void tbl_mirror_set(u32 offset, u32 value)
 {
 	u16 id = (offset & 0x0000FC00) >> 10, off = offset & 0x000003FF;
 
-	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS) {
+	if (id < TBL_MIRROR_IDS && off < TBL_MIRROR_OFFS)
 		tbl_mirror[id][off] = value;
-		tbl_written[id][off] = 1;
-	}
 }
 
 /* Le tre larghezze che b43_ntab_* distingue stanno nei bit alti dell'offset,
@@ -334,7 +422,6 @@ static void tbl_port_put(int high, u16 val)
 	}
 	tbl_mirror[id][off] = tbl_hi_valid ? ((u32)tbl_hi_pending << 16) | val
 					   : val;
-	tbl_written[id][off] = 1;
 	tbl_hi_valid = 0;
 	if (off + 1 < TBL_MIRROR_OFFS)
 		mirror_phy[0x72] = (sel & 0xFC00) | (off + 1);
@@ -343,20 +430,69 @@ static void tbl_port_put(int high, u16 val)
 /* La cella indirizzata dall'ultima scrittura su 0x72, che porta (id << 10) | off
  * per ogni larghezza di tabella: 0x3c57 e' 15/0x57, 0x1d54 e' 7/0x154.
  * `high` distingue la porta 0x74 (word alta di una cella a 32 bit) da 0x73.
+ *
+ * Il modello e' il simmetrico di tbl_port_put, e le due larghezze si servono
+ * senza sapere quale sia: la lettura di 0x73 aggancia la cella INTERA e fa
+ * avanzare l'indirizzo, quella di 0x74 rende la word alta agganciata e non
+ * avanza. Serve perche' le due porte si visitano in ordine opposto nei due
+ * versi - b43_ntab_read fa 0x73 e poi 0x74, b43_ntab_write 0x74 e poi 0x73
+ * (tables_nphy.c) - e senza l'aggancio l'incremento sulla word bassa
+ * spingerebbe la lettura della word alta sulla cella dopo.
+ *
+ * L'incremento e' quello dell'hardware, ed e' cio' che rende una read in blocco
+ * un indirizzo e N letture: la cattura lo mostra su ogni cella a 32 bit, per
+ * esempio #7430-7435, dove 26/0xca si legge con una 0x72, una 0x73 (0x002e) e
+ * una 0x74 (0x4077) per la cella 0x4077002e.
+ *
+ * La cella si serve sempre, anche se nessuno l'ha scritta: tbl_mirror parte a
+ * zero e zero e' la risposta giusta, perche' 0x73 e 0x74 sono SOLO la porta dati
+ * e il mirror del registro li' non significa niente. Servirlo era il buco: una
+ * cella intoccata si riprendeva l'ultima word scritta sulla porta da qualunque
+ * tabella.
  */
 int tbl_port_get(int high, u16 *val)
 {
 	u32 sel = mirror_phy[0x72];
-	u32 cell;
-	u16 id = (sel & 0xFC00) >> 10, off = sel & 0x3FF;
+	u16 id = (sel & 0xFC00) >> 10, off = sel & 0x3FF, pv;
 
+	if (high) {
+		if (!tbl_latch_valid) {
+			tbl_hi_unlatched++;
+			return 0;
+		}
+		*val = tbl_latch >> 16;
+		return 1;
+	}
 	if (id >= TBL_MIRROR_IDS || off >= TBL_MIRROR_OFFS)
 		return 0;
-	if (!tbl_written[id][off])
-		return 0;
-	cell = tbl_mirror[id][off];
-	*val = high ? (cell >> 16) : (cell & 0xFFFF);
+	/* Se l'hardware ha scritto questa cella, il piano dice cosa ci ha messo, e
+	 * il mirror lo impara: da qui in avanti una read senza piano rende
+	 * l'ultimo valore del motore invece di zero.
+	 */
+	if (cell_plan_get(id, off, &pv))
+		tbl_mirror[id][off] = pv;
+	tbl_latch = tbl_mirror[id][off];
+	tbl_latch_valid = 1;
+	*val = tbl_latch & 0xFFFF;
+	if (off + 1 < TBL_MIRROR_OFFS)
+		mirror_phy[0x72] = (sel & 0xFC00) | (off + 1);
 	return 1;
+}
+
+void b43_test_tables_report(FILE *f)
+{
+	int i;
+
+	for (i = 0; i < nr_cell_plans; i++)
+		fprintf(f, "piano cella %2u/0x%03x: consumati %d/%d, oltre la "
+			"fine %d\n", cell_plans[i].id, cell_plans[i].off,
+			cell_plans[i].iter, cell_plans[i].cap,
+			cell_plans[i].over);
+
+	if (tbl_hi_unlatched)
+		fprintf(f, "porta dati: %d letture di 0x74 senza la 0x73 che le "
+			"aggancia, servite dal mirror del registro\n",
+			tbl_hi_unlatched);
 }
 
 u16 b43_phy_read(struct b43_wldev *dev, u16 reg)

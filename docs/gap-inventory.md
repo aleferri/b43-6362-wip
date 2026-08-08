@@ -55,7 +55,7 @@ Impatto atteso: sensibilità RX e comportamento AGC. **SALAME**: che sia il
 primo collo di bottiglia sul 2x2 è la mia ipotesi di lettura, va misurato
 (vedi `reports/30-rx-sensitivity.md`) prima di trattarlo come tale.
 
-Patch: `patches/b43/0001`, scritta sui valori della cattura e non su brcmsmac,
+Patch: `patches/b43/MESSAGES.md#0001`, scritta sui valori della cattura e non su brcmsmac,
 perché i due divergono: LNA1 `8, 13, 18, 25` invece di `9, 14, 19, 24`, W1 clip
 24 invece di 13, e in 2.4 GHz il device programma anche LNA2, TIA e i gain bits
 che il ramo 2 GHz di brcmsmac non tocca. Dettaglio in `docs/trace-init-2g.md`.
@@ -139,7 +139,7 @@ voce: sono `wlc_phy_txpwrctrl_enable_nphy` che spegne il controllo di potenza
 dentro `wlc_phy_txpwr_index_nphy`, e b43 quel codice ce l'ha in
 `b43_nphy_tx_power_ctrl()`. Vedi `docs/rxiq-cal-map.md`.
 
-**CHIUSA.** `patches/b43/0018` porta il guscio, l'indice di potenza per core e lo
+**CHIUSA.** `patches/b43/MESSAGES.md#0018` porta il guscio, l'indice di potenza per core e lo
 sweep di gain, e `up-ch1` passa da 5791 a **11552 op su 22951**; `0019` aggiunge il
 gain di pre-calibrazione (**12363**), `0020` rimette l'indice dopo la cal PAPD
 (**13134**), `0021` lo restituisce dopo la lettura dei gain (**13625**), e
@@ -220,7 +220,7 @@ giustamente non ha un equivalente.
 
 ### 4j. I due tetti della tabella di potenza, e da dove vengono
 
-`patches/b43/0025` applica due tetti per numero di catene — 68 qdBm a una, 56 a
+`patches/b43/MESSAGES.md#0025` applica due tetti per numero di catene — 68 qdBm a una, 56 a
 due — e con quelli le 84 celle della tabella di potenza aggiustata escono **84 su
 84** sulla 3580L e **82 su 84** sulla vd630, che hanno offset SROM diversi di un
 fattore quattro. Le 2 che restano sono uno **sfasamento di un gruppo** nella colonna
@@ -252,7 +252,7 @@ sottrarrebbe `hw_gain = 6 + antenna_gain`, darebbe 72 anche lui.
 Il vendore per radiorev 7 e 8 usa `nphy_papd_padgain_dlt_2g_2057rev7`, la
 tabella merged usa i valori del rev 5. **Deciso dalla cattura**: ricalcolando le
 128 celle PAPD che quella tabella alimenta, i valori rev 7 le predicono tutte, i
-valori in tree ne predicono 5. Correzione in `patches/b43/0002`, dettaglio in
+valori in tree ne predicono 5. Correzione in `patches/b43/MESSAGES.md#0002`, dettaglio in
 `docs/rf-pwr-offset-rev8.md`.
 
 ### 4c. Il percorso PAPD non viene mai eseguito sui rev 7+
@@ -261,7 +261,7 @@ valori in tree ne predicono 5. Correzione in `patches/b43/0002`, dettaglio in
 per `phy->rev >= 7` con un `/* TODO: Enable this once we have gains configured */`,
 quindi le tabelle 26 e 27 a offset 576 (128 celle per core, la compensazione
 PAPD) restano non programmate. Il loop che le calcola è già lì e nell'harness
-produce esattamente le 256 celle della cattura. `patches/b43/0003` lo abilita per
+produce esattamente le 256 celle della cattura. `patches/b43/MESSAGES.md#0003` lo abilita per
 radio 2057 rev 8 e lascia gli altri rev 7+ come sono. Da mandare dopo `0002`:
 con i valori sbagliati scrive 246 celle su 256 diverse dal vendore.
 
@@ -295,7 +295,7 @@ E la posizione non è quella ovvia: i dieci sono **intercalati** con quelli a 2
 GHz, non in coda — `0x43` subito dopo `0x41`, `0x4a` dopo `0x47`, i tre del core 0
 fra `PAD2G` e `LNA2G`. È lo stesso ordine del ramo intero di b43.
 
-`patches/b43/0011` li scrive, gateata su radio 2057 rev 8, la sola combinazione
+`patches/b43/MESSAGES.md#0011` li scrive, gateata su radio 2057 rev 8, la sola combinazione
 che la cattura copre. Le altre due board che passano per la tabella 2 GHz (phy
 rev 8 con radio rev 5, phy rev 17 con radio rev 14) restano come sono: brcmsmac
 non ha righe a 2.4 GHz per quei radio, quindi non c'è niente contro cui
@@ -314,7 +314,7 @@ e le epsilon (31 e 33). Restano con quello che c'era.
 
 La cattura mostra il vendore scrivere la scalare con 64 valori per core — gli
 stessi che brcmsmac ha in `nphy_papd_scaltbl`, verificati identici — e azzerare le
-64 epsilon per core. `patches/b43/0004` fa lo stesso per radio 2057 rev 8: nell'
+64 epsilon per core. `patches/b43/MESSAGES.md#0004` fa lo stesso per radio 2057 rev 8: nell'
 harness le 256 celle coincidono con la cattura, zero divergenti.
 
 Non aggiunge la calibrazione PAPD, che è quella che riempirebbe le epsilon con
@@ -335,7 +335,7 @@ La cattura, nello stesso punto e in entrambi gli init, scrive `0x63 = 0x14` e
 mai. b43 invece lascia IMAIN_CORE0 al suo valore, scrive il registro di gain del
 core 0 con un valore destinato al bias, e programma i due core in modo diverso.
 
-`patches/b43/0005` dà al rev 8 un `case` suo e programma IMAIN su entrambi i core.
+`patches/b43/MESSAGES.md#0005` dà al rev 8 un `case` suo e programma IMAIN su entrambi i core.
 Il rev 7 tiene il suo `case` e il suo comportamento: ha probabilmente lo stesso
 problema, ma non c'è una cattura da hardware con quel radio, e il ramo 40 MHz
 nemmeno. I due `case` sono separati di proposito, con 20 e 40 MHz divisi dentro
@@ -357,7 +357,7 @@ riportato è il massimo fra i core.
 
 La cattura legge esattamente quelle quattro parole, 96 volte, e passando i suoi
 valori per la conversione escono **−82, −86, −88 dBm** per core: plausibili e
-coerenti fra i due core. `patches/b43/0006` la cabla.
+coerenti fra i due core. `patches/b43/MESSAGES.md#0006` la cabla.
 
 Attenzione al recinto: non è gateata sulla revisione ma sul **tipo** di PHY,
 quindi tocca tutte le N-PHY. L'argomento per accettarla è che oggi quelle
@@ -402,7 +402,7 @@ come in `wlc_phy_loadsampletable_nphy` — e tre toni da confrontare: ampiezza 0
 #1288 (idle TSSI), ampiezza 250 a 2500 kHz a #8638 (cal TX IQ/LO, periodo 8
 campioni), ampiezza 181 a 4000 kHz a #11838 (cal PAPD, periodo 5).
 
-`patches/b43/0010` sistema entrambi. Sul tono di #8638, parole sbagliate su 160:
+`patches/b43/MESSAGES.md#0010` sistema entrambi. Sul tono di #8638, parole sbagliate su 160:
 160 in mainline (tutte zero), 140 con la sola maschera corretta, 120 col solo
 passo corretto, **0** con la patch.
 
@@ -513,7 +513,7 @@ tabelle e a due generazioni di blob distanti anni.
 **SALAME** su cosa lo giustifichi: che il riferimento PTAT sia condiviso fra i due
 core, e quindi che `0x0e7` sia un alias morto, e' l'unica lettura che mi viene, ma
 dalle tabelle non e' falsificabile e non l'ho verificata. Quello che conta per noi e'
-che `patches/b43/0013` fa la cosa giusta a non scriverlo: nessuna versione del
+che `patches/b43/MESSAGES.md#0013` fa la cosa giusta a non scriverlo: nessuna versione del
 driver proprietario lo scrive.
 
 La tabella intera, con la colonna `do_init` e la classe, sta in
@@ -534,7 +534,7 @@ stesso rapporto della tabella intera (70 e 63). L'unica parte spiegata e' che 50
 70 registri con `5G` nel nome non vengano scritti in una cattura che sta solo sul 2.4
 GHz. I restanti **272 restano senza spiegazione**.
 
-`patches/b43/0013` filtra la tabella alle 39 voci. **Nessun valore cambia**: delle
+`patches/b43/MESSAGES.md#0013` filtra la tabella alle 39 voci. **Nessun valore cambia**: delle
 39 che restano, tutte tengono indirizzo e valore che avevano, e non ne compare
 nessuna nuova — 373 cancellate, 0 aggiunte, 0 modificate. Il diff sembra una
 riscrittura solo perche' le voci stanno quattro per riga, quindi togliendone 373 su

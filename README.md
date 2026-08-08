@@ -17,7 +17,7 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; disponibilità blob da verificare | `docs/firmware-rev22.md` |
 | enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/bcma/`, `docs/soc-glue.md` |
 | SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
-| gain control N-PHY rev 7+ | stub vuoto in mainline, **patch in `patches/b43/0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/README.md` |
+| gain control N-PHY rev 7+ | stub vuoto in mainline, **nel rollup, `patches/b43/MESSAGES.md#0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/README.md` |
 | chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, la tabella 2 GHz di b43 non li aveva: **patch `0011`**, 31 cambi canale su 31 nella cattura | `docs/gap-inventory.md` |
 | chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
 | RF power offset rev 8 | valori sbagliati in mainline, **chiuso dalla cattura**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
@@ -50,7 +50,7 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
   catture ce ne sono due: `opinit-ch1-ch6-bw20` (70796 record, due cicli
   down/up su canali operativi 1 e 6, zero perdite), che ha già corretto una
   patch (`docs/trace-init-2g.md`) e trovato quattro difetti di mainline
-  (`patches/b43/0005`, `0010`, `0011`, `0012`), e `full-init-ch1-bw20` (81397
+  (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`), e `full-init-ch1-bw20` (81397
   record, init a freddo, con un buco da 65285 record per overflow della fifo),
   la sola che contenga il download delle tabelle statiche.
 
