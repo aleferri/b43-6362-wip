@@ -534,5 +534,6 @@ int main(int argc, char **argv)
 
 	fflush(stdout);
 	b43_test_plans_report(stderr);
+	b43_test_tables_report(stderr);
 	return err ? 1 : 0;
 }

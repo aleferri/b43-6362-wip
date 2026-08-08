@@ -1,0 +1,55 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Sat, 8 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: take the N-PHY TX I/Q LO results out instead of overwriting them
+
+At the end of b43_nphy_cal_tx_iq_lo() the calibration engine has left its
+result in the IQLOCAL table at offset 96, and the driver is meant to read
+it from there and install it at offset 80, where the rest of the driver
+looks for the coefficients. The two calls have their direction swapped:
+
+	b43_ntab_write_bulk(dev, B43_NTAB16(15, 96), 4, buffer);
+	b43_ntab_read_bulk(dev, B43_NTAB16(15, 80), 4, buffer);
+
+So the driver overwrites the engine's result at 96 with the stale
+contents of buffer, then reads offset 80 into buffer instead of writing
+it. Offset 80 keeps whatever it had, and what the calibration produced is
+destroyed by the write that was supposed to collect it. The three pairs
+that follow in the same block are the right way round, which is what
+makes this look like a transcription slip rather than intent.
+
+The reference reads 96 and writes 80:
+
+	wlc_phy_table_read_nphy(pi, NPHY_TBL_ID_IQLOCAL, 4, 96, 16, tbl_buf);
+	wlc_phy_table_write_nphy(pi, NPHY_TBL_ID_IQLOCAL, 4, 80, 16, tbl_buf);
+
+An MMIO capture of wl 6.30.102.7 on a BCM6362 (N-PHY rev 8, radio 2057
+rev 8) writes four words to offset 80 at the end of the calibration, and
+the first is 0x0059. Before this change the driver never writes offset 80
+there at all, so the transmit power control coefficient setup that reads
+it later computes from zeros; after it, offset 80 carries 0x0059 as in
+the capture, and the matched operations over the calibration rise from
+1195 of 1570 to 1308.
+
+This is not specific to radio 2057 rev 8: the block is shared by every
+N-PHY rev 3 and later, so it is deliberately not gated.
+
+Verified: record #10640, "TBL.WR   id=0x000f off=0x0050 len=4"
+Link: https://github.com/aleferri/b43-6362-wip/blob/d2c490d/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n25914
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+index 22359bd9d..56cf3ee25 100644
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -5499,8 +5499,8 @@ static int b43_nphy_cal_tx_iq_lo(struct b43_wldev *dev,
+ 		last = (dev->phy.rev < 3) ? 6 : 7;
+ 
+ 		if (!mphase || nphy->mphase_cal_phase_id == last) {
+-			b43_ntab_write_bulk(dev, B43_NTAB16(15, 96), 4, buffer);
+-			b43_ntab_read_bulk(dev, B43_NTAB16(15, 80), 4, buffer);
++			b43_ntab_read_bulk(dev, B43_NTAB16(15, 96), 4, buffer);
++			b43_ntab_write_bulk(dev, B43_NTAB16(15, 80), 4, buffer);
+ 			if (dev->phy.rev < 3) {
+ 				buffer[0] = 0;
+ 				buffer[1] = 0;

@@ -26,6 +26,7 @@ void b43_test_plan_mmio_reads(u16 addr, const u16 *results,
 				   const u32 *recs, int cap);
 void b43_test_plans_reset(void);
 void b43_test_plans_report(FILE *f);
+void b43_test_tables_report(FILE *f);
 
 /*
  * Pre-populate the radio mirror with a real hardware value (used when a
@@ -35,6 +36,7 @@ void b43_test_plans_report(FILE *f);
  */
 void b43_test_mirror_radio_set(u16 reg, u16 val);
 void b43_test_mirror_phy_set(u16 reg, u16 val);
+void b43_test_mirror_table_set(u16 id, u16 off, u32 val);
 void b43_test_trace_to(FILE *f);
 
 /*

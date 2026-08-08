@@ -19,7 +19,7 @@ header (`B43_TXH_PHY1_MODE_{SISO,CDD,STBC,SDM}`, CRATE, MODUL), e il firmware
 ### M0 — base legacy sana (prerequisito, nessuna riga di HT)
 
 Delle sei voci iniziali di `gap-inventory.md` ne è rimasta una da chiudere: il
-gain control rev7, che è `patches/b43/0001`, scritta sui valori della cattura.
+gain control rev7, che è `patches/b43/MESSAGES.md#0001`, scritta sui valori della cattura.
 Le altre si sono rivelate non-buchi leggendo brcmsmac e il trace (loopfilter,
 rcal, rccal) o mal attribuite (tx cal radio setup).
 

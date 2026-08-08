@@ -84,7 +84,7 @@ altro:
 Il ramo 2 GHz di brcmsmac è più povero di quello che il blob 6.30 esegue: LNA2
 (`fc 06 0a 0f`), TIA gain (`ff 00 03 06...`) e i gain bits (`00 01 02 03...`)
 vengono programmati, e ci sono anche i clip1 low gain code (0x37/0x2ad = 0x74,
-0x38/0x2ae = 0x18). `patches/b43/0001` è stata riscritta su questi numeri.
+0x38/0x2ae = 0x18). `patches/b43/MESSAGES.md#0001` è stata riscritta su questi numeri.
 
 I due init danno lo stesso blocco identico — stessi registri, stessi valori,
 stesso ordine, a #685-#770 con canale operativo 1 e a #35491-#35576 con canale

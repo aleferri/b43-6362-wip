@@ -13,6 +13,11 @@ calcolare. Se si seminasse anche lo stato prodotto dentro la finestra, un
 registro che il port programma sbagliato tornerebbe giusto per magia e la misura
 non direbbe piu' niente.
 
+Per i REGISTRI si guarda solo prima della finestra. Per le celle di tabella il
+confine e' per forza diverso, perche' il download statico che le riempie e'
+avvenuto in un boot precedente e prima di `--before` non c'e' niente da guardare:
+vedi `table_cells()`, che spiega quale condizione tiene onesta la regola.
+
 Tre fonti, in ordine di quando si presentano:
 
   - le write, `RAD.WR` / `PHY.WR` / `MMIO.WR`: il valore e' quello scritto;
@@ -23,7 +28,7 @@ Tre fonti, in ordine di quando si presentano:
     vincono su quello che si era dedotto.
 
     ./reverse-tools/gen_seed.py router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded \\
-        --before 132 --name up > test/seed_up.h
+        --before 132 --until 26100 --name up > test/seed_up.h
 """
 
 import argparse
@@ -124,7 +129,7 @@ def parse(path, before):
     return state, ndef
 
 
-def emit(state, name, source, before, out):
+def emit(state, name, source, before, out, cells=None):
     tot = sum(len(v) for v in state.values())
     out.write('/* SPDX-License-Identifier: GPL-2.0\n'
               ' *\n'
@@ -149,6 +154,11 @@ def emit(state, name, source, before, out):
                           for a, v in items[i:i + 4])
             out.write('\t%s\n' % row.rstrip())
         out.write('};\n\n')
+    items = sorted((cells or {}).items())
+    out.write('static const u32 seed_%s_table[][3] = {\n' % name)
+    for (tid, off), v in items:
+        out.write('\t{ %d, 0x%03x, 0x%08x },\n' % (tid, off, v))
+    out.write('};\n\n')
     out.write('static inline void b43_test_seed_%s(void)\n{\n'
               '\tunsigned int i;\n\n'
               '\tfor (i = 0; i < ARRAY_SIZE_TEST(seed_%s_phy); i++)\n'
@@ -157,8 +167,46 @@ def emit(state, name, source, before, out):
               '\tfor (i = 0; i < ARRAY_SIZE_TEST(seed_%s_radio); i++)\n'
               '\t\tb43_test_mirror_radio_set(seed_%s_radio[i][0],\n'
               '\t\t\t\t\t  seed_%s_radio[i][1]);\n'
-              '}\n\n' % ((name,) * 7))
+              '\tfor (i = 0; i < ARRAY_SIZE_TEST(seed_%s_table); i++)\n'
+              '\t\tb43_test_mirror_table_set(seed_%s_table[i][0],\n'
+              '\t\t\t\t\t  seed_%s_table[i][1],\n'
+              '\t\t\t\t\t  seed_%s_table[i][2]);\n'
+              '}\n\n' % ((name,) * 11))
     out.write('#endif\n')
+
+
+def table_cells(capture, before, until):
+    """Le celle di tabella che valevano qualcosa all'ingresso della finestra.
+
+    Qui il confine e' PER FORZA diverso da quello dei registri, e vale dirlo. Una
+    cella come 15/0x50 non viene scritta da nessuna parte nella cattura: il
+    download statico che l'ha riempita e' avvenuto in un boot precedente, e prima
+    del record `--before` non c'e' niente da guardare. Il suo stato all'ingresso
+    e' osservabile solo dalla PRIMA read che la tocca dentro la finestra.
+
+    La regola resta onesta perche' e' la stessa che il tool applica ai registri
+    tramite RETVAL - una read dice lo stato meglio di qualunque inferenza - con
+    una condizione in piu': si tiene solo la cella che nessuna write per porta ha
+    toccato prima di quella read, e il cui valore non cambia. Se la finestra ci ha
+    scritto prima di leggerla, il valore e' cio' che la finestra deve calcolare e
+    seminarlo lo farebbe tornare giusto per magia; se cambia fra le read, e'
+    l'hardware che ci scrive dentro la finestra ed e' lavoro di un piano per
+    cella, non del seme.
+
+    Le due popolazioni le separa trace_tables.hw_written(), che e' anche cio' che
+    `trace_tables.py --hw-written` stampa: sulla finestra up-ch1, 44 celle a
+    valore fisso qui e 7 a valore variabile nei piani.
+    """
+    import trace_tables as tt
+
+    records = [r for r in tt.parse(capture) if before <= r['seq'] <= until]
+    out = {}
+    for (tid, off), c in sorted(tt.hw_written(records).items()):
+        vals = set(c['vals'])
+        if len(vals) != 1 or not c['mai_scritta']:
+            continue
+        out[(tid, off)] = c['vals'][0]
+    return out
 
 
 def main():
@@ -168,12 +216,21 @@ def main():
     ap.add_argument('--before', type=int, required=True,
                     help='il primo record DELLA FINESTRA: si guarda solo prima')
     ap.add_argument('--name', required=True)
+    ap.add_argument('--until', type=int, required=True,
+                    help='l\'ultimo record della finestra. Serve alle sole celle '
+                         'di tabella, il cui stato all\'ingresso e\' osservabile '
+                         'solo dalla prima read dentro la finestra: vedi '
+                         'table_cells()')
     args = ap.parse_args()
 
     state, ndef = parse(args.capture, args.before)
-    emit(state, args.name, args.capture.split('/')[-1], args.before, sys.stdout)
-    sys.stderr.write('seminati: %d phy, %d radio, di cui %d default del chip\n'
-                     % (len(state['phy']), len(state['radio']), ndef))
+    cells = table_cells(args.capture, args.before, args.until)
+    emit(state, args.name, args.capture.split('/')[-1], args.before, sys.stdout,
+         cells)
+    sys.stderr.write('seminati: %d phy, %d radio, di cui %d default del chip, '
+                     '%d celle di tabella\n'
+                     % (len(state['phy']), len(state['radio']), ndef,
+                        len(cells)))
 
 
 if __name__ == '__main__':

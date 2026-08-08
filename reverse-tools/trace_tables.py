@@ -177,6 +177,48 @@ def check(tbl):
     return problems
 
 
+def hw_written(records):
+    """Celle la cui rilettura il mirror per porta non puo' riprodurre.
+
+    Si percorrono write e read in ordine di record tenendo lo stato per cella,
+    esattamente come fa il mirror dell'harness. Una read che rende un valore
+    diverso da quello che l'ultima write per porta ci ha messo -- o che rende un
+    valore su una cella che nessuna write per porta ha mai toccato -- e' una cella
+    il cui contenuto arriva da qualcos'altro: il motore di calibrazione, o il
+    download statico fuori dalla finestra. Per quelle un piano e' l'unica fonte
+    onesta, perche' il mirror non ha modo di saperle.
+
+    Le altre non le vuole nessuno: se la write per porta c'e', il valore giusto e'
+    quello che la tabella contiene, ed e' quello che il mirror rende.
+    """
+    events = []
+    for t in collect(records):
+        events.append((t['seq'], 'WR', t))
+    for t in collect_reads(records):
+        events.append((t['seq'], 'RD', t))
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    state = {}
+    cells = {}
+    for seq, kind, t in events:
+        if t['id'] is None or t['off'] is None:
+            continue
+        for k, val in enumerate(t['values']):
+            key = (t['id'], t['off'] + k)
+            if kind == 'WR':
+                state[key] = val
+                continue
+            if val is None:
+                continue
+            if state.get(key) != val:
+                c = cells.setdefault(key, dict(n=0, first=seq, vals=[],
+                                               mai_scritta=key not in state))
+                c['n'] += 1
+                c['vals'].append(val)
+            state[key] = val
+    return cells
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -191,6 +233,11 @@ def main():
                     help='storia di una sola cella: ogni accesso, read e write,'
                          ' in ordine di record, col valore che quella cella'
                          ' aveva o prendeva')
+    ap.add_argument('--hw-written', action='store_true',
+                    help='celle la cui rilettura il mirror per porta non puo'
+                         ' riprodurre, cioe\' quelle che scrive qualcos\'altro:'
+                         ' sono le sole per cui un piano per cella e\' una fonte'
+                         ' e non un suggerimento')
     args = ap.parse_args()
 
     records = parse(args.trace)
@@ -225,6 +272,29 @@ def main():
             print('#%-6d %s  len %-3d %s%s' % (seq, kind, ln, shown, mark))
         print('\n%d accessi alla cella tbl %d off 0x%x' % (len(hist), want_id,
                                                            want_off))
+        return
+
+    if args.hw_written:
+        cells = hw_written(records)
+        if args.id is not None:
+            cells = {k: v for k, v in cells.items() if k[0] in args.id}
+        per_tbl = {}
+        for (tid, off), c in sorted(cells.items()):
+            per_tbl.setdefault(tid, []).append((off, c))
+        tot = 0
+        for tid in sorted(per_tbl):
+            offs = per_tbl[tid]
+            tot += sum(c['n'] for _, c in offs)
+            print('tbl %2d: %d celle, %d riletture non riproducibili'
+                  % (tid, len(offs), sum(c['n'] for _, c in offs)))
+            for off, c in offs:
+                vals = ' '.join('0x%04x' % v for v in c['vals'][:8])
+                if len(c['vals']) > 8:
+                    vals += ' ...'
+                print('    off 0x%03x  x%-3d  #%-6d %s%s'
+                      % (off, c['n'], c['first'], vals,
+                         '  (mai scritta per porta)' if c['mai_scritta'] else ''))
+        print('\n%d celle, %d riletture' % (len(cells), tot))
         return
 
     tables = collect(records)

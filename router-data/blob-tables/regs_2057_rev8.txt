@@ -3,7 +3,7 @@
 # Il record del blob e' sei byte: u16 address, u16 init, u8 do_init, u8 pad.
 # 413 record, 2478 byte, l'ultimo e' il terminatore 0xffff.
 #
-# `patches/b43/0013` porta in b43 solo le 39 voci con do_init=1, che sono quelle
+# `patches/b43/MESSAGES.md#0013` porta in b43 solo le 39 voci con do_init=1, che sono quelle
 # che il driver proprietario scrive davvero all'init del radio. Le altre 373
 # stanno qui perche' sono dati che abbiamo e che serviranno: 51 di esse le
 # riprogramma il cambio canale dalla chantab, 322 non le scrive nessuno.
@@ -16,7 +16,7 @@
 # La riga che si puo' tracciare fra le 412, e che le partiziona senza sovrapporsi:
 #
 #   init      39   il flag del blob: le scrive all'init del radio. Sono quelle
-#                  che patches/b43/0013 porta in b43.
+#                  che patches/b43/MESSAGES.md#0013 porta in b43.
 #   chan      51   le riprogramma il cambio canale o una cal, dalla chantab e non
 #                  da qui: vcocal, RFPLL loopfilter, MMD, i LOGEN_*_TUNE. 31
 #                  scritture ciascuna nella cattura, uno per cambio canale.

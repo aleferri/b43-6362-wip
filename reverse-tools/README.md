@@ -84,7 +84,7 @@ Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
   che la implementano e stampa i valori, con controllo di coerenza fra
   intestazione e dati (indirizzo = `(id << 10) | off`, conteggio = `len`). Con
   `--c-array` li emette come array C. È così che sono stati ricavati i numeri di
-  `patches/b43/0001`.
+  `patches/b43/MESSAGES.md#0001`.
 - **verify_chantab_trace.py** — per ogni `CHANSPEC` del trace confronta i 18
   campi della chantab 2.4 GHz di b43 con le scritture radio che seguono, valore
   e ordine. Verifica su tutti i canali che la cattura tocca invece che su uno

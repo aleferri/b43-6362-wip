@@ -34,6 +34,46 @@ KINDS = {'PHY.RD': 'phy', 'RAD.RD': 'radio', 'MMIO.RD': 'mmio'}
 TABLE_PORT = {0x72, 0x73, 0x74}
 
 
+def cell_plans(path, lo, hi):
+    """I piani per CELLA di tabella, dalle sole celle che li meritano.
+
+    Le riletture che il mirror per porta non puo' riprodurre le trova
+    trace_tables.hw_written(); di quelle si tengono solo le celle il cui valore
+    CAMBIA fra una read e l'altra, perche' sono le sole scritte dall'hardware
+    dentro la finestra - i risultati del motore di calibrazione. Le altre hanno
+    valore fisso e sono stato da prima della finestra: quello e' lavoro del seed,
+    e servirlo da un piano vorrebbe dire srotolare una coda dove basta un valore.
+
+    La logica sta in trace_tables e non qui: e' la stessa misura che
+    `trace_tables.py --hw-written` stampa, e due copie divergono.
+    """
+    import trace_tables as tt
+
+    records = tt.parse(path)
+    if lo is not None:
+        records = [r for r in records if lo <= r['seq'] <= hi]
+
+    # hw_written() decide QUALI celle meritano un piano; il contenuto e' un'altra
+    # cosa e va preso intero. Mettere nel piano le sole riletture divergenti
+    # sfasa la coda: la prima read del port prenderebbe la prima divergenza
+    # invece del primo valore, e il resto a scalare.
+    scelte = set()
+    for (tid, off), c in tt.hw_written(records).items():
+        if len(set(c['vals'])) > 1:
+            scelte.add((tid, off))
+
+    tutte = {}
+    for t in sorted(tt.collect_reads(records), key=lambda t: t['seq']):
+        if t['id'] is None or t['off'] is None:
+            continue
+        for k, val in enumerate(t['values']):
+            key = (t['id'], t['off'] + k)
+            if key in scelte and val is not None:
+                tutte.setdefault(key, []).append(val)
+
+    return OrderedDict((k, tutte[k]) for k in sorted(tutte))
+
+
 def collect(path, lo, hi, max_len, skip=()):
     pending = {}          # seq del record di read -> (kind, addr)
     plans = OrderedDict()  # (kind, addr) -> [(record, valore)]
@@ -80,12 +120,13 @@ def collect(path, lo, hi, max_len, skip=()):
     return plans, reads, matched
 
 
-def emit(plans, name, source, reads, matched, out):
+def emit(plans, name, source, argv, reads, matched, out, cells=None):
     p = out.write
     p('/* SPDX-License-Identifier: GPL-2.0\n'
       ' *\n'
       ' * GENERATO da reverse-tools/gen_readplans.py: non modificare a mano.\n'
       ' *   sorgente: %s\n'
+      ' *   invocazione: %s\n'
       ' *   read con RETVAL appaiato: %d su %d\n'
       ' *   indirizzi con un piano: %d\n'
       ' *\n'
@@ -94,7 +135,14 @@ def emit(plans, name, source, reads, matched, out):
       ' * servire le read del port in ordine di cattura invece che a srotolare una\n'
       ' * coda: il port ne fa meno del vendore, e senza la posizione ogni fase che\n'
       ' * dipende da una lettura calcola su valori di un\'altra fase.\n'
-      ' */\n' % (source, matched, reads, len(plans)))
+      ' *\n'
+      ' * In coda i piani per CELLA di tabella, per le sole celle che l\'hardware\n'
+      ' * scrive dentro la finestra: quelle il cursore non ce l\'hanno, perche\'\n'
+      ' * la risposta giusta e\' la n-esima che il vendore ha letto da quella\n'
+      ' * cella e non dipende dall\'ordine fra celle diverse.\n'
+      ' *   celle con un piano: %d\n'
+      ' */\n' % (source, argv, matched, reads, len(plans),
+                    len(cells or {})))
     p('#ifndef _READPLANS_%s_H\n#define _READPLANS_%s_H\n\n'
       % (name.upper(), name.upper()))
     p('#include "test_harness.h"\n\n')
@@ -112,6 +160,15 @@ def emit(plans, name, source, reads, matched, out):
             p('%s%d,' % ('\n\t' if j % 8 == 0 else ' ', r))
         p('\n};\n')
 
+    cnames = {}
+    for (tid, off), vals in (cells or {}).items():
+        sym = 'plan_%s_cell_%02x_%03x' % (name, tid, off)
+        cnames[(tid, off)] = sym
+        p('static const u16 %s[] = {' % sym)
+        for j, v in enumerate(vals):
+            p('%s0x%04x,' % ('\n\t' if j % 8 == 0 else ' ', v))
+        p('\n};\n')
+
     p('\nstatic inline void b43_test_load_readplans(void)\n{\n')
     for (kind, addr), sym in names.items():
         fn = {'phy': 'b43_test_plan_phy_reads',
@@ -119,6 +176,9 @@ def emit(plans, name, source, reads, matched, out):
               'mmio': 'b43_test_plan_mmio_reads'}[kind]
         p('\t%s(0x%04x, %s, %s_rec, ARRAY_SIZE_TEST(%s));\n'
           % (fn, addr, sym, sym, sym))
+    for (tid, off), sym in cnames.items():
+        p('\tb43_test_plan_table_cell(%d, 0x%03x, %s, ARRAY_SIZE_TEST(%s));\n'
+          % (tid, off, sym, sym))
     p('}\n\n#endif\n')
 
 
@@ -144,9 +204,12 @@ def main():
                                    [tuple(x) for x in args.skip])
     if not plans:
         sys.exit('nessuna read con RETVAL appaiato: e\' il trace giusto?')
-    emit(plans, args.name, args.trace.split('/')[-1], reads, matched, sys.stdout)
-    print('%d piani, %d/%d read appaiate' % (len(plans), matched, reads),
-          file=sys.stderr)
+    cells = cell_plans(args.trace, lo, hi)
+    argv = 'gen_readplans.py ' + ' '.join(sys.argv[1:])
+    emit(plans, args.name, args.trace.split('/')[-1], argv, reads, matched,
+         sys.stdout, cells)
+    print('%d piani per indirizzo, %d/%d read appaiate, %d piani per cella'
+          % (len(plans), matched, reads, len(cells)), file=sys.stderr)
 
 
 if __name__ == '__main__':

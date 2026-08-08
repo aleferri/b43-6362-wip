@@ -310,8 +310,9 @@ PHASES = (
          marcatore='26/27 off 0x0 len 64 a #1740'),
     dict(rng=(2172, 3711), name='gain-table', op='macro: tx_gain_table_upload',
          marcatore='26/27 off 0xc0 len 128 a #2172, unica nella finestra'),
-    dict(rng=(3712, 4785), name='coeff-setup', op='macro: txpwrctrl_coeff_setup',
-         marcatore='26/27 off 0x140 e 0x1c0 len 128 a #3754'),
+    dict(rng=(3738, 4785), name='coeff-setup', op='macro: txpwrctrl_coeff_setup',
+         marcatore='la read di 15/0x50 len=7 che apre la funzione, #3738, poi '
+                   '26/27 off 0x140 e 0x1c0 len 128 a #3754 #4013 #4271 #4529'),
     dict(rng=(5726, 6500), name='recalc-txpower', op='phy_ops: recalc_txpower',
          marcatore='secondo 26/27 off 0x0 len 64 a #5726, dopo il TPL.RAMW #5672'),
     dict(rng=(7034, 8504), name='perical-ingresso', op='macro: ingresso della cal',
@@ -331,9 +332,44 @@ PHASES = (
 )
 
 
+MIN_BLOCK = 16
+
+
+def block_shape(sizes):
+    """I blocchi da MIN_BLOCK in su, i ripetuti raccolti come NxM.
+
+    Serve perche' la run da sola sbaglia in un verso preciso: prende il MASSIMO,
+    quindi una fase che ripete N volte la stessa sequenza non puo' superare ~1/N
+    per costruzione, quanto bene la riproduca. Ed e' il caso di tutte le cal.
+    cal-rx-iq fa sei blocchi da 410 esatti, cioe' le sei iterazioni dello sweep
+    una per una, e la run dice 7%.
+
+    Sei blocchi da 410 non sono una coincidenza, ottantadue da trenta possono
+    esserlo: e' questa la differenza che il totale in blocchi non sa fare e che la
+    forma fa vedere senza sommare niente.
+    """
+    from collections import Counter
+
+    if not sizes:
+        return ''
+    c = Counter(s for s in sizes if s >= MIN_BLOCK)
+    if not c:
+        return '(nessuno da %d op)' % MIN_BLOCK
+    parts = ['%dx%d' % (n, size) if n > 1 else str(size)
+             for size, n in sorted(c.items(), reverse=True)]
+    resto = sum(1 for s in sizes if s < MIN_BLOCK)
+    out = ' '.join(parts[:4])
+    if len(parts) > 4:
+        out += ' ...'
+    if resto:
+        out += ' +%d piccoli' % resto
+    return out
+
+
 def phase_report(vops, blocks):
-    """Per ogni fase la run piu' lunga che ci cade dentro. Niente somme."""
-    print('  %-17s %-34s %6s %8s' % ('fase', 'cosa e\'', 'op', 'run'))
+    """Per ogni fase la run piu' lunga che ci cade dentro, e la forma dei blocchi."""
+    print('  %-17s %-30s %6s %8s  %s'
+          % ('fase', 'cosa e\'', 'op', 'run', 'blocchi'))
     tot_op = tot_run = 0
     for ph in PHASES:
         lo, hi = ph['rng']
@@ -342,21 +378,27 @@ def phase_report(vops, blocks):
             continue
         a, b = idx[0], idx[-1]
         best = 0
+        sizes = []
         for rec, vi, size in blocks:
             s0, s1 = max(vi, a), min(vi + size - 1, b)
             if s1 >= s0:
                 best = max(best, s1 - s0 + 1)
+                sizes.append(s1 - s0 + 1)
         tot_op += len(idx)
         tot_run += best
-        print('  %-17s %-34s %6d %5d %3.0f%%'
+        print('  %-17s %-30s %6d %5d %3.0f%%  %s'
               % (ph['name'], ph['op'], len(idx), best,
-                 100.0 * best / len(idx)))
-    print('  %-17s %-34s %6d %5d %3.0f%%'
+                 100.0 * best / len(idx), block_shape(sizes)))
+    print('  %-17s %-30s %6d %5d %3.0f%%'
           % ('TOTALE', 'somma delle run, non delle op', tot_op, tot_run,
              100.0 * tot_run / max(1, tot_op)))
     print('\n  La run e\' la sequenza contigua piu\' lunga dentro la fase: un\n'
           '  frammento non la muove. Le op fuori dalle fasi dichiarate non\n'
-          '  compaiono, e non e\' una dimenticanza.')
+          '  compaiono, e non e\' una dimenticanza.\n'
+          '\n  La colonna blocchi c\'e\' perche\' la run sbaglia in un verso: prende\n'
+          '  il massimo, quindi una fase che ripete N volte la stessa sequenza non\n'
+          '  puo\' superare ~1/N, quanto bene la riproduca. `6x410` e `82 piccoli`\n'
+          '  sono due cose diverse che la run scrive nello stesso modo.')
 
 def run_contig(vendor, reg, out):
     if reg.get('capture'):
@@ -433,11 +475,11 @@ WINDOWS = [
     dict(name='papd-comp', rng='2688:2703',
          anchor='TBL.WR id=0x1a off=0x240 len=1',
          flow=('init', '1'),
-         what='compensazione PAPD, patches/b43/0003'),
+         what='compensazione PAPD, patches/b43/MESSAGES.md#0003'),
     dict(name='papd-tables', rng='10966:11740',
          anchor='TBL.WR id=0x20 off=0x0 len=64',
          flow=('init', '1'),
-         what='tabelle scalare ed epsilon della cal, patches/b43/0004 e 0012',
+         what='tabelle scalare ed epsilon della cal, patches/b43/MESSAGES.md#0004 e 0012',
          known='resta una sola op, e non e\' una sequenza: il valore che la '
                'PHY.RD di 0x01 restituisce. Le due tabelle scalare, il '
                'salvataggio del reset RX e le due tabelle epsilon scritte cella '
@@ -447,7 +489,7 @@ WINDOWS = [
     dict(name='ipa-bias', rng='605:607',
          anchor='PHY.WR addr=0x32f val=0x3',
          flow=('init', '1'),
-         what='bias IPA 2 GHz, patches/b43/0005'),
+         what='bias IPA 2 GHz, patches/b43/MESSAGES.md#0005'),
     # Filtri digitali TX dell'init: tre gruppi di 15 coefficienti su 0x186,
     # 0x195 e 0x2c5, le prime tre righe di tbl_tx_filter_coef_rev4.
     # L'unica finestra su una cattura diversa: il download delle tabelle statiche
@@ -483,7 +525,7 @@ WINDOWS = [
     dict(name='sampleplay-iqlo', rng='8638:8959',
          anchor='TBL.WR id=0x11 off=0x0 len=160', anchor_nth=1,
          flow=('initcal', '1'),
-         what='tono 2500 kHz ampiezza 250 della cal TX IQ/LO, patches/b43/0010'),
+         what='tono 2500 kHz ampiezza 250 della cal TX IQ/LO, patches/b43/MESSAGES.md#0010'),
     dict(name='rssi-cal', rng='3723:3740',
          anchor='PHY.WR addr=0x1b8 val=0x3f',
          flow=('init', '1'),
@@ -513,25 +555,35 @@ WINDOWS = [
          anchor='TBL.RD id=0x1a off=0xca len=1', anchor_nth=0,
          flow=('init', '1'),
          what='txpwr_index: gain, dac, radio gain, il moltiplicatore in due celle',
-         known='le op combaciano tutte, comprese le due celle del moltiplicatore '
-               'lette e riscritte; cio\' che diverge sono nove VALORI, e sono '
-               'del banco: le celle per indice della tabella di potenza '
-               '(26/0x14a, 0x1ca, 0x24a) non hanno un piano di lettura, quindi '
-               'il mirror risponde con l\'ultimo valore scritto sulla porta '
-               'dati o con 0xffff. Fino a quando i piani non ci sono, nessuna '
-               'modifica al driver puo\' allungare la run qui: una run si '
-               'rompe anche su un valore. Non e\' una divergenza del port.'),
-         # Aggiornata: col mirror che ora vede le scritture dalla porta dati,
-         # quelle celle esistono e le letture rendono cio' che coef_setup ci ha
-         # messo - non piu' 0x2e2e, cioe' il moltiplicatore di un'altra tabella.
-         # Resta una divergenza di VALORE, e quella e' del port: il vendore
-         # chiama coef_setup DUE volte, a #3754 con i coefficienti ancora a zero
-         # (la cal TX IQ/LO parte a #8505) e a #21203 con 0x16413. b43 la chiama
-         # una volta sola, dopo le cal, quindi lo sweep rilegge valori che
-         # l'hardware del vendore non ha ancora. Aggiungere la prima chiamata
-         # dov'e' sembrato naturale non ha spostato niente e ha prodotto una
-         # terza apertura della porta che il vendore non ha: tre tentativi su
-         # questa fase, tre negativi, e il punto di chiamata resta da trovare.
+         known='le celle per indice della tabella di potenza (26/0x14a, 0x1ca, '
+               '0x24a) le serve il mirror della TABELLA e non piu\' quello del '
+               'registro, e dentro questa finestra 26/0x14a torna 0x0000 su '
+               'entrambi i lati (trace_tables.py --cell 0x1a:0x14a). Restano '
+               'sei op, e sono tre cose. Due sono la RILETTURA di 26/0x24a, '
+               'e non e\' una divergenza del port: i due lati SCRIVONO lo '
+               'stesso 0xffffffe9 (#2319 il port, #2768 il vendore), e '
+               'l\'hardware lo rilegge troncato a 9 bit, 0x01e9. Misurato su '
+               'cinque celle su cinque in 26/27 oltre l\'offset 576 '
+               '(0x24a 0x24c 0x25e), riletto == scritto & 0x1ff, e il mirror '
+               'della tabella tiene i 32 bit interi. E\' inerte: il solo '
+               'consumatore e\' b43_nphy_txpwr_index(), che fa '
+               '(((s16)v) << 4) & 0x1ff0, e i due valori danno lo stesso '
+               '0x1e90 sul maskset di PAPD_EN. Delle altre due, il bbmult: il '
+               'vendore legge 0x2c2c e scrive 0x2e2c, il port fa 0x2e2e in '
+               'entrambe, cioe\' sta su un indice diverso; e 0x1e7, 0xa contro '
+               '0x19. La sesta e\' di forma: il vendore fa TBL.WR 26 off 0x40 '
+               'len 84 dove il port apre la porta dati a mano.'),
+         # Il punto di chiamata di coef_setup non e' fra le cose che restano da
+         # trovare: b43 la chiama due volte come il vendore, e nei due punti
+         # giusti - una in coda all'init prima delle cal, una dentro la cal
+         # periodica dopo la RX IQ. La fase coeff-setup lo misura, 1037 op su
+         # 1037 fra la read che la apre e i quattro blocchi che la chiudono.
+         # Quello che diverge nella SECONDA e' il contenuto del buffer che la
+         # alimenta: 15/0x50-0x53 sono i coefficienti che la cal TX IQ/LO
+         # produce, il vendore ci ha 0x59/0x013 e il port zeri, perche' in
+         # userspace quella cal non misura niente (test/README.md, il cursore
+         # dei piani). Percio' la seconda coeff-setup si chiude quando si
+         # chiude la cal TX IQ/LO, non prima, e non con un'altra chiamata.
     dict(name='adj-pwr-tbl', rng='5986:6070',
          # Le 84 celle della tabella di potenza aggiustata, la sola fase in cui
          # due board si controllano a vicenda: la 3580L ha le nibble SROM tutte
@@ -752,7 +804,7 @@ def main():
             print('  %s\n' % err)
         else:
             print('  %d op del vendore, %d in blocchi contigui (%.0f%%);'
-                  ' stampati i blocchi da 16 op in su'
+                  ' la forma per fase e\' nella colonna blocchi'
                   % (res['nops'], res['matched'],
                      100.0 * res['matched'] / res['nops']))
             if res['skipped']:

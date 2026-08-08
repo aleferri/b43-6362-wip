@@ -51,15 +51,16 @@ contenuto e `upstreaming.md` per gli ostacoli.
 
 ## Non merged, scritte qui e mai girate su hardware
 
-Sono quattordici, `patches/b43/0001..0014`: l'elenco con lo stato per voce sta nella
-tabella del `README.md` e il dettaglio in `gap-inventory.md`. Applicano tutte
-pulito su `848acc8ffe1b` e compilano nell'harness, che le verifica contro la
+Sono ventisei, compresse in `patches/b43/rollup.diff` finche' si costruisce, con i
+messaggi in `patches/b43/MESSAGES.md`: l'elenco con lo stato per voce sta nella
+tabella del `README.md` e il dettaglio in `gap-inventory.md`. Il rollup applica
+pulito sopra `patches/mainline/` e compila nell'harness, che lo verifica contro la
 cattura. Due meritano una riga a parte:
 
-| patch | cosa fa | stato |
+| voce del rollup | cosa fa | stato |
 |---|---|---|
-| `patches/b43/0001` | programma il gain control RX per radio 2057 rev 8 in 2.4 GHz bw20, sui valori della cattura | verificata op per op nell'harness (finestra `gain-control`, 87/87), **mai girata su hardware**; gate `reports/30-rx-sensitivity.md` |
-| `patches/b43/0002` | porta gli offset di potenza del rev 8 sui valori rev 7 del vendore | **chiusa dalla cattura**: i valori rev 7 predicono 128 celle su 128, quelli in tree 5 (`rf-pwr-offset-rev8.md`). Non è più codice morto, `0003` abilita il percorso che la legge |
+| `MESSAGES.md#0001` | programma il gain control RX per radio 2057 rev 8 in 2.4 GHz bw20, sui valori della cattura | verificata op per op nell'harness (finestra `gain-control`, 87/87), **mai girata su hardware**; gate `reports/30-rx-sensitivity.md` |
+| `MESSAGES.md#0002` | porta gli offset di potenza del rev 8 sui valori rev 7 del vendore | **chiusa dalla cattura**: i valori rev 7 predicono 128 celle su 128, quelli in tree 5 (`rf-pwr-offset-rev8.md`). Non è più codice morto, `0003` abilita il percorso che la legge |
 
 `0001` non va spedita prima della misura di sensibilità RX. Ha già cambiato forma
 una volta: era scritta su brcmsmac, la cattura ha mostrato valori diversi
