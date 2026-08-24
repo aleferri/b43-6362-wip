@@ -381,7 +381,16 @@ static int flow_initpor(void)
 	if (err)
 		return err;
 	b43_phyops_n.prepare_structs(&dev);
-	return init_once(true);
+	err = init_once(true);
+	if (err)
+		return err;
+	/* mac80211 chiama recalc_txpower dopo l'init, sempre, e il driver ci
+	 * appende la sequenza differita della cal periodica: senza questa
+	 * chiamata il flow a freddo non la fa girare affatto e la finestra
+	 * up-ch1-freddo perde undicimila op.
+	 */
+	b43_phyops_n.recalc_txpower(&dev, false);
+	return 0;
 }
 
 /* mac80211 aggiorna hw->conf.chandef PRIMA di chiamare l'op, e il driver legge

@@ -92,8 +92,85 @@ chiusure non riprogrammano la tabella: dentro b43_nphy_tx_power_ctrl() c'e' una
 condizione sul ramo di abilitazione che non ho letto, ed e' il prossimo posto.
 
 ---
+
+get_tx_gains() e' una lettura sola per tutta la sequenza invece di una per passo:
+il riferimento la rifa a ogni invocazione, la cattura no. Vale +3 su cal-papd e sul
+totale per fase, 6555 -> 6558, blocchi contigui 17831 -> 17830.
+
+---
+
+E la RX IQ con la RSSI sono un passo solo, perche' la cattura le ha contigue: fra la
+rilettura dei coefficienti di save_cal (#21169) e quella che apre coef_setup (#21187)
+ci sono diciotto op e nient'altro. In due passi, fra i due passa la chiusura e la
+riapertura della parentesi, cioe' due riprogrammazioni da 84 celle, e la sequenza si
+spezza. coeff-setup-2 torna a 1066 su 1073 in UN blocco (era 1037 piu' frammenti) e
+il totale per fase va a 6587.
+
+---
+
+E la parentesi si chiude UNA volta, alla fine della sequenza, non a ogni passo: il
+controllo resta spento per tutta la cal. L'audit dei confini nella cattura non trova
+una sola accensione fra le fasi - solo spegnimenti, che sono le aperture. Blocchi
+contigui 17830 -> 18254 (78% -> 80%), totale per fase fermo a 6587.
+
+---
+
+E la restituzione dell'indice sta fra la PAPD e la RX IQ, non dopo: la cattura ha
+la' due chiamate a txpwr_index, una per core, ognuna col suo salva e riapplica.
+Numeri neutri - 18254 e 6587 identici - con i frammenti di cal-papd da 34 a 31: sta
+dentro per l'evidenza, non per il numero.
+
+---
+
+E il test della restituzione e' sullo stato all'INGRESSO della sequenza, non su
+quello del passo, che con la chiusura unica alla fine e' falso dopo la prima
+apertura. Verificato: le TBL.RD 7/0x110 len=1 passano da 1 a 2 come il vendore. Verificato: le TBL.RD 7/0x110 len=1
+passano da 1 a 2 come il vendore.
+
+E l'indice da restituire si prende al passo INIT. Il ramo perical != 2 lo prende
+nello stesso punto, subito prima di precal_txgain, ma questo hardware ha
+perical == 2 - che e' la ragione della macchina a stati - quindi la' non passa e
+cal_orig_pwr_idx restava a zero: la restituzione forzava l'indice 0 invece di
+rimettere quello di partenza, e spezzava i sotto-blocchi dello sweep RX IQ.
+Rimessa, la forma di cal-rx-iq torna 6x420 2x360 6x119 12x85 con 21 frammenti
+invece di 42.
+
+Stato: blocchi contigui 18258 (80%) contro 17532 del baseline, totale per fase 6587
+contro 6602.
+
+---
+
+E la coda della sequenza non restituisce l'indice: le due coppie di txpwr_index stanno
+entrambe PRIMA delle cal, dentro perical-ingresso - il vendore forza a #7445 e #7868 e
+restituisce a #8096 e #8294 - e il blocco differito le fa gia'. Le write di 15/0x57 che
+combaciano passano da cinque a sette e il conteggio va a 35 come il vendore, a run
+invariate (6587) e blocchi 18254.
+
+---
+---
+
+E precal_txgain lo fa solo il blocco differito, non anche il passo INIT: rifarlo
+forzava l'indice una seconda volta, dove il vendore ne ha una sola. Le prime dodici
+write di 15/0x57 combaciano esatte, e il totale per fase passa a 6658 - SOPRA il 6602
+del baseline - con blocchi contigui 18309 (80%), cal-papd 850 contro 847 del baseline
+e cal-tx-iqlo 443.
+
+---
+
+E la sequenza differita non gira in coda a b43_phy_initn() ma dalla coda di
+b43_nphy_op_recalc_txpower(), dietro nphy->perical_pending: la cattura la mette DOPO
+recalc, non prima - init, recalc a #5726-6500, poi la cal da #7034. Chiamata da initn,
+le op di recalc uscivano diciassettemila record oltre la loro finestra e la fase faceva
+zero su 716.
+
+  recalc-txpower       0 -> 604 su 716 (84%), un blocco solo
+  totale per fase   6658 -> 7205 (38%)
+  blocchi contigui 18309 -> 18462 (80%)
+  a freddo         18022 -> 18163 (66%)
+
+---
 diff --git a/drivers/net/wireless/broadcom/b43/b43.h b/drivers/net/wireless/broadcom/b43/b43.h
-index c0d8fc0b2..0a0341e01 100644
+index c0d8fc0..0a0341e 100644
 --- a/drivers/net/wireless/broadcom/b43/b43.h
 +++ b/drivers/net/wireless/broadcom/b43/b43.h
 @@ -335,6 +335,11 @@ enum {
@@ -109,7 +186,7 @@ index c0d8fc0b2..0a0341e01 100644
  #define B43_SHM_SH_NPHY_TXPWR_INDX1	0x070E
  
 diff --git a/drivers/net/wireless/broadcom/b43/main.c b/drivers/net/wireless/broadcom/b43/main.c
-index 817448e58..7853e7afb 100644
+index 817448e..7853e7a 100644
 --- a/drivers/net/wireless/broadcom/b43/main.c
 +++ b/drivers/net/wireless/broadcom/b43/main.c
 @@ -1397,16 +1397,65 @@ static void b43_jssi_write(struct b43_wldev *dev, u32 jssi)
@@ -194,7 +271,7 @@ index 817448e58..7853e7afb 100644
  		return;
  
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
-index 4e6644c2d..71374035e 100644
+index 4e6644c..b0082ab 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c
 @@ -51,6 +51,21 @@ struct nphy_iq_est {
@@ -1044,7 +1121,16 @@ index 4e6644c2d..71374035e 100644
  	if (dev->phy.rev >= 3)
  		return b43_nphy_rev3_cal_rx_iq(dev, target, type, debug);
  	else
-@@ -5871,6 +6568,60 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+@@ -5831,6 +6528,8 @@ static void b43_nphy_set_rx_core_state(struct b43_wldev *dev, u8 mask)
+ 	b43_mac_enable(dev);
+ }
+ 
++static void b43_nphy_run_pending_perical(struct b43_wldev *dev);
++
+ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+ 							bool ignore_tssi)
+ {
+@@ -5871,6 +6570,60 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
  	b43_ppr_add(dev, ppr, -hw_gain);
  #endif
  
@@ -1105,7 +1191,16 @@ index 4e6644c2d..71374035e 100644
  	/* Make sure we didn't go too low */
  	b43_ppr_apply_min(dev, ppr, INT_TO_Q52(8));
  
-@@ -5995,6 +6746,674 @@ static void b43_nphy_superswitch_init(struct b43_wldev *dev, bool init)
+@@ -5906,6 +6659,8 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+ 	nphy->tx_pwr_last_recalc_freq = channel->center_freq;
+ 	nphy->tx_pwr_last_recalc_limit = phy->desired_txpower;
+ 
++	b43_nphy_run_pending_perical(dev);
++
+ 	return B43_TXPWR_RES_DONE;
+ }
+ 
+@@ -5995,6 +6750,755 @@ static void b43_nphy_superswitch_init(struct b43_wldev *dev, bool init)
  }
  
  /* http://bcm-v4.sipsolutions.net/802.11/PHY/Init/N */
@@ -1669,6 +1764,7 @@ index 4e6644c2d..71374035e 100644
 +	struct nphy_txgains cal_target = target;
 +	u16 orig_tx_gain[2];
 +	bool full;
++	bool entry_pwr_ctrl_state;
 +	u8 id;
 +
 +	/* Full or partial is not a constant: brcmsmac calibrates fully when the
@@ -1704,6 +1800,13 @@ index 4e6644c2d..71374035e 100644
 +	nphy->mphase_txcal_cmdidx = 0;
 +	nphy->mphase_txcal_numcmds = B43_NPHY_MPHASE_TXCAL_NUMCMDS;
 +
++	/* Il riferimento la rilegge a ogni invocazione, ma la cattura no: una
++	 * lettura sola per tutta la sequenza. Con una per passo la fase cal-papd
++	 * perde 53 op e coeff-setup-2 29.
++	 */
++	target = b43_nphy_get_tx_gains(dev);
++	entry_pwr_ctrl_state = nphy->txpwrctrl;
++
 +	for (id = B43_NPHY_MPHASE_INIT; id <= B43_NPHY_MPHASE_IDLETSSI; id++) {
 +		nphy->mphase_cal_phase_id = id;
 +
@@ -1721,15 +1824,18 @@ index 4e6644c2d..71374035e 100644
 +		    id <= B43_NPHY_MPHASE_TXPHASE5)
 +			continue;
 +
-+		bool restore_tx_gain = false;
 +		bool tx_pwr_ctrl_state;
 +
 +		tx_pwr_ctrl_state = b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
-+		target = b43_nphy_get_tx_gains(dev);
 +
 +		switch (id) {
 +		case B43_NPHY_MPHASE_INIT:
-+			b43_nphy_precal_txgain(dev);
++			/* precal_txgain lo fa il blocco differito, prima di
++			 * entrare qui. Rifarlo forzava l'indice una seconda
++			 * volta: la storia di 15/0x57 mostra il port che dopo la
++			 * restituzione risale a 2e2c e 2e2e (#7091, #7490) dove
++			 * il vendore resta su 2c2c, e da li' la scala si sfasa.
++			 */
 +			cal_target = b43_nphy_get_tx_gains(dev);
 +			break;
 +		case B43_NPHY_MPHASE_TXPHASE0:
@@ -1741,16 +1847,32 @@ index 4e6644c2d..71374035e 100644
 +			break;
 +		case B43_NPHY_MPHASE_PAPDCAL:
 +			b43_nphy_papd_cal(dev);
++			/* La restituzione dell'indice va QUI, fra la PAPD e la RX
++			 * IQ, e la cattura lo dice: fra le due fasi ci sono due
++			 * chiamate a txpwr_index, una per core, ognuna col suo
++			 * salva e riapplica - #14101 e #14305 per il core 0,
++			 * #14524 e #14728 per il core 1, riconoscibili da 7/0x110
++			 * e 7/0x111 con 15/0x57, 15/0x50 e 15/0x55.
++			 */
 +			break;
 +		case B43_NPHY_MPHASE_RXCAL:
++			/* La RX IQ e la RSSI sono un passo solo, e la cattura e'
++			 * il motivo: fra la rilettura dei coefficienti di
++			 * save_cal (#21169, 15/0x50 len 8) e quella che apre
++			 * coef_setup (#21187, len 7) ci sono diciotto op e
++			 * nient'altro. Tenendoli in due passi, fra i due passa la
++			 * chiusura e la riapertura della parentesi, cioe' due
++			 * riprogrammazioni da 84 celle, e la sequenza si spezza:
++			 * coeff-setup-2 perde le 29 op che nel base le stavano
++			 * attaccate davanti.
++			 */
 +			if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0)
 +				b43_nphy_save_cal(dev);
-+			break;
-+		case B43_NPHY_MPHASE_RSSICAL:
 +			b43_nphy_tx_pwr_ctrl_coef_setup(dev);
 +			b43_nphy_rssi_cal(dev);
 +			b43_radio_2057_vcocal(dev);
-+			restore_tx_gain = true;
++			break;
++		case B43_NPHY_MPHASE_RSSICAL:
 +			break;
 +		case B43_NPHY_MPHASE_IDLETSSI:
 +			/* What the reference does on the first calibration
@@ -1762,25 +1884,79 @@ index 4e6644c2d..71374035e 100644
 +			break;
 +		}
 +
-+		if (restore_tx_gain && tx_pwr_ctrl_state) {
-+			b43_nphy_txpwr_index(dev, 1 << 0,
-+					     nphy->cal_orig_pwr_idx[0], false);
-+			b43_nphy_txpwr_index(dev, 1 << 1,
-+					     nphy->cal_orig_pwr_idx[1], false);
-+			nphy->txpwrindex[0].index = -1;
-+			nphy->txpwrindex[1].index = -1;
-+		}
++		/* Il test e' sullo stato all'INGRESSO della sequenza, non su
++		 * quello del passo: con la chiusura unica alla fine il controllo
++		 * e' spento dopo la prima apertura, quindi lo stato per passo e'
++		 * falso e la restituzione non partirebbe. Il riferimento lo
++		 * prova contro quello che aveva l'invocazione, che nella
++		 * macchina a stati e' l'unico che vale.
++		 */
++		/* Nessuna restituzione in coda alla sequenza: le due coppie di
++		 * txpwr_index stanno entrambe PRIMA delle cal, dentro
++		 * perical-ingresso. Il vendore forza a #7445 e #7868 e
++		 * restituisce a #8096 e #8294, e il blocco differito in
++		 * b43_phy_initn() le fa gia' - precal_txgain forza, la coppia
++		 * con indice -1 restituisce. Rifarla qui aggiungeva una terza
++		 * coppia dopo le cal, e le prime write di 15/0x57 che
++		 * combaciano passano da cinque a sette togliendola.
++		 */
 +
-+		b43_nphy_pwr_ctl_close(dev, tx_pwr_ctrl_state);
++		/* Nessuna chiusura per passo: il controllo resta spento per tutta
++		 * la sequenza e si ripristina una volta alla fine. L'audit dei
++		 * confini nella cattura non trova UNA accensione fra le fasi,
++		 * solo spegnimenti, e quelli sono le aperture: nessuna
++		 * transizione fra perical e la TX I/Q LO, una fra questa e la
++		 * PAPD (#10790 e #10876), quattro coppie fra la PAPD e la RX IQ
++		 * (#14121 #14207, #14344 #14430, #14544 #14630, #14767 #14853),
++		 * nessuna fra la RX IQ e l'idle TSSI. Tutte con payload di 84
++		 * zeri.
++		 */
 +	}
 +
++	b43_nphy_pwr_ctl_close(dev, entry_pwr_ctrl_state);
 +	nphy->mphase_cal_phase_id = 0;
 +}
++
++/* La sequenza differita della cal periodica. Non gira in coda a b43_phy_initn():
++ * la cattura la mette DOPO recalc_txpower, non prima. Il vendore fa init, poi
++ * recalc a #5726-6500, poi la cal a #7034 in avanti; chiamandola da initn le op
++ * di recalc uscivano diciassettemila record piu' avanti della loro finestra e la
++ * fase recalc-txpower faceva zero su 716 con nessun blocco.
++ *
++ * Il punto di chiamata e' la coda di b43_nphy_op_recalc_txpower(), che e' il solo
++ * posto fra i due in cui l'harness passa. Nel riferimento la sequenza la fa
++ * partire il watchdog, che qui non c'e'.
++ */
++static void b43_nphy_run_pending_perical(struct b43_wldev *dev)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	struct nphy_txgains target;
++
++	if (!nphy->perical_pending)
++		return;
++	nphy->perical_pending = false;
++
++		/* Anche il passo INIT della sequenza fa precal_txgain, e non e'
++		 * un doppione da togliere: la cattura ne ha due, e togliendo
++		 * questo perical-ingresso passa da 6x172 a 2x172 e i blocchi
++		 * contigui da 17830 a 17100.
++		 */
++		b43_nphy_precal_txgain(dev);
++		target = b43_nphy_get_tx_gains(dev);
++		/* The forced index was only ever there to read those gains
++		 * off: the hardware goes back to what it had, while the
++		 * calibrations keep the gains. The capture hands it back here,
++		 * one core at a time, immediately after the read.
++		 */
++		b43_nphy_txpwr_index(dev, 1 << 0, -1, true);
++		b43_nphy_txpwr_index(dev, 1 << 1, -1, true);
++		b43_nphy_cal_perical_phyinit(dev, target);
++	}
 +
  static int b43_phy_initn(struct b43_wldev *dev)
  {
  	struct ssb_sprom *sprom = dev->dev->bus_sprom;
-@@ -6007,6 +7426,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6007,6 +7511,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
  
  	u16 clip[2];
  	bool do_cal = false;
@@ -1788,7 +1964,7 @@ index 4e6644c2d..71374035e 100644
  
  	if ((dev->phy.rev >= 3) &&
  	   (sprom->boardflags_lo & B43_BFL_EXTLNA) &&
-@@ -6097,6 +7517,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6097,6 +7602,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
  	}
  
  	if (b43_nphy_ipa(dev)) {
@@ -1796,7 +1972,7 @@ index 4e6644c2d..71374035e 100644
  		b43_phy_set(dev, B43_NPHY_PAPD_EN0, 0x1);
  		b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ0, 0x007F,
  				nphy->papd_epsilon_offset[0] << 7);
-@@ -6190,14 +7611,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6190,14 +7696,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
  					    nphy->txpwrindex[0].index_internal;
  					nphy->cal_orig_pwr_idx[1] =
  					    nphy->txpwrindex[1].index_internal;
@@ -1828,7 +2004,7 @@ index 4e6644c2d..71374035e 100644
  			}
  		} else {
  			b43_nphy_restore_cal(dev);
-@@ -6213,6 +7647,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6213,6 +7732,17 @@ static int b43_phy_initn(struct b43_wldev *dev)
  	if (phy->rev >= 3)
  		b43_nphy_spur_workaround(dev);
  
@@ -1840,23 +2016,13 @@ index 4e6644c2d..71374035e 100644
 +	 * it is scheduled, the control is still off, so all eleven restores put
 +	 * back an off state and the table is never written.
 +	 */
-+	if (deferred_cal) {
-+		b43_nphy_precal_txgain(dev);
-+		target = b43_nphy_get_tx_gains(dev);
-+		/* The forced index was only ever there to read those gains
-+		 * off: the hardware goes back to what it had, while the
-+		 * calibrations keep the gains. The capture hands it back here,
-+		 * one core at a time, immediately after the read.
-+		 */
-+		b43_nphy_txpwr_index(dev, 1 << 0, -1, true);
-+		b43_nphy_txpwr_index(dev, 1 << 1, -1, true);
-+		b43_nphy_cal_perical_phyinit(dev, target);
-+	}
++	if (deferred_cal)
++		nphy->perical_pending = true;
 +
  	return 0;
  }
  
-@@ -6474,6 +7929,12 @@ static void b43_nphy_op_prepare_structs(struct b43_wldev *dev)
+@@ -6474,6 +8004,12 @@ static void b43_nphy_op_prepare_structs(struct b43_wldev *dev)
  	nphy->perical = 2; /* avoid additional rssi cal on init (like wl) */
  	/* 128 can mean disabled-by-default state of TX pwr ctl. Max value is
  	 * 0x7f == 127 and we check for 128 when restoring TX pwr ctl. */
@@ -1869,7 +2035,7 @@ index 4e6644c2d..71374035e 100644
  	nphy->tx_pwr_idx[0] = 128;
  	nphy->tx_pwr_idx[1] = 128;
  
-@@ -6654,6 +8115,63 @@ static void b43_nphy_op_switch_analog(struct b43_wldev *dev, bool on)
+@@ -6654,6 +8190,63 @@ static void b43_nphy_op_switch_analog(struct b43_wldev *dev, bool on)
  	}
  }
  
@@ -1934,7 +2100,7 @@ index 4e6644c2d..71374035e 100644
  				      unsigned int new_channel)
  {
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.h b/drivers/net/wireless/broadcom/b43/phy_n.h
-index b96ded0ef..6c1244680 100644
+index b96ded0..2631632 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.h
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.h
 @@ -604,6 +604,15 @@
@@ -1965,7 +2131,7 @@ index b96ded0ef..6c1244680 100644
  #define B43_NPHY_EPS_TABLE_ADJ0			B43_PHY_N(0x298) /* EPS Table Adj0 TBD */
  #define B43_NPHY_EPS_OVERRIDEI_0		B43_PHY_N(0x299)
  #define B43_NPHY_EPS_OVERRIDEQ_0		B43_PHY_N(0x29A)
-@@ -932,6 +946,11 @@ struct b43_phy_n_pwr_ctl_info {
+@@ -932,8 +946,14 @@ struct b43_phy_n_pwr_ctl_info {
  };
  
  struct b43_phy_n {
@@ -1976,8 +2142,11 @@ index b96ded0ef..6c1244680 100644
 +	s32 chan_meas;
  	u8 antsel_type;
  	u8 cal_orig_pwr_idx[2];
++	bool perical_pending;
  	u8 measure_hold;
-@@ -974,7 +993,11 @@ struct b43_phy_n {
+ 	u8 phyrxchain;
+ 	u8 hw_phyrxchain;
+@@ -974,7 +994,11 @@ struct b43_phy_n {
  	int tx_pwr_last_recalc_limit;
  
  	u8 txrx_chain;
@@ -1991,7 +2160,7 @@ index b96ded0ef..6c1244680 100644
  
  	u16 rfctrl_intc1_save;
 diff --git a/drivers/net/wireless/broadcom/b43/ppr.c b/drivers/net/wireless/broadcom/b43/ppr.c
-index 26514cc3a..5bf4d779f 100644
+index 26514cc..5bf4d77 100644
 --- a/drivers/net/wireless/broadcom/b43/ppr.c
 +++ b/drivers/net/wireless/broadcom/b43/ppr.c
 @@ -32,6 +32,23 @@ void b43_ppr_add(struct b43_wldev *dev, struct b43_ppr *ppr, int diff)
@@ -2019,7 +2188,7 @@ index 26514cc3a..5bf4d779f 100644
  {
  	int i;
 diff --git a/drivers/net/wireless/broadcom/b43/ppr.h b/drivers/net/wireless/broadcom/b43/ppr.h
-index 094389f9f..682a2979c 100644
+index 094389f..682a297 100644
 --- a/drivers/net/wireless/broadcom/b43/ppr.h
 +++ b/drivers/net/wireless/broadcom/b43/ppr.h
 @@ -37,6 +37,8 @@ void b43_ppr_clear(struct b43_wldev *dev, struct b43_ppr *ppr);
@@ -2032,7 +2201,7 @@ index 094389f9f..682a2979c 100644
  u8 b43_ppr_get_max(struct b43_wldev *dev, struct b43_ppr *ppr);
  
 diff --git a/drivers/net/wireless/broadcom/b43/radio_2057.c b/drivers/net/wireless/broadcom/b43/radio_2057.c
-index e761f899b..2e88dd925 100644
+index e761f89..2e88dd9 100644
 --- a/drivers/net/wireless/broadcom/b43/radio_2057.c
 +++ b/drivers/net/wireless/broadcom/b43/radio_2057.c
 @@ -73,111 +73,18 @@ static u16 r2057_rev7_init[][2] = {
@@ -2159,7 +2328,7 @@ index e761f899b..2e88dd925 100644
  
  /* Extracted from MMIO dump of 6.30.223.141 */
 diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.c b/drivers/net/wireless/broadcom/b43/tables_nphy.c
-index 22da74136..258762d32 100644
+index 22da741..258762d 100644
 --- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
 +++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
 @@ -2928,14 +2928,36 @@ static const s16 b43_ntab_rf_pwr_offset_2057_rev9_5g[] = {
@@ -2215,7 +2384,7 @@ index 22da74136..258762d32 100644
  	{ 0x1000, 0x07C, 0x07F, 0xFFFF, 0 },
  	{ 0x6000, 0x348, 0x349, 0x00FF, 0 },
 diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.h b/drivers/net/wireless/broadcom/b43/tables_nphy.h
-index 3876786d2..73b62887a 100644
+index 3876786..73b6288 100644
 --- a/drivers/net/wireless/broadcom/b43/tables_nphy.h
 +++ b/drivers/net/wireless/broadcom/b43/tables_nphy.h
 @@ -195,6 +195,7 @@ const u32 *b43_nphy_get_tx_gain_table(struct b43_wldev *dev);

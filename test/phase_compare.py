@@ -25,6 +25,7 @@ import difflib
 import importlib.util
 import os
 import re
+import re
 import subprocess
 import sys
 
@@ -478,7 +479,9 @@ WINDOWS = [
          what='compensazione PAPD, patches/b43/MESSAGES.md#0003'),
     dict(name='papd-tables', rng='10966:11740',
          anchor='TBL.WR id=0x20 off=0x0 len=64',
-         flow=('init', '1'),
+         # La cal ora parte da recalc_txpower, che il flow init non
+         # chiama: questa finestra ne ha bisogno e usa il flow che la esegue.
+         flow=('txpower', '1'),
          what='tabelle scalare ed epsilon della cal, patches/b43/MESSAGES.md#0004 e 0012',
          known='resta una sola op, e non e\' una sequenza: il valore che la '
                'PHY.RD di 0x01 restituisce. Le due tabelle scalare, il '
@@ -527,6 +530,11 @@ WINDOWS = [
          flow=('initcal', '1'),
          what='tono 2500 kHz ampiezza 250 della cal TX IQ/LO, patches/b43/MESSAGES.md#0010'),
     dict(name='rssi-cal', rng='3723:3740',
+         # I nove registri dei coefficienti: 0x1b8 e gli otto RSSIMC. Qui il
+         # confronto che conta e' sullo STATO, non sulla sequenza.
+         finali=(0x1b8, 0x1a4, 0x1a5, 0x1a6, 0x1a7,
+                 0x1aa, 0x1ab, 0x1ac, 0x1ad),
+         finali_len=200,
          anchor='PHY.WR addr=0x1b8 val=0x3f',
          flow=('init', '1'),
          what='coefficienti di moltiplicazione RSSI',
@@ -553,7 +561,9 @@ WINDOWS = [
          # posizione invece di riallineare a mano - cosa che mi e' andata storta
          # tre volte. L'ancora e' la read del gain all'indice 10 sul core 0.
          anchor='TBL.RD id=0x1a off=0xca len=1', anchor_nth=0,
-         flow=('init', '1'),
+         # La cal ora parte da recalc_txpower, che il flow init non
+         # chiama: questa finestra ne ha bisogno e usa il flow che la esegue.
+         flow=('txpower', '1'),
          what='txpwr_index: gain, dac, radio gain, il moltiplicatore in due celle',
          known='le celle per indice della tabella di potenza (26/0x14a, 0x1ca, '
                '0x24a) le serve il mirror della TABELLA e non piu\' quello del '
@@ -642,6 +652,30 @@ def merged_vendor(vendor):
     return out
 
 
+def final_values(ops, regs):
+    """L'ultimo valore scritto su ciascun registro, nell'ordine in cui capita.
+
+    Serve alle finestre dove il confronto posizionale non puo' dire niente di
+    utile: quando i due lati arrivano allo stesso stato per strade diverse - il
+    vendore scrivendo ogni registro una volta, il port scrivendone alcuni due
+    volte, zero e poi il valore - contare le op misura la strada e non lo stato.
+    Il criterio che conta la' e' se i registri finiscono con lo stesso contenuto,
+    e questa e' l'unica cosa che lo dice.
+
+    Non sostituisce la run: una finestra puo' avere lo stato giusto e la sequenza
+    sbagliata, e sono due difetti diversi che vanno visti tutti e due.
+    """
+    out = {}
+    for op in ops:
+        m = re.match(r'(PHY|RAD|MMIO)\.WR addr=(0x[0-9a-f]+) val=(0x[0-9a-f]+)', op)
+        if not m:
+            continue
+        addr = int(m.group(2), 16)
+        if addr in regs:
+            out[addr] = int(m.group(3), 16)
+    return out
+
+
 def run(vendor, win, verbose):
     # Una finestra puo' dichiarare la propria cattura con `capture`: le finestre
     # nate contro l'init a caldo (opinit-*) non si possono ancorare a fasi che
@@ -687,6 +721,20 @@ def run(vendor, win, verbose):
     res = dict(nops=len(vops), mismatch=mism, run=run_len, run_at=(vi, ti),
                missing=missing, unexpected=unexpected)
 
+    # L'asserzione sullo stato, per le finestre che la dichiarano con `finali`.
+    regs = win.get('finali')
+    if regs:
+        # Lo span del port e' il suo, dichiarato: il confronto posizionale usa
+        # tante op quante ne ha il vendore, e su quelle il port ha appena
+        # scritto gli zeri e non ancora i valori. Troncare li' misurerebbe uno
+        # stato intermedio e direbbe che non combacia niente.
+        fspan = win.get('finali_len', span)
+        fv = final_values(vops, set(regs))
+        ft = final_values(tall[off:off + fspan], set(regs))
+        diff = {r: (fv.get(r), ft.get(r)) for r in regs
+                if fv.get(r) != ft.get(r)}
+        res['finali'] = (len(regs) - len(diff), len(regs), diff)
+
     if verbose:
         for i, (v, t) in enumerate(zip(vops, tops)):
             if not CMP.ops_equal(v, t):
@@ -699,6 +747,11 @@ def run(vendor, win, verbose):
             print('  op in piu\' del port, fuori dalla deroga:')
             for op, n in res['unexpected'].items():
                 print('    x%-3d %s' % (n, op))
+        if res.get('finali') and res['finali'][2]:
+            print('  registri che NON finiscono sullo stesso valore:')
+            for r, (a, b) in sorted(res['finali'][2].items()):
+                fmt = lambda x: 'mai scritto' if x is None else '0x%04x' % x
+                print('    0x%03x  vendore %s   port %s' % (r, fmt(a), fmt(b)))
     return res, None
 
 
@@ -839,9 +892,17 @@ def main():
 
         run_s = '%d/%d' % (res['run'], res['nops'])
         diag = ''
+        # Lo stato finale, dove dichiarato, va nella riga di riepilogo: e' il
+        # verdetto che conta per le finestre in cui i due lati raggiungono lo
+        # stesso stato per strade diverse, e nasconderlo dietro -v lo rende
+        # inutile.
+        if res.get('finali'):
+            ok, tot, _ = res['finali']
+            diag = 'stato finale %d/%d registri' % (ok, tot)
         if res['mismatch']:
-            diag = 'mancano %d, in piu\' %d' % (sum(res['missing'].values()),
-                                                sum(res['unexpected'].values()))
+            diag = ((diag + '; ') if diag else '') + \
+                'mancano %d, in piu\' %d' % (sum(res['missing'].values()),
+                                             sum(res['unexpected'].values()))
         if res['mismatch'] == 0:
             verdict = 'ok'
         elif win.get('equiv') == 'multiset':
