@@ -147,6 +147,20 @@ def canon_values(op: str) -> str:
     stessa normalizzazione, che e' innocua perche' entrambi i lati la ricevono."""
     return HEXNUM.sub(lambda m: '0x%x' % int(m.group(1), 16), op)
 
+OBJ_SPACE = re.compile(r'^(OBJ\.(?:RD|WR) .*)space=0x1$')
+
+def canon_obj_space(op: str) -> str:
+    """Traduci lo spazio della object memory dall'enum di b43 all'encoding del
+    decoder del vendore.
+
+    Non sono lo stesso numero: b43 passa il routing come B43_SHM_SHARED, che nella
+    sua enum vale 1, e il decoder del vendore stampa 0x10000 per la stessa
+    regione. In queste due catture 0x10000 e' il SOLO valore che compare, 3565 e
+    3295 volte, quindi la traduzione e' univoca per i dati che abbiamo; se salta
+    fuori una cattura con un secondo spazio questa funzione va rifatta con una
+    mappa e non con una costante."""
+    return OBJ_SPACE.sub(r'\1space=0x10000', op)
+
 def normalize_op(op: str) -> str:
     m = SET_OP.match(op)
     if m:
@@ -165,7 +179,12 @@ def normalize_op(op: str) -> str:
     # L'harness nomina l'abilitazione GPIO come il simbolo bcma
     # (bcma_chipco_gpio_outen), il tracer vendor come il registro (OE).
     op = re.sub(r'^GPIO\.OUTEN\b', 'GPIO.OE', op)
-    return canon_ws(canon_values(op))
+    # Sospensione e riabilitazione del MAC: l'harness le nomina come le funzioni
+    # che aggancia (b43_mac_suspend, b43_mac_enable), il decoder del vendore come
+    # il bit di MACCTL che cambiano. Sono la stessa op e vanno confrontate.
+    op = re.sub(r'^MAC\.EN\b.*$',   'MAC.MCTRL val=0x1 mask=0x1', op)
+    op = re.sub(r'^MAC\.SUSP\b.*$', 'MAC.MCTRL val=0x0 mask=0x1', op)
+    return canon_obj_space(canon_ws(canon_values(op)))
 
 VAL_TOK = re.compile(r'val=(?:0x[0-9a-fA-F]+|UNDEFINED)')
 

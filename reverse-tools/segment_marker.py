@@ -11,8 +11,7 @@ identifica una struttura. Il caso per cui e' nato lo mostra. La cal periodica de
 riferimento apre ogni fase leggendo il tx gain da 7/0x110 e subito dopo spegne il
 controllo di potenza; ma quella stessa cella la legge anche get_tx_gain(), con la
 condizione OPPOSTA su txpwrctrl. Contare la sola lettura somma due cose diverse e
-il numero non vuol dire niente - ci sono cascato, e i "9 contro 20" che ne sono
-usciti hanno portato a mettere quattro parentesi su una base sbagliata.
+il numero non vuol dire niente.
 
 La coppia invece distingue: la lettura seguita, entro poche op, dalla scrittura che
 apre lo svuotamento della tabella di potenza.

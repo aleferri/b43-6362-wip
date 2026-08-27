@@ -542,15 +542,16 @@ WINDOWS = [
                 'PHY.WR addr=0x1c', 'PHY.MOD'),
          known='i nove valori combaciano col vendore da quando la parentesi di '
                'abs() e\' al suo posto (patches/mainline, cal RSSI): 0x1b8 = 0x3f '
-               'e otto 0x3e. Quello che resta non e\' un valore: il vendore scrive '
-               'gli otto di fila in 16 op, il port ne mette ~140 perche\' scrive '
-               'ogni coefficiente due volte, zero e poi il valore, e intercala le '
-               'read e gli override RF. Allargando test_len a 200 gli otto 0x3e si '
+               'e otto 0x3e, e lo STATO FINALE lo verifica questa stessa voce, coi '
+               'campi finali/finali_len. Quello che resta e\' un conteggio: qui il '
+               'vendore scrive gli otto di fila in 16 op, il port ne mette ~140 '
+               'perche\' intercala le read e gli override RF. La doppia scrittura, '
+               'zero e poi il valore, NON e\' una stranezza del port: il vendore fa '
+               'lo stesso nella fase cal-rssi-2 (#23543 e #23613 nella cattura). '
+               'Allargando test_len a 200 gli otto 0x3e si '
                'appaiano per multiinsieme, ma entrano 37 op del port che il '
                'vendore in questa finestra non ha: le due finestre non sono '
-               'commensurabili. Questa fase vuole un confronto sul VALORE FINALE '
-               'dei nove registri, che e\' un\'asserzione che questo strumento non '
-               'fa. Restano fuori anche due table-read del vendore, TBL.RD id=0x7 '
+               'commensurabili. Restano fuori anche due table-read del vendore, TBL.RD id=0x7 '
                'off=0x110 (il salvataggio del tx gain originale, che 0014 non '
                'porta) e TBL.RD id=0xf off=0x50.'),
     # Fasi della calibrazione PAPD, dalla mappa in docs/papd-cal-map.md. Non
@@ -578,9 +579,12 @@ WINDOWS = [
                'della tabella tiene i 32 bit interi. E\' inerte: il solo '
                'consumatore e\' b43_nphy_txpwr_index(), che fa '
                '(((s16)v) << 4) & 0x1ff0, e i due valori danno lo stesso '
-               '0x1e90 sul maskset di PAPD_EN. Delle altre due, il bbmult: il '
-               'vendore legge 0x2c2c e scrive 0x2e2c, il port fa 0x2e2e in '
-               'entrambe, cioe\' sta su un indice diverso; e 0x1e7, 0xa contro '
+               '0x1e90 sul maskset di PAPD_EN. Delle altre due, il bbmult: dentro '
+               'questa finestra il port e\' su un indice diverso, ma la storia '
+               'della cella non e\' piu\' divergente - le dodici write che '
+               'cambiano valore su 15/0x57 sono identiche al vendore, valore per '
+               'valore e in ordine (trace_tables.py --cell 0xf:0x57), e '
+               'altrettanto su 15/0x5f. Quel che resta e\' 0x1e7, 0xa contro '
                '0x19. La sesta e\' di forma: il vendore fa TBL.WR 26 off 0x40 '
                'len 84 dove il port apre la porta dati a mano.'),
          # Il punto di chiamata di coef_setup non e' fra le cose che restano da
@@ -605,18 +609,62 @@ WINDOWS = [
          flow=('txpower', '1'),
          what='adj_pwr_tbl: 84 celle, quattro colonne per numero di catene'),
     dict(name='recalc-txpower', rng='5726:6244',
-         # La fase che nella tabella per fase fa 1 op su 716, e non perche' il
-         # port non la sappia fare: la fa, ma in fondo alla traccia invece che in
-         # mezzo all'init, dove la mette il vendore. Questa finestra la confronta
-         # SENZA la posizione, agganciandosi alla terza apertura di 26/0x0 - le
-         # prime due sono l'init - cosi' si vede se le op sono le stesse.
+         # Questa finestra confronta la fase SENZA la posizione, agganciandosi
+         # alla SECONDA apertura di 26/0x0: la prima e' l'init, la seconda e'
+         # recalc, la terza e' il power setup in coda alla cal periodica, che e'
+         # la stessa funzione in un'altra fase. Agganciarsi a quella confronta
+         # la recalc del vendore con la coda del port, e quel che ne esce non
+         # parla di recalc.
          #
          # Il cortocircuito di b43_nphy_op_recalc_txpower resta: se le tabelle le
          # ha gia' scritte l'init, uscire subito salta lavoro ridondante. Il flow
          # invalida la cache per rendere la fase osservabile, non per correggerla.
-         anchor='TBL.WR id=0x1a off=0x0 len=64', anchor_nth=2,
+         anchor='TBL.WR id=0x1a off=0x0 len=64', anchor_nth=1,
          flow=('txpower', '1'),
          what='recalc_txpower: pwr_setup piu\' txpwrctrl_enable, sei table-op'),
+    dict(name='perical-ingresso', rng='7034:8504',
+         # Ancorata alla prima delle due letture di C1_TXPCTL_STAT che aprono la
+         # sequenza: nel port c'e' una volta sola in tutta la traccia, quindi
+         # l'aggancio non puo' finire altrove. Serve perche' senza ancora questa
+         # fase non e' misurabile: il suo contenuto sono in gran parte scritture
+         # da 84 zeri identiche fra loro, e un matcher libero le pesca da tutta
+         # la traccia. Vedi CLAUDE.md, Trappole 10.
+         anchor='PHY.RD addr=0x1ed val=0x1900',
+         flow=('txpower', '1'),
+         what='ingresso della cal periodica: precal, gain, hand-back',
+         known='19 op in due gruppi, entrambi dichiarati. Quattro sono la '
+               'rilettura a 9 bit delle tabelle 26/27 oltre l\'offset 576, che '
+               'e\' dell\'hardware e non del port (0x1e9 contro 0xffe9, il '
+               'mirror dello strumento tiene i 32 bit interi) e sono inerti: il '
+               'solo consumatore fa (((s16)v) << 4) & 0x1ff0 e i due valori danno '
+               'lo stesso 0x1e90. Le altre quindici sono il confine con la fase '
+               'dopo: a #8482 il vendore e\' gia\' dentro il setup della cal TX '
+               'I/Q LO (0xb0, 0x2c, 0x42, 0x1) mentre il port sta ancora aprendo '
+               'la parentesi del primo passo. La run e\' 573 su 1402 e i tre '
+               'blocchi sono 573, 409 e 401, cioe\' la fase e\' appaiata a pezzi '
+               'interi.'),
+    dict(name='rxiq-ingresso', rng='14297:15920',
+         # Comincia a #14297 e non a #14093, che e' l'inizio della regione: le
+         # prime 195 op sono un prologo di txpwr_index che si ripete identico
+         # altrove, quindi non c'e' niente di unico su cui agganciarsi. Questa
+         # e' la prima op che compare una volta sola sui due lati.
+         anchor='TBL.RD id=0x1a off=0xde len=1',
+         flow=('txpower', '1'),
+         what='ingresso della cal RX IQ, dalla prima op ancorabile',
+         known='555 op, e sono tutte a valle di UNA: la lettura di 0xb0 a '
+               '#14943, che il port serve con 0xdf7 dove il vendore ha 0xdf4. Il '
+               'piano di lettura e\' posizionale e per registro, quindi il port ha '
+               'consumato una voce di 0xb0 in piu\' prima di entrare qui - ne ha 25 '
+               'contro 16 in tutta up-ch1, e una coppia di carrier search in piu\', '
+               '7 contro 6. Da la\' ogni lettura di 0xb0 rende il valore sbagliato '
+               'e la parita\' non si recupera. Le op ci sono e sono le stesse: '
+               'mancano 18 e ce ne sono 18 in piu\', su 1503. Il resto e\' noto: sei '
+               'op di rilettura a 9 bit delle tabelle 26/27 oltre l\'offset 576, due '
+               'PHY.CLK che il tracer del vendore non vede perche\' aggancia '
+               'core_phy_clk e non phyclk_fgc, e ventotto di confine con la fase '
+               'dopo. La run e\' 500 su 1503 con blocchi 500, 401, 178, 79: si '
+               'chiude togliendo la coppia di carrier search di troppo, non '
+               'lavorando qui.'),
     dict(name='papd-digifilt', rng='11741:11755',
          anchor='PHY.WR addr=0x186 val=0xfed9',
          flow=('init', '1'),
@@ -802,6 +850,20 @@ def main():
         tot = len(matched)
         print('\ntotale op in comune: %d su %d del vendore (%.0f%%), in %d blocchi'
               % (tot, len(vops), 100.0 * tot / max(1, len(vops)), len(blocks)))
+        # Il totale vale solo se i blocchi stanno vicini nel port. Il matcher
+        # confronta una fetta del vendore contro TUTTO l'output del flow, e in
+        # questa traccia ci sono dieci scritture identiche da 84 zeri: senza il
+        # controllo qui sotto un blocco puo' venire da quindicimila op piu'
+        # avanti e il numero non misura la fase, misura quante volte l'hardware
+        # ripete la stessa sequenza.
+        span = max(b.b for b in blocks) - min(b.b for b in blocks)
+        if span > 3 * len(vops):
+            print('\n  ATTENZIONE: i blocchi si spargono su %d op del port per'
+                  ' una fetta di %d.' % (span, len(vops)))
+            print('  Il totale sopra NON misura questa regione: i blocchi'
+                  ' vengono da punti')
+            print('  diversi della traccia. Serve un\'ancora, come fanno le'
+                  ' finestre.')
         print('\nper regione (il numero di record se lo porta dietro l\'op, '
               'vedi CMP.Op):')
         print('  %-34s %-16s %6s %9s %7s %9s'

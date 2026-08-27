@@ -31,7 +31,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 | offset epsilon del PAPD | scritto a zero da b43, **patch `0009`**: 24 dB di differenza | `docs/papd-cal-map.md` |
 | tabella dei campioni, cioè il tono di test | passo di fase troncato a zero in una `u16` e componente in fase persa per una precedenza: b43 non ha mai suonato un tono, su nessun N-PHY. **Patch `0010`**, 160 word su 160 identiche alla cattura | `docs/papd-cal-map.md` |
 | calibrazione PAPD, il resto | le due `wlc_phy_a3_nphy` guidate dalle letture; fasi mappate e attribuite | `docs/papd-cal-map.md` |
-| cal periodica: TX IQ/LO, RX IQ, seconda cal RSSI | in mainline il ramo che le chiama è un `;/* TODO */`, quindi non girano mai: **patch `0014`**, seconda cal RSSI da 0% a 46% nel flow `init`, non verificata (vedi `CLAUDE.md`, prossimo passo 2) | `CLAUDE.md` |
+| cal periodica: TX IQ/LO, RX IQ, seconda cal RSSI | in mainline il ramo che le chiama è un `;/* TODO */`, quindi non girano mai: **patch `0014`**. La seconda cal RSSI, misurata da sola, è a 956 op su 960 | `CLAUDE.md` |
+| ricerca del VCM nella cal RSSI | `Q * I` invece di `Q²` nella distanza, e il vincitore programmato col contatore del ciclo invece che col vincitore: **due patch mainline**, valgono da N-PHY rev 3 | `CLAUDE.md` |
 | HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
 
 ## Come è organizzato
@@ -50,7 +51,8 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
   catture ce ne sono due: `opinit-ch1-ch6-bw20` (70796 record, due cicli
   down/up su canali operativi 1 e 6, zero perdite), che ha già corretto una
   patch (`docs/trace-init-2g.md`) e trovato quattro difetti di mainline
-  (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`), e `full-init-ch1-bw20` (81397
+  (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`) piu' i due della ricerca
+  del VCM, e `full-init-ch1-bw20` (81397
   record, init a freddo, con un buco da 65285 record per overflow della fifo),
   la sola che contenga il download delle tabelle statiche.
 

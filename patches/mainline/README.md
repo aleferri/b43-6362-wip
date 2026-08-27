@@ -19,6 +19,10 @@ delle altre, e non c'è nessuna ragione tecnica per pagare quel prezzo.
 | `b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` | il modo del test DAC e' un `u8` testato `== 1`, b43 lo restringe a `bool` in tre punti: qualunque modo sopra 1 accende la strada sbagliata | 5 |
 | `b43-wait-for-the-n-phy-tx-iq-lo-calibration-to-finish` | il polling su `IQLOCAL_CMD` esce quando i bit 15/14 sono **accesi**, cioe' mentre la cal gira, invece di aspettare che si spengano: `SPINWAIT` nel riferimento gira *mentre* l'espressione e' vera. Il driver rilegge i coefficienti ~10 us dopo il comando, dodici volte, e salva cio' che c'era prima | 1 |
 | `b43-take-the-n-phy-tx-iq-lo-results-out-instead-of-overwriting-them` | in coda alla cal, `write(96)` e `read(80)` hanno la direzione **scambiata**: il driver sovrascrive il risultato del motore col buffer vecchio e legge 80 invece di scriverlo. Le tre coppie che seguono nello stesso blocco sono giuste, ed e' cio' che lo fa sembrare un refuso | 2 |
+| `b43-fill-the-per-rate-transmit-power-offsets-on-n-phy` | `nphy->tx_power_offset[]` non ha **nessuno scrittore**: dichiarata, letta in due posti e riempita da nessuna parte, quindi le 84 celle della tabella di potenza aggiustata escono a zero qualunque cosa dica la SPROM, e ogni rate trasmette alla stessa potenza | 20 |
+| `b43-square-both-terms-of-the-n-phy-rssi-vcm-search` | la ricerca del VCM narrowband minimizza `I² + Q²` e il secondo termine e' scritto `Q * I`: non e' una distanza, ed e' negativo ogni volta che le due rail hanno segno opposto, quindi il minimo cade dove quel prodotto e' piu' negativo. Il VCM scelto e gli offset che ne discendono sono entrambi sbagliati | 2 |
+| `b43-program-the-best-n-phy-rssi-vcm-instead-of-the-loop-bound` | il ramo rev 7+ della scelta del VCM migliore programma `vcm`, che all'uscita del ciclo vale 8: il campo e' di tre bit, quindi scrive un bit fuori campo e butta il risultato della ricerca. Il ramo rev 3 sotto e brcmsmac passano entrambi `vcm_final` | 2 |
+| `b43-save-the-right-field-of-the-n-phy-tx-power-index` | quando spegne il controllo di potenza acceso, salva l'indice su cui stava ogni catena prendendo i **sette bit bassi** dello stato invece dei bit 8..14, che sono l'indice — lo dice `B43_NPHY_TXPCTL_STAT_BIDX` di questo stesso driver, e venti righe sotto `b43_nphy_get_tx_gains()` lo legge giusto. Il ripristino rimette quel campo sbagliato nell'indice, quindi l'hardware riparte da dove capita | 12 |
 
 Le ultime due si dimostrano **a tre voci**: brcmsmac, la cattura e b43 dicono cose
 diverse, e le prime due dicono la stessa. Le righe della cattura stanno nel corpo
@@ -26,16 +30,22 @@ delle patch.
 
 `b43-program-the-fifth-tx-power-up-override` e
 `b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag` sono le due qui che
-`reverse-tools/check_patch_gating.py` segna `NON GATEATA`, e **è corretto**: sta in
+`reverse-tools/check_patch_gating.py` segna `NON GATEATA`, e **è corretto**: stanno in
 `b43_nphy_rf_ctl_override_one_to_many()`, che gira su ogni N-PHY rev 7 e su. È la
 stessa eccezione dichiarata di `b43/MESSAGES.md#0010` e per la stessa ragione — un refuso di
 trascrizione da brcmsmac non si mette dietro un gate di revisione, perché non è una
-feature di questo hardware. Le altre quattro non toccano codice condiviso: tre sono
-dati o aritmetica, una un guard.
+feature di questo hardware. Le altre dieci non toccano codice condiviso: dati,
+aritmetica, un guard, un array senza scrittore, le due della cal RSSI e quella
+del campo dell'indice di potenza.
 
-Ognuna applica **da sola** su mainline pulito, e si dimostra senza hardware: per
-precedenza C e aritmetica, perché un guard non può essere falso, o perché brcmsmac
-e la cattura concordano contro b43.
+Si dimostrano tutte senza hardware: per precedenza C e aritmetica, perché un guard
+non può essere falso, o perché brcmsmac e la cattura concordano contro b43.
+
+Undici applicano **da sole** su mainline pulito. La dodicesima,
+`b43-fill-the-per-rate-transmit-power-offsets-on-n-phy`, **no**: e' stata generata
+sopra il rollup, e i suoi hunk dichiarano righe di un `phy_n.c` piu' lungo di ~1000
+righe di quello pulito. Su mainline entra solo con fuzz e offset da -638 a -1049. Va
+rigenerata sul baseline pulito prima di spedirla, e finche' non lo e' non e' spedibile.
 
 La prima porta due difetti insieme, e non per pigrizia: nessuna delle due metà, da
 sola, produce una tabella dei campioni giusta — 140 parole sbagliate su 160 con la

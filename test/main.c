@@ -327,6 +327,23 @@ static int flow_init(void)
 	}
 	b43_test_trace_to(null);
 	err = init_once(true);
+	/* E un recalc, ancora non tracciato: e' quello che riempie
+	 * nphy->tx_power_offset[], e senza di lui la tabella di potenza
+	 * aggiustata esce a zeri per tutto l'init tracciato. Il vendore quegli
+	 * offset ce li ha, perche' la cattura e' un init a caldo e il suo driver
+	 * li ha calcolati al boot prima: a #2000 e a #2086 scrive le 84 celle col
+	 * contenuto, `0 0 0 0` e poi `2 c c c` ripetuto, dove il port scriveva
+	 * ottantaquattro zeri.
+	 */
+	if (!err) {
+		/* Senza spegnere il pending, il recalc si tira dietro anche la
+		 * sequenza differita della cal periodica, che rifa' la cal RSSI
+		 * e riscrive la cache: il secondo init restaurerebbe quella e non
+		 * quella del primo init. Qui serve solo il calcolo degli offset.
+		 */
+		dev.phy.n->perical_pending = false;
+		b43_phyops_n.recalc_txpower(&dev, false);
+	}
 	b43_test_trace_to(stdout);
 	fclose(null);
 	if (err)
@@ -334,17 +351,33 @@ static int flow_init(void)
 	fprintf(stderr, "--- init a freddo fatto e non tracciato, ora quello "
 			"che la cattura contiene ---\n");
 
-	/* La cattura e' un init a caldo che rifa' le calibrazioni: legge e
-	 * ricalcola i coefficienti RSSI invece di riscriverli dalla cache. Il
-	 * primo init qui sopra lascia le chanspec di cal valorizzate, e con
-	 * quelle il secondo init prende la strada del restore, che scrive la
-	 * cache del primo. Azzerarle e' cio' che rende il secondo init lo stesso
-	 * init che la cattura contiene.
+	/* La cattura e' un init a caldo che rifa' la cal TX I/Q LO e la RX I/Q -
+	 * le parentesi a #8492 e #14964 lo dicono - e NON la RSSI, che restaura.
+	 * Il primo init qui sopra lascia le chanspec di cal valorizzate; azzerare
+	 * le tre delle cal che la cattura contiene e' cio' che rende il secondo
+	 * init lo stesso init che la cattura contiene. Quella della RSSI resta
+	 * valorizzata, vedi sotto.
 	 */
-	dev.phy.n->rssical_chanspec_2G.center_freq = 0;
-	dev.phy.n->rssical_chanspec_5G.center_freq = 0;
 	dev.phy.n->iqcal_chanspec_2G.center_freq = 0;
 	dev.phy.n->iqcal_chanspec_5G.center_freq = 0;
+	dev.phy.n->rssical_chanspec_5G.center_freq = 0;
+
+	/* Quella RSSI in 2 GHz NO, e va lasciata valorizzata: la cattura e' un
+	 * init a caldo e il vendore la' non calibra, RESTAURA. Fra #132 e #8000
+	 * legge 0x219 una volta sola - zero poll - e a #3712-#3731 scrive di
+	 * fila i due registri radio e i dodici PHY, che e' esattamente il corpo
+	 * di b43_nphy_restore_rssi_cal(). Azzerando la chanspec il port prendeva
+	 * la strada della calibrazione: 1052 op che il vendore non ha.
+	 *
+	 * I valori NON si seminano: ce li mette il primo init, che la
+	 * calibrazione la fa. Ne escono tutti e due i registri radio e undici
+	 * dei dodici PHY identici alla cattura; l'unico che differisce e' quello
+	 * di 0x1ac, l'offset fine narrowband del core 0 sulla rail Q, che il
+	 * banco calcola 0 dove la cattura ha 1. Costa UNA op sulla finestra
+	 * up-ch1, e vale meno di quattordici costanti copiate dalla cattura
+	 * dentro il banco.
+	 */
+	dev.phy.n->rssical_chanspec_2G.center_freq = chan.center_freq;
 	/* E anche questa, che serve per la stessa ragione e mancava. Da quando
 	 * b43_nphy_cal_perical_phyinit() calcola full/parziale invece di
 	 * inchiodare `true` — come fa il riferimento, sul confronto fra il canale
@@ -396,9 +429,8 @@ static int flow_initpor(void)
 /* mac80211 aggiorna hw->conf.chandef PRIMA di chiamare l'op, e il driver legge
  * la frequenza da lì: b43_nphy_op_switch_channel() usa
  * dev->wl->hw->conf.chandef.chan e l'argomento new_channel. Senza aggiornare il
- * chandef il port programma la chantab del canale vecchio -- ci sono cascato, e
- * il confronto col trace vendor l'ha fatto vedere subito (0x16 e 0x2c, cioe'
- * vcocal e mmd0, con i valori di 2412 invece di 2437). */
+ * chandef il port programma la chantab del canale vecchio, e si vede sul trace
+ * come 0x16 e 0x2c -- vcocal e mmd0 -- coi valori di 2412 invece di 2437. */
 static void set_channel(unsigned int channel)
 {
 	chan.center_freq = channel == 14 ? 2484 : 2412 + (channel - 1) * 5;

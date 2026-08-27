@@ -125,12 +125,11 @@ enum wldiag_op {
  * una traccia di cosa fa il chip, da cui il comportamento si ricostruisce a
  * posteriori.
  *
- * C'e' stata per un giro una variante che marcava l'ingresso di sette funzioni
- * del PHY (`OP_FN`), utile per delimitare le fasi, ed e' stata **togliere di
- * proposito**: marcare le funzioni interne produce una mappa della struttura del
- * driver del vendore, che e' una cosa diversa dall'osservare l'hardware e molto
- * piu' facile da contestare. Se un confine di fase serve, si ricava dalle op
- * degli accessor.
+ * Le funzioni interne del PHY non si agganciano, ed e' una scelta e non una
+ * mancanza: marcarne l'ingresso produce una mappa della struttura del driver del
+ * vendore, che e' una cosa diversa dall'osservare l'hardware e molto piu' facile
+ * da contestare. Se un confine di fase serve, si ricava dalle op degli
+ * accessor.
  */
 struct wldiag_rec {
 	u64 ts_ns; u32 seq; u32 addr; u32 val; u32 aux;

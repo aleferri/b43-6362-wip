@@ -85,8 +85,8 @@ build:
 
 # Staging: sola copia, mai modifica. Una regola per file, col sorgente del tree
 # come prerequisito, cosi' se applichi una patch al tree la copia si rifa' da
-# sola. Con uno stamp unico restava vecchia in silenzio, e si misurava il codice
-# sbagliato credendo di misurare la patch: ci sono cascato.
+# sola. Non uno stamp unico: quello resta valido e la copia resta vecchia in
+# silenzio, vedi README.md.
 STAGED := $(addprefix $(SRCDIR)/,$(COPY_SRCS) $(REAL_HDRS))
 
 $(SRCDIR)/cordic.c: $(KDIR)/lib/math/cordic.c | build

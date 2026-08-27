@@ -20,9 +20,9 @@ make compare FLOW=init REF=../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
 
 Per provare una patch: si applica **al tree** e si rifà `make`. Le copie in
 `build/src/` hanno il sorgente del tree come prerequisito, quindi si aggiornano da
-sole — non serve `make clean`, e prima serviva: con uno stamp unico la copia
-restava vecchia in silenzio e si misurava il codice sbagliato credendo di misurare
-la patch. Ci sono cascato, e le prime cifre di copertura erano quelle sbagliate.
+sole e non serve `make clean`. Il prerequisito e' per file di proposito: con uno
+stamp unico la copia resta vecchia in silenzio e si misura il codice sbagliato
+credendo di misurare la patch.
 
 Il repo non tiene una copia dei sorgenti del driver.
 
@@ -38,25 +38,23 @@ Il repo non tiene una copia dei sorgenti del driver.
   nei registri e uno stub li falserebbe.
 - `wrap.c` implementa gli accessor (PHY, radio, MMIO, SHM, MAC) emettendo una
   riga per op, con mirror di memoria per le write. **E un mirror delle tabelle**,
-  `tbl_mirror`, keyed su `(id, offset)`: senza, una lettura di tabella passava
-  dalla porta dati `0x73` e si riprendeva l'ultima cella scritta da qualunque
-  parte invece di quella richiesta. Si vedeva sulla banda del filtro passa-basso
-  che la cal PAPD rilegge da `7/0x154`, e per due sessioni e' stato attribuito ai
-  piani di lettura e alla cattura sbagliata prima che qualcuno guardasse `wrap.c`.
+  `tbl_mirror`, keyed su `(id, offset)`: senza, una lettura di tabella passa
+  dalla porta dati `0x73` e riprende l'ultima cella scritta da qualunque parte
+  invece di quella richiesta.
   Il mirror lo serve `tbl_port_get()` **alla porta dati**, cioe' dentro
   `b43_phy_read` per `0x73` e `0x74`, usando `(id << 10) | off` dall'ultima
-  scrittura su `0x72`. Serve la cella **sempre**, anche se nessuno l'ha scritta —
+  scrittura su `0x72` — non solo al valore di ritorno di `b43_ntab_read`, o il
+  driver legge la cella giusta e il trace mostra il mirror del registro. Serve la
+  cella **sempre**, anche se nessuno l'ha scritta —
   `tbl_mirror` parte a zero e zero e' la risposta giusta, perche' quelle due
   porte non sono registri e il loro mirror non significa niente — e in lettura
   fa **avanzare l'indirizzo** come l'hardware: la read di `0x73` aggancia la
   cella intera e incrementa, quella di `0x74` rende la word alta agganciata. Le
   due porte si visitano in ordine opposto nei due versi (`0x73` poi `0x74` in
   lettura, `0x74` poi `0x73` in scrittura), e senza l'aggancio l'incremento
-  sulla word bassa spingerebbe la lettura della word alta sulla cella dopo. Prima lo serviva solo al valore di ritorno di
-  `b43_ntab_read`: il driver leggeva la cella giusta e il trace continuava a
-  mostrare il mirror del registro, cioe' la misura diceva di no mentre il codice
-  era a posto. Due sessioni di colpa data ai piani di lettura e alla cattura
-  sbagliata prima di guardare qui. Le `b43_ntab_*` invece stanno
+  sulla word bassa spingerebbe la lettura della word alta sulla cella dopo.
+  Si vede sulla banda del filtro passa-basso che la cal PAPD rilegge da
+  `7/0x154`. Le `b43_ntab_*` invece stanno
   in `tables_nphy.c` che compiliamo, quindi si intercettano al linker con
   `--wrap` e poi si chiama la `__real_`: nel trace escono l'etichetta `TBL.WR` e
   le `PHY.WR` su 0x72/0x73/0x74 che ne discendono, come nella cattura.
@@ -105,7 +103,7 @@ raggiunti, ma compilati fuori non avrebbero mai potuto comparire.
 - `stubs/sprom.h` — `struct ssb_sprom` **copiata verbatim** dal kernel: i nomi
   dei campi devono combaciare, riscriverli a mano è il modo migliore di
   introdurre una differenza muta.
-- `stubs/b43_defs.h` — 487 define e 7 enum estratte da `b43.h`. I commenti sono
+- `stubs/b43_defs.h` — 488 define e 7 enum estratte da `b43.h`. I commenti sono
   rimossi di proposito: la prima versione li copiava e `B43_BFH_FEM_BT` ha un
   `/*` che continua sulla riga dopo, quindi il commento troncato si mangiava le
   define successive.
@@ -113,6 +111,40 @@ raggiunti, ma compilati fuori non avrebbero mai potuto comparire.
 - `stubs/b43.h` è scritto a mano ma ridotto ai soli campi usati. La riduzione la
   verifica il compilatore: se il driver ne tocca uno che manca, il build si
   ferma.
+
+## Il seme degli offset di potenza
+
+Dopo l'init a freddo, e sempre non tracciato, gira un `recalc_txpower`: e' quello che
+riempie `nphy->tx_power_offset[]`, e senza di lui la tabella di potenza aggiustata
+esce a zeri per tutto l'init tracciato, dove il vendore la scrive col contenuto
+(#2000 e #2086). La cattura e' un init a caldo e il driver del vendore quegli offset
+li ha dal boot prima.
+
+Prima di chiamarlo si spegne `perical_pending`, o il recalc si tira dietro la sequenza
+differita della cal periodica, che rifa' la cal RSSI e riscrive la cache: il secondo
+init restaurerebbe quella invece di quella del primo init. Costa 479 op su `up-ch1` e
+fa perdere l'ancora alla finestra `rssi-cal`.
+
+## Il seme della cal RSSI
+
+Delle quattro chanspec di calibrazione, `rssical_chanspec_2G` **non** si azzera fra i
+due init. La ragione sta nella
+cattura: e' un init a caldo, e il vendore al primo passo RSSI **restaura** invece di
+calibrare — fra #132 e #8000 legge `0x219` una volta sola, zero poll, e a #3712-#3731
+scrive i due registri radio e i dodici PHY di fila. Azzerando la chanspec il port
+prendeva la strada della calibrazione, 1052 op che il vendore non ha e che valevano
+841 op sulla somma delle run.
+
+Le altre tre si azzerano, perche' la cattura la cal TX I/Q LO e la RX I/Q le contiene.
+
+I valori della cache **non si seminano**: ce li mette il primo init, che la
+calibrazione la fa, e ne escono i due registri radio e undici dei dodici PHY identici
+alla cattura. Copiarli a mano dalla cattura vale una op su `up-ch1`, che non paga
+quattordici costanti dentro il banco. L'unico che differisce e' `0x1ac`, l'offset fine
+narrowband del core 0 sulla rail Q: 0 contro 1.
+
+E a freddo non c'e' niente contro cui verificare: `full-init-ch1-bw20` la cal RSSI la
+comincia a #32637 e a #32769 parte il buco da 65285 record.
 
 ## L'init a freddo e quello a caldo
 
@@ -246,7 +278,7 @@ Il motivo non e' estetico: **una fase presa da sola non dice niente su cio' che 
 arriva addosso da prima**. `chanswitch-ch6` diceva 33/39 e "nessuna op mancante";
 la fase intera sta al 14%, perche' 200 op su 321 sono un ciclo di 100+100 read
 consecutive su `0x1c9`/`0x1ca` che il port non fa affatto, e che nessuno ha ancora
-attribuito (`CLAUDE.md`, Prossimo passo 0). Una finestra che passa mentre la fase
+attribuito (`CLAUDE.md`, "Cosa resta aperto", ACI scan). Una finestra che passa mentre la fase
 e' al 14% e' peggio di nessuna finestra.
 
 I confronti per fase restano nelle **finestre** qui sopra, che sono il dettaglio;

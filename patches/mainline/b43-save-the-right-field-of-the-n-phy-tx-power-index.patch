@@ -1,0 +1,68 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Sun, 24 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: save the right field of the N-PHY TX power index
+
+When hardware TX power control is turned off while it was running,
+b43_nphy_tx_power_ctrl() remembers the index each chain was on so that
+turning it back on can resume there. It reads the two per-core status
+registers and keeps the low seven bits.
+
+The index is not in the low seven bits. It is in bits 8 to 14, which is what
+this driver's own B43_NPHY_TXPCTL_STAT_BIDX says, what
+b43_nphy_get_tx_gains() twenty lines away uses to read the same field, and
+what the reference does:
+
+	tmp = read_phy_reg(pi, ((core == PHY_CORE_0) ? 0x1ed : 0x1ee));
+	tmp = (tmp & (0x7f << 8)) >> 8;
+
+So what gets saved is a different field of the status register, and the
+restore path puts it back into the index: b43_nphy_tx_power_ctrl() writes it
+to the low seven bits of TXPCTL_CMD and to the low byte of TXPCTL_INIT. The
+hardware resumes on whatever those seven unrelated bits happened to hold.
+
+This runs on every N-PHY rev 3 and up, and on every path that brackets work
+with the power control off - the calibrations and the channel switch among
+them.
+
+Measured on an MMIO capture of wl 6.30.102.7 on a BCM6362, N-PHY rev 8 with
+radio 2057 rev 8: the status register reads back 0x1900, so the index is 25
+and the low seven bits are zero. The vendor driver restores 25; b43 restored
+0, the bottom of the table. With the fix the port writes 25 at all three
+sites where the vendor writes 25, and no longer writes 0 anywhere.
+
+Not tested on hardware.
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n24207
+Link: https://github.com/aleferri/b43-6362-wip/blob/HEAD/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+The restore of the index in that capture, three times over two interface
+inits, the first at
+
+  53676.750000 #1735     cpu0 PHY.MOD  addr=0x01e7 val=0x0019 mask=0x007f
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+ drivers/net/wireless/broadcom/b43/phy_n.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -3612,10 +3612,14 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+ 		      B43_NPHY_TXPCTL_CMD_HWPCTLEN |
+ 		      B43_NPHY_TXPCTL_CMD_PCTLEN))) {
+ 			/* We disable enabled TX pwr ctl, save it's state */
+-			nphy->tx_pwr_idx[0] = b43_phy_read(dev,
+-						B43_NPHY_C1_TXPCTL_STAT) & 0x7f;
+-			nphy->tx_pwr_idx[1] = b43_phy_read(dev,
+-						B43_NPHY_C2_TXPCTL_STAT) & 0x7f;
++			nphy->tx_pwr_idx[0] = (b43_phy_read(dev,
++					B43_NPHY_C1_TXPCTL_STAT) &
++				B43_NPHY_TXPCTL_STAT_BIDX) >>
++				B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
++			nphy->tx_pwr_idx[1] = (b43_phy_read(dev,
++					B43_NPHY_C2_TXPCTL_STAT) &
++				B43_NPHY_TXPCTL_STAT_BIDX) >>
++				B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
+ 		}
+ 
+ 		b43_phy_write(dev, B43_NPHY_TABLE_ADDR, 0x6840);

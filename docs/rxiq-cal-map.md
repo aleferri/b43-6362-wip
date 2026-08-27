@@ -36,7 +36,7 @@ Anche il preambolo torna, e serve per posizionare il guscio: **#14966-14969** su
 `wlc_phy_stay_in_carriersearch_nphy(pi, true)`. La fase quindi non comincia a
 #14093 come dice il confine di `REGIONS`: comincia a **#14966**, e cio' che sta in
 mezzo e' la coda di `wlc_phy_txpwr_index_nphy` della cal PAPD (`CLAUDE.md`,
-"Prossimo passo" 4).
+"Come sta insieme la cal periodica").
 
 ## Le funzioni di brcmsmac
 
