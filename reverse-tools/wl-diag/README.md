@@ -27,11 +27,10 @@ Qui si agganciano **accessor**: funzioni che leggono e scrivono registri e memor
 condivisa, cioe' l'interfaccia verso l'hardware. Quello che ne esce e' una traccia
 di cosa fa il chip, e il comportamento si ricostruisce a posteriori da quella.
 
-Per un giro c'e' stata una variante che marcava l'ingresso di sette funzioni del
-PHY, comoda per delimitare le fasi, ed e' stata **togliere di proposito**: marcare
-le funzioni interne di un driver di terzi produce una mappa della sua struttura,
-che e' una cosa diversa dall'osservare l'hardware e molto piu' facile da
-contestare.
+Le funzioni interne del PHY **non** si agganciano, ed e' una scelta: marcarne
+l'ingresso sarebbe comodo per delimitare le fasi, ma produce una mappa della
+struttura di un driver di terzi, che e' una cosa diversa dall'osservare l'hardware
+e molto piu' facile da contestare.
 Se un confine di fase serve, si ricava dalle op degli accessor — e con
 `MAC.SUSP`/`MAC.EN` adesso ce n'e' uno esplicito dove prima si indovinava.
 

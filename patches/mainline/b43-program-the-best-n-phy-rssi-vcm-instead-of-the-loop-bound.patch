@@ -1,0 +1,49 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Sun, 24 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: program the best N-PHY RSSI VCM instead of the loop bound
+
+b43_nphy_rev3_rssi_cal() sweeps the eight narrowband RSSI VCM settings of a
+core, polls each one, and picks the one whose I and Q results are closest to
+zero into vcm_final. It then programs the winner back into the radio - and
+on N-PHY rev 7 and up it programs vcm instead, which is the sweep's loop
+variable and is 8 by the time the loop has ended.
+
+Eight is not a VCM. The field is three bits wide, so on radio 2057 the
+maskset writes bit 3 of NB_MASTER, which is outside the field, and leaves
+the VCM field at whatever the last sweep iteration put there. The result of
+the search is discarded on every rev 7 and up, and a bit that belongs to
+something else gets set.
+
+The rev 3 branch immediately below has it right, and so does the reference:
+wlc_phy_rssi_cal_nphy_rev3() passes vcm_final on both paths.
+
+Measured on an MMIO capture of wl 6.30.102.7 on a BCM6362, N-PHY rev 8 with
+radio 2057 rev 8: with the fix the port writes the VCM the vendor driver
+writes on the second core, 3 on both sides, where before it wrote 8.
+
+Not tested on hardware.
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n22498
+Link: https://github.com/aleferri/b43-6362-wip/blob/HEAD/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+Records #22377 to #23541 of that capture are the two VCM sweeps of the
+second RSSI calibration, one per core. The write that selects the winner for
+core 1 is
+
+  53677.056000 #23537    cpu0 RAD.MOD  addr=0x0139 val=0x0003 mask=0x0007
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+ drivers/net/wireless/broadcom/b43/phy_n.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -2183,7 +2183,7 @@ static void b43_nphy_rev3_rssi_cal(struct b43_wldev *dev)
+ 			b43_radio_maskset(dev,
+ 					  core ? R2057_NB_MASTER_CORE1 :
+ 						 R2057_NB_MASTER_CORE0,
+-					  ~R2057_VCM_MASK, vcm);
++					  ~R2057_VCM_MASK, vcm_final);
+ 		else
+ 			b43_radio_maskset(dev, r | B2056_RX_RSSI_MISC,
+ 					  0xE3, vcm_final << 2);

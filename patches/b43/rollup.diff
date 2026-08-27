@@ -6,7 +6,7 @@ accorciare il giro di build mentre si costruisce. Si ridivide prima di
 mandare qualunque cosa, e i messaggi delle ventisei patch che stanno qui
 dentro sono in MESSAGES.md, da cui ripartire per la divisione.
 
-Baseline: patches/mainline/ (tutte e sette) su un tree pulito. Il rollup si
+Baseline: patches/mainline/ (tutte e dodici) su un tree pulito. Il rollup si
 applica DOPO quelle, non da solo, e questo e' un cambiamento rispetto a
 prima: la serie numerata si applicava anche su mainline pulito, con il
 conflitto atteso di 0010. Qui il conflitto non c'e' perche' 0010 e 0022 non
@@ -33,8 +33,9 @@ trace dell'harness e' identico (md5 3c23340b6076cffdfb7f531583fd5a0b su
 Niente ha mai girato su hardware.
 
 check_patch_gating.py, contro un albero con le sole mainline applicate, segna
-tre punti NON GATEATI. Tutti e tre erano dichiarati nelle patch che li
-portavano, e la dichiarazione va qui perche' il tool ora vede un file solo:
+sette punti NON GATEATI. Tre erano dichiarati nelle patch che li portavano, e la
+dichiarazione va qui perche' il tool ora vede un file solo. Ce n'e' un sesto che
+il tool NON segna, e sbaglia: sta in fondo.
 
   b43_radio_2057_setup (phy_n.c)
         Condivisa, ma qui subisce solo un'estrazione: le stesse quattro op sul
@@ -55,6 +56,56 @@ portavano, e la dichiarazione va qui perche' il tool ora vede un file solo:
         non tocca niente di esistente. La funzione nuova non ha test di
         revisione, come il resto del file: il gate sta nel chiamante, che
         prova phy rev 8, radio rev 8 e la banda 2 GHz.
+
+  b43_nphy_rf_ctl_override_one_to_many (phy_n.c)
+        Comune a ogni N-PHY rev 7 e su. Il caso TX_GAIN passa il campo 0x2000
+        invece di 0x4000 e taglia il secondo argomento con (value & 0x8000) >> 14
+        invece di value >> 14: e' quello che fa il riferimento in
+        wlc_phy_rfctrl_override_1tomany_nphy(), (0x1 << 12) e (0x1 << 13), e la
+        cattura concorda - spegne 0x4000 zero volte. E' un numero di campo
+        sbagliato, non una feature di questo hardware, e dietro un gate non ci va.
+
+  b43_nphy_update_tx_cal_ladder (phy_n.c)
+        Comune a ogni N-PHY rev 3 e su. Le due scale della cal TX I/Q LO si
+        scrivono in due cicli invece di uno interleavato: stesse trentasei celle
+        della tabella 15, stessi valori, stesso ordine dentro ciascuna scala,
+        cambia solo il raggruppamento. Nessuna condizione nuova e nessuna op in
+        piu'. Dietro un gate non ci va perche' non e' una feature di questo
+        hardware, e' l'ordine che il vendore usa su ogni revisione - la cattura
+        lo mostra due volte, a #9015 e a #9735.
+
+  b43_nphy_tx_power_ctrl (phy_n.c)
+        Comune a ogni N-PHY. Il ramo di spegnimento passa da
+        b43_ntab_write_bulk() sulle tabelle 26 e 27 all'offset 64 invece di
+        aprire la porta dati a mano: e' la stessa strada che il ramo di
+        accensione, dieci righe sotto, prende da sempre sulle stesse due tabelle
+        allo stesso offset. Le celle scritte sono le stesse, lo zero e' lo zero:
+        nessuna revisione si comporta diversamente. Dietro un gate non ci va
+        perche' non e' una feature di questo hardware, e' togliere un
+        open-coding.
+
+  b43_nphy_get_tx_gains (phy_n.c)
+        Comune a ogni N-PHY rev 3 e su. Il ramo a controllo di potenza acceso
+        legge l'indice per catena dai due registri di stato per andare a prendere
+        i gain in tabella; qui quell'indice viene anche registrato in
+        nphy->cal_orig_pwr_idx[], perche' e' la lettura da cui la cattura lo
+        prende e la coda della cal periodica lo rimette. Nessuna op in piu' e
+        nessuna condizione nuova: due assegnazioni a un campo che legge solo la
+        coda, che gira su phy rev 8 e radio rev 8. Sulle altre revisioni il campo
+        resta scritto e non letto, come lo era prima.
+
+  b43_nphy_poll_rssi (phy_n.c), che il tool considera gateata e non lo e'
+        La lettura di GPIO_SEL esce da if (phy.rev < 2), dove sta insieme alla
+        scrittura: nel riferimento la lettura e' incondizionata e solo la
+        scrittura e' gateata (wlc_phy_poll_rssi_nphy). Il tool vede il rev < 2
+        dentro la funzione e la conta gateata, ma la riga che tocco gira su
+        ogni revisione. La dichiarazione e' che il cambiamento e' INERTE: su
+        rev >= 2 il valore letto serve solo alla riscrittura, che resta
+        gateata, quindi nessuna revisione si comporta diversamente. Costa una
+        lettura di registro per chiamata, e serve solo a questo banco: nella
+        cattura la lettura di 0xca c'e', una per poll, e senza di lei la
+        seconda cal RSSI si spezza in 22 blocchi invece di 3. Per la stessa
+        ragione NON e' un candidato mainline: la' e' una lettura buttata.
 
 Aggiunta la macchina a stati mphase in b43_nphy_cal_perical_phyinit(): i passi del
 riferimento - INIT, TX I/Q LO, PAPD, RX I/Q, RSSI, idle TSSI - ognuno con la
@@ -169,11 +220,580 @@ zero su 716.
   a freddo         18022 -> 18163 (66%)
 
 ---
+---
+
+E la coda della sequenza rimette i due indici, uno per core, prima della
+chiusura unica: la cattura legge 26/0xca a #25017 e 27/0xcc a #25418, e fra le
+due chiamate il controllo di potenza resta spento - i quattro payload da 84
+zeri di #24841, #25064, #25242, #25465 - con l'unica accensione dopo, a
+#25641, che e' la chiusura. Gli indici non sono uno: si leggono dai bit 8..14
+di C1/C2_TXPCTL_STAT, a #7034 e #7036, e sono 10 sul core 0 e 12 sul core 1,
+quindi non possono essere quello che le cal forzano.
+
+  blocchi contigui 18462 -> 19224 (80% -> 84%)
+  totale per fase  fermo a 7205
+
+Aggiungendola la finestra recalc-txpower sembrava rompersi, da 519/519 a
+432/519. Era la sua ancora: prendeva la TERZA apertura di 26/0x0, che era la
+recalc del port finche' la sequenza girava altrove e che con la sequenza in
+coda a recalc e' diventata il power setup della coda. Confrontava la recalc
+del vendore con la coda del port. Corretta l'ancora alla seconda, la finestra
+torna 519/519 con la modifica dentro.
+
+---
+
+E la lettura di GPIO_SEL in b43_nphy_poll_rssi() esce dal gate della
+scrittura. Vedi la dichiarazione sopra: e' inerte e non e' un candidato
+mainline. Con le due mainline nuove sulla cal RSSI, la seconda cal RSSI
+misurata da sola passa da 623 a 956 op su 960 (65% -> 100%) e da 22 blocchi a
+3, con una run singola da 940.
+
+  blocchi contigui 19224 -> 19247 (84%)
+  totale per fase   7205 -> 7206 (38%)
+  a freddo         18163 -> 18167 (66%)
+
+---
+
+E la lettura dei due indici di base sale in testa a
+b43_nphy_cal_perical_phyinit(), fuori dal passo INIT, dove il riferimento la
+mette: in testa a ogni invocazione, prima che qualcosa possa muoverli. Nella
+cattura sta a #7034 e #7036, i primi due record della fase, prima della
+lettura del tx gain. Numero neutro: perical-ingresso misurata da sola resta a
+1295 op su 1402 (92%) in 31 blocchi. Sta dentro per l'ordine, non per il
+numero.
+
+---
+
+---
+
+E le letture d'ingresso vanno prima del blocco differito. Il riferimento in testa a
+wlc_phy_cal_perical_nphy_run() legge l'indice per catena, poi il gain, poi
+get_tx_gain, poi spegne il controllo, e SOLO DOPO fa il precal; il port faceva il
+precal per primo. Ora target si prende prima del precal, e l'indice che la coda
+riforza lo registra get_tx_gains(), che e' la lettura da cui la cattura lo prende
+(#7044 e #7046, 10 e 12). NON e' nphy_cal_orig_pwr_idx del riferimento, che a
+#7034/#7036 rende 25 e 25: quel ramo di brcmsmac non descrive questa coda, come
+l'indice di precal e il raggruppamento dell'rccal.
+
+  blocchi contigui 19247 -> 19254 (84%)
+  a freddo         18167 -> 18169 (66%)
+  perical-ingresso  divergenze 905 -> 885
+  totale per fase  fermo a 7206
+
+---
+
+---
+
+E il blocco differito gira DENTRO la parentesi. Il riferimento spegne il controllo
+di potenza in testa alla run, prima che qualcosa forzi un indice; il port lo
+spegneva solo entrando nel primo passo, quindi il precal e i due hand-back
+restituivano il controllo ACCESO e ognuno riprogrammava la tabella di potenza
+aggiustata. La sequenza ora riceve lo stato d'ingresso come argomento invece di
+rileggerlo dopo che il blocco differito lo ha girato.
+
+  blocchi contigui 19254 -> 19804 (84% -> 86%)
+  a freddo         18169 -> 18750 (66% -> 68%)
+  perical-ingresso  divergenze 885 -> 323, op mancanti 675 -> 42
+  txpwr-index       divergenze note 11 -> 6
+
+---
+
+E il ramo di spegnimento di b43_nphy_tx_power_ctrl() passa da
+b43_ntab_write_bulk() come fa quello di accensione, invece di aprire la porta dati
+a mano e scrivere 84 celle in un ciclo. Le celle scritte sono le stesse per la
+stessa tabella allo stesso offset: cambia la strada, non l'effetto. Ma il tracer
+del vendore aggancia la funzione di tabella, quindi la sua op c'e' e quella del
+port no, e l'op mancante sfasava di uno tutto quello che seguiva - il che spiega
+perche' i blocchi uguali dentro perical-ingresso si accorciavano di uno a ogni
+scrittura da 84 celle.
+
+  blocchi contigui  19804 -> 19977 (86% -> 87%)
+  totale per fase    7206 -> 7578 (38% -> 40%)
+  perical-ingresso   run 119 -> 401, divergenze 323 -> 286
+  rxiq-ingresso      run 306 -> 401, divergenze 805 -> 722
+  cal-rx-iq          run 420 -> 510
+  a freddo          18750 -> 18711, cioe' 39 in meno: l'assegnazione dei blocchi
+                    e' esclusiva e golosa, e nessuna finestra si e' rotta
+
+---
+
+---
+
+E le due letture d'ingresso del riferimento tornano, nell'ordine suo: l'indice per
+catena e, se il controllo di potenza girava, i gain. Il riferimento le fa e poi non
+le rilegge - la coda rimette l'indice preso CON i gain, non questo - ma l'hardware
+le vede, e senza di loro tutto quello che segue in questa fase sta sei op in
+anticipo. Erano proprio quelle sei: due della coppia e quattro della table-read.
+Da qui i campi cal_orig_pwr_idx[] e cal_orig_tx_gain[], che portano i nomi del
+riferimento e come la' non li legge nessuno; l'indice che la coda usa sta in
+pwr_idx_at_gain[], scritto da b43_nphy_get_tx_gains().
+
+  blocchi contigui 19977 -> 20013 (87%)
+  totale per fase   7578 -> 7586 (40%)
+  a freddo         18711 -> 18715 (68%)
+  perical-ingresso  divergenze 286 -> 95, run 401 -> 409
+
+Cosa resta in quella finestra, 95 op in tre gruppi: 4 op di rilettura a 9 bit delle
+tabelle 26/27 oltre l'offset 576, che e' hardware e sta dichiarato; 27 op in una
+parentesi di txpwr_index dove il port apre il blocco di salvataggio mentre il
+vendore e' gia' a metà; e 64 op che sono lo sfasamento che ne consegue.
+
+---
+
+---
+
+E b43_nphy_precal_txgain() scrive nphy->txcal_bbmult, che in mainline e' letto e
+mai scritto. Lo legge b43_nphy_update_tx_cal_ladder(), che ci scala i 36 gradini
+della scala che la cal TX I/Q LO usa: senza scrittore vale zero, quindi ogni
+gradino esce ad ampiezza zero. Il riferimento lo riempie in coda a
+wlc_phy_precal_txgain_nphy(), quando save_bbmult, che sul rev 7 e su e' sempre, e
+di nuovo in coda a wlc_phy_cal_txgainctrl_nphy(). Nella cattura e' la TBL.RD
+15/0x57 a #8076, subito dopo il forzamento dell'indice.
+
+Questo e' un difetto di mainline e non di questo hardware: va in
+patches/mainline/ appena si e' misurato cosa cambia sulla cal, che qui non si
+vede perche' i piani servono i valori del vendore.
+
+E i gain al forzamento si prendono dove la cattura li prende, fra il forzamento e
+la restituzione (#8080), non dentro il passo INIT della macchina a stati. Il
+riferimento fa cal_target_gain = get_tx_gain() subito dopo precal_txgain(), nello
+stesso passo.
+
+  blocchi contigui 20013 -> 20022 (87%)
+  totale per fase   7586 -> 7750 (41%)
+  a freddo         18715 -> 18724 (68%)
+  perical-ingresso  divergenze 95 -> 19, run 409 -> 573
+
+Le 19 che restano sono dichiarate nella finestra: quattro di rilettura a 9 bit,
+inerti, e quindici di confine con la fase dopo.
+
+---
+
+---
+
+E la parentesi per passo se ne va da tutti i passi tranne uno. Il controllo di
+potenza e' gia' spento da prima del blocco differito, quindi
+b43_nphy_pwr_ctl_open() dentro il ciclo non spegne niente e la lettura del gain la
+salta: restano 172 op per passo che l'hardware non vede. Il port ne emetteva 48 di
+parentesi da 84 celle contro le 36 del vendore, dodici in piu', e sono queste.
+
+Quale tenere lo dice l'audit dei confini, non un'intuizione: fra perical e TX I/Q LO
+nessuna transizione, fra TX I/Q LO e PAPD UNA, fra PAPD e RX IQ quattro (che sono le
+due per core della cal PAPD, che le apre da se'), fra RX IQ e idle TSSI nessuna.
+Quindi resta la sola apertura in testa al passo PAPDCAL. Togliendole tutte e sei si
+guadagnava sull'ingresso della RX IQ e si perdevano 172 op contigue altrove:
+misurato, non dedotto.
+
+  blocchi contigui 20022 -> 20025 (87%)
+  rxiq-ingresso     run 401 -> 500, divergenze 722 -> 542, op mancanti 184 -> 19
+  perical-ingresso  op mancanti 19 -> 10
+  cal-rx-iq         forma da 510 5x507 a 2x510 4x507
+
+---
+
+---
+
+E b43_nphy_cal_perical_phyinit() non sovrascrive piu' il parametro che ha appena
+ricevuto. Rileggeva i gain in testa alla propria funzione, con il controllo di
+potenza gia' spento, quindi b43_nphy_get_tx_gains() prendeva il ramo che legge
+7/0x110 invece di quello che indicizza la tabella: i gain d'ingresso calcolati dal
+chiamante finivano nel cestino tre righe dopo. Misurato con una stampa temporanea:
+il chiamante passava pad 14,12 e la funzione usava pad 4,4.
+
+E la cal RX IQ riceve i gain all'indice FORZATO, non quelli d'ingresso. La cattura
+scrive 0x4077 su entrambe le catene a #14985 e #14986, che e' il cal_gain della
+voce 10 di b43_ntab_tx_gain_ipa_2057_rev8_2g (0x4077002e: ipa 7, pad 14, pga 0,
+txgm 4) - l'indice che il precal forza su entrambe. Coi gain d'ingresso, che hanno
+gli indici per catena 10 e 12, escono 0x4077 e 0x4067.
+
+  blocchi contigui 20025 -> 20027 (87%)
+  totale per fase   7750 -> 7752 (41%)
+  a freddo         18724 -> 18726 (68%)
+  perical-ingresso  divergenze 19 -> 17, run 573 -> 575
+  rxiq-ingresso     i due valori scritti in 7/0x110 ora combaciano
+
+---
+
+---
+
+E la cal PAPD tiene la carrier search aperta per tutto, come fa wlc_phy_a4() dalla
+riga 25133 alla 25380. Il hold e' a contatore: senza quello esterno, le parentesi
+che i passi interni prendono escono come coppie ingresso-uscita per conto loro. Si
+contano: il port emetteva 8 coppie contro le 6 del vendore, e le due in piu' erano
+corte, 27 e 34 op, cioe' proprio inner che il vendore ha gratis.
+
+  blocchi contigui 20027 -> 20029 (87%)
+  a freddo         18726 -> 18729 (68%)
+  rxiq-ingresso     divergenze 542 -> 530
+  cal-papd          run 850 -> 847, forma da 850 2x334 a 847 2x342
+  totale per fase   7752 -> 7749
+
+E la cattura lo conferma direttamente, che e' la verifica che conta: le sei coppie
+del vendore sono #1620-1666 (34 op, init), #8492-10756 (1601, cal TX I/Q LO),
+#10771-14946 (3658, cal PAPD - la regione e' #10962-14092), #14964-21143 (5615,
+ingresso e sweep della RX IQ), #22245-23900 (1052, coeff setup e cal RSSI),
+#24271-24317 (34, idle TSSI). La terza copre la cal PAPD per intero ed esce a
+#14946, che e' l'uscita che si vedeva nel gruppo da 25 op di rxiq-ingresso.
+
+Il hold del port risulta 5112 op contro i 3658 del vendore, ma non e' fuori posto:
+le due estremita' combaciano op per op sui due lati, e la lunghezza differisce
+perche' il port emette 1454 op dentro la cal PAPD che il vendore non emette - cosa
+nota, cal-papd fa 847 su 2662 e a3/a2 non ci sono. Contare la lunghezza di un hold
+non misura il hold, misura cio' che ci sta dentro.
+
+Sui confini restano due numeri: una coppia in piu' (7 contro 6) e nove letture di
+0xb0 in piu' (25 contro 16), coi valori scritti che combaciano. E' un conteggio di
+chiamate a b43_nphy_classifier(), non un valore sbagliato.
+
+---
+
+---
+
+E il blocco di salvataggio della cal RX IQ salva un registro in piu', 0x2ff. La
+cattura lo legge a #15015, subito dopo i quattro registri di override rev 7 e prima
+di 0x297 e 0x29b: PHY.RD addr=0x02ff val=0x00001000. brcmsmac non lo legge MAI -
+tocca solo i bit 0, 13, 14 e 15 di quell'indirizzo nel percorso di override rev 7 -
+quindi qui decide la cattura, come per l'indice di precal e il raggruppamento
+dell'rccal. Salvato e non ripristinato, che e' quello che la cattura fa: la lettura
+c'e', una write in questa fase no.
+
+Vale un'op, e chiude quattrocentosessantasei divergenze:
+
+  rxiq-ingresso     divergenze 530 -> 64
+  blocchi contigui 20029 -> 20031 (87%)
+  a freddo         18729 -> 18730 (68%)
+  cal-rx-iq         forma da 2x510 4x507 2x360 285 a 2x510 4x507 2x360 288
+
+Il perche' e' l'unica cosa interessante: la lettura mancante sfasava di UNO tutto
+quello che seguiva, e dopo non si riallineava mai, perche' da li' in poi sono corse
+lunghe di zeri identici e di contenuto identico della tabella dei campioni. I
+gruppi da 357, 46, 21, 16, 5 e le quattro coppie da 2 erano tutti quello.
+
+Delle 64 che restano, UNA non e' dichiarabile e va corretta nel driver: la OBJ.WR
+addr=0xb8 val=0x2710, che e' write_shm(M_CTS_DURATION, 10000) - M_PSM_SOFT_REGS +
+0x5c*2 = 0xb8 - e che b43 non fa da nessuna parte, mentre il riferimento la fa in
+entrambi i rami che portano alla cal RX IQ (phy_n.c:25413 e 25460). L'avevo
+archiviata dentro la deroga OBJ.WR, e la deroga dice un'altra cosa: che l'harness
+non puo' EMETTERE object memory in modo confrontabile, non che il driver possa non
+FARE la scrittura. wrap.c ha b43_shm_write16() e la stampa, quindi si vedrebbe
+anche nel trace.
+
+Le altre 63: sei di rilettura a 9 bit, due MAC.MCTRL che sono mac_enable e
+mac_suspend e che l'harness stubba, due PHY.CLK del port col rimescolamento che ne
+segue - e quelle il port le fa GIUSTE, b43_nphy_reset_cca() e
+wlc_phy_resetcca_nphy() sono identiche, fgc(ON)/BBCFG/fgc(OFF)/RESET2RX: e' il
+tracer che non le vede, perche' aggancia wlc_bmac_core_phy_clk e l'accessor dietro
+b43_phy_force_clock() e' brcms_b_phyclk_fgc, un'altra funzione. Poi tre di
+allineamento dei piani a valle della coppia di carrier search in piu' e ventotto di
+confine con la fase dopo.
+
+---
+
+---
+
+E la fase RXCAL scrive M_CTS_DURATION. La calibrazione trasmette a lungo, quindi il
+mezzo va protetto per altrettanto: il riferimento imposta la durata del CTS che la
+ucode manda, in testa a QUESTA fase e a nessun'altra, e va fatto col MAC acceso
+(phy_n.c:25413 nella macchina a stati, 25460 nell'altro ramo). In b43 quella cella
+non la scriveva nessuno: grep CTS_DURATION su tutto il driver non trovava niente.
+M_CTS_DURATION = M_PSM_SOFT_REGS + 0x5c*2 = 0xb8, ed e' la OBJ.WR addr=0xb8
+val=0x2710 di #14949.
+
+Serve una define nuova, B43_SHM_SH_CTSDUR, e la stessa in test/stubs/b43_defs.h,
+che e' generato dal b43.h del tree e non ha uno script che lo rigeneri.
+
+  blocchi contigui 20031 -> 20035 (87%)
+  a freddo         18730 -> 18734 (68%)
+  totale per fase  fermo a 7749
+
+La finestra rxiq-ingresso passa da 64 a 555 divergenze, e va detto perche' non e'
+una regressione: con le tre op al loro posto la parita' dell'allineamento cambia, e
+riemerge uno sfasamento che era mascherato - il piano di lettura di 0xb0. Le op
+restano le stesse (mancano 18, in piu' 18 su 1503) e le due misure grandi salgono.
+Si chiude togliendo la coppia di carrier search di troppo, che e' voce a se'.
+
+---
+
+---
+
+E la pulizia della cal PAPD spegne anche il campo 0x2000, e le due prime le fa
+PRIMA di fermare il tono. La cattura, a #13741-#13748: e7 e 0x7c per il core 0 e
+ec e 0x7f per il core 1 (campo 0x1000), poi e7 e 0x348, ec e 0x349 (campo 0x2000,
+il cui valore sta nei quattro bit bassi di quei due registri e non in un registro
+intero). Il port il 0x2000 non lo spegneva affatto e il 0x1000 lo spegneva dopo.
+Ora le otto op sono op per op quelle della cattura.
+
+Numeri fermi: quel vicinato resta dentro un buco da 167 op che non si e' chiuso, e
+serve capire il resto della sequenza di spegnimento prima che la metrica lo veda.
+Sta dentro perche' e' giusto, non perche' paga.
+
+---
+
+---
+
+E le tabelle dell'ADC ausiliario non sono piu' un /* TODO */. In
+b43_nphy_workarounds_rev7plus() le quattro write bulk su tabella 8, offset 0x08,
+0x18, 0x0c e 0x1c, erano commentate via perche' gli array non c'erano. La cattura
+le ha a #771-#794: quattro celle per blocco, 0x8e 0x96 0x96 0x8b per il core 0,
+0x8f 0x9f 0x9f 0x96 per il core 1, 0x02 0x02 0x02 0x00 per i due di gain.
+
+Il riferimento sceglie l'ultimo elemento di ognuno dal power detector range e dalla
+banda. Solo la combinazione di questa board sta qui - range 2, radio 2057 rev 8,
+2 GHz - perche' le altre non hanno cattura dietro. E la' brcmsmac scrive 0x8c su
+entrambi i core dove la cattura scrive 0x8b sul core 0 e lascia il core 1 a 0x96,
+che e' il default dell'array; l'elemento di gain concorda a 0. Quarta volta che
+brcmsmac e' piu' vecchio.
+
+  blocchi contigui 20402 -> 20426 (89%)
+  a freddo         18734 -> 18758 (68%)
+  buco portabile    1193 -> 1169 op
+
+---
+
+---
+
+E la scala della cal TX I/Q LO si scrive in due corse, non interleavata.
+b43_nphy_update_tx_cal_ladder() scriveva 0, 32, 1, 33, 2, 34... e la cattura scrive
+0x00-0x11 e poi 0x20-0x31, due blocchi consecutivi (#9015-#9123 e #9735-#9843, la
+stessa cosa due volte). Stesse trentasei celle e stessi valori: cambia solo il
+raggruppamento, e brcmsmac interleava anche lui - quinta volta che e' piu' vecchio
+del driver delle catture.
+
+  blocchi contigui 20426 -> 20632 (89% -> 90%)
+  a freddo         18758 -> 18965 (68% -> 69%)
+  buco portabile    1169 -> 963 op
+  cal-tx-iqlo        forma da 443 333 268 80 a 443 333 268 110
+
+Due sole corse per 206 op: e' il rapporto migliore fra righe toccate e op
+recuperate di tutta la serie.
+
+---
+
+---
+
+E il primo ritardo della sequenza TX2RX e' 0x46, non 8. La cattura lo scrive a
+#806, dentro il bulk da sette celle su tabella 7 offset 0x90. Per rev 7 e su il
+riferimento non aiuta: wlc_phy_workarounds_nphy_rev7() non programma affatto la
+sequenza TX2RX, quindi l'8 che stava qui non aveva niente dietro. I sei ritardi
+che seguono e tutti e sette gli eventi combaciavano gia'.
+
+Costa UNA op (20952 -> 20951 e 18965 -> 18964) perche' quella cella sta dentro un
+buco che comincia prima, sui maskset di 0xa6/0xa7. Sta dentro perche' il valore ha
+una fonte e il precedente no.
+
+---
+
+---
+
+E l'override uno-a-molti del TX gain usa il campo 0x2000, non 0x4000. Il
+riferimento, nel caso txgain di wlc_phy_rfctrl_override_1tomany_nphy(), fa
+(0x1 << 12) per il gain e (0x1 << 13) per il lpf gain; b43 faceva 0x1000 e
+0x4000. E il conteggio degli spegnimenti su 0xe7/0xec lo conferma da solo: il
+vendore spegne 0x4000 ZERO volte e 0x2000 otto, il port spegneva 0x4000 quattro
+volte e 0x2000 due.
+
+Corretto anche il taglio del secondo argomento: (value & 0x8000) >> 14 invece di
+value >> 14, che si portava dietro anche il bit 14 - lo stesso bit che la prima
+chiamata prende dentro tgain.
+
+  blocchi contigui 20951 -> 20971 (91%)
+  a freddo         18964 -> 18972 (69%)
+  cal-papd          i frammenti piccoli da 19 a 9, forma 847 2x344 224 182
+
+E' la stessa funzione che b43_nphy_rf_ctl_override_one_to_many() ha gia' rotta
+altrove: la mainline b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7
+mette la quinta delle cinque chiamate di TX_PU. Vale la pena rileggerla tutta.
+
+---
+
+E otto maskset su AFECTL_C1/C2, gateate su radio rev 8. La cattura le ha a
+#796-#803: bit 2, 3 e 6 a uno e bit 7 a zero, core 0 poi core 1 ogni volta, e
+senza toccare la coppia di override accanto. Il riferimento quei bit li tocca solo
+nel percorso della tempsense, e la' sempre insieme a 0x8f e 0xa5.
+
+Numeri fermi: la posizione nel port non e' ancora quella del vendore, che le mette
+FRA le tabelle dell'ADC ausiliario e le sequenze RF. Spostare le tabelle dell'aux
+ADC prima delle sequenze, che e' l'ordine della cattura, costa 24 op: qualcosa in
+mezzo dipende dall'ordine e non e' capito. Le otto op stanno dentro perche' la
+cattura le ha.
+
+---
+
+---
+
+E la cal TX I/Q LO interna spegne l'override che accende. Al setup fa
+rf_ctl_override_rev7(0x8, 0, 0x3, false, 0) - accende il campo 0x8 su tabella 0 - e
+niente lo rispegneva: l'override restava acceso su entrambi i core dopo la
+calibrazione. Non e' una questione di op: e' stato dell'hardware lasciato dietro.
+
+La cattura lo spegne a #10729 e #10731, subito prima che i gain tornino al loro
+posto, e il punto conta: messo dopo stop_playback costa 13 op sulla run di
+cal-tx-iqlo, messo attaccato al ntab_write_bulk(7, 0x110, save) ne vale quattro.
+
+  blocchi contigui 20971 -> 20975 (91%)
+  a freddo         18972 -> 18976 (69%)
+  cal-tx-iqlo       run 443 intatta, un frammento piccolo in meno
+
+Restano due conteggi sul campo 0x2000: il port lo spegne sei volte, il vendore
+quattro (#12321, #12777, #13373, #13745). Il port ne fa due per passo con due
+passi per core piu' due pulizie; il vendore uno per core piu' due. Prossima voce.
+
+---
+
+---
+
+E la pulizia della cal PAPD rispegne 0x1000 una seconda volta, da solo. L'avevo
+togliato io due incrementi fa credendolo un doppione della coppia che ho messo in
+testa: non lo e'. La cattura lo ha a #12820 e #13788, dopo 0x800/tabella 0 e prima
+di 0x4/tabella 1, e la classificazione dei suoi otto spegnimenti di 0x1000 su 0xe7
+lo dice senza ambiguita' - quattro in coppia con 0x2000 e quattro da soli.
+
+  blocchi contigui 20975 -> 20979 (91%)
+  a freddo         18976 -> 18980 (69%)
+
+---
+
+---
+
+E lo smoothing della tabella epsilon se ne va. b43_nphy_papd_smooth_epsilon()
+leggeva le 64 celle in blocco, mediava su una finestra scorrevole e riscriveva le
+prime 41. Non ha NESSUNA fonte: brcmsmac non ha uno smoothing dell'epsilon da
+nessuna parte - zero letture bulk delle tabelle 31 e 33 in tutto phy_n.c - e la
+cattura non lo fa. Confrontando tutto il traffico sulle due tabelle epsilon, i due
+lati differiscono per due sole op per core, ed entrambe sono del port: la TBL.RD
+31/0x0 len=64 e la TBL.WR 31/0x0 len=41. Tutto il resto combacia cella per cella,
+compreso il curioso off=0x19 che compare tre volte su entrambi i lati.
+
+E non e' una questione di conteggio: quelle 41 celle sono stato dell'hardware, e le
+riscrivevamo sopra a quello che la calibrazione aveva prodotto. Un'op che il vendore
+non fa e che sovrascrive il risultato della cal e' peggio di un'op mancante.
+
+Numeri fermi - erano op che non appaiavano niente - e il trace perde 213 righe.
+Niente nel MESSAGES.md, niente nella nota, niente in docs/: codice senza fonte.
+
+---
+
+---
+
+E la seconda M_CTS_DURATION. Il vendore scrive la durata del CTS DUE volte per
+init: 31000 a #10759, prima della cal PAPD, e 10000 a #14949, prima della RX I/Q.
+Ha senso fisico - la PAPD trasmette piu' a lungo - e il riferimento ne scrive solo
+quella da 10000, e solo nella fase RXCAL. Aggiunta in testa al passo PAPDCAL, con
+mac_enable e mac_suspend attorno come l'altra.
+
+  blocchi contigui 20979 -> 20982 (91%)
+  a freddo         18980 -> 18983 (69%)
+
+---
+
+E la coppia 0x1000/0x2000 che avevo messo in testa a b43_nphy_papd_cal_cleanup()
+se ne va: quelle op non sono della pulizia, sono la CODA di papd_run_one(), che le
+emette gia'. La classificazione l'avevo letta male e il confronto posizionale delle
+sedici op contestate lo dice senza appello: allineando la coda del passo 2 del core
+1, senza la coppia in testa alla pulizia fa 16 su 16, compreso il 0x1000/0x2000 di
+#13741-#13748 che avevo attribuito alla pulizia.
+
+Quindi i quattro spegnimenti di 0x2000 del vendore sono due per core NEI PASSI, e
+la pulizia non ne fa nessuno. Con la coppia togliata i conteggi combaciano tutti:
+0x2000 quattro e quattro, 0x1000 otto e otto, e la classificazione per presenza di
+un 0x2000 accanto e' identica op per op - solo, E, E, solo, E, E, solo, solo.
+
+Numeri fermi, otto op spurie in meno. E cade anche l'idea di gatare la coda di
+run_one su gain_ctrl: il vendore la fa in entrambi i passi.
+
+---
+
+---
+
+E la pulizia della cal PAPD va DENTRO la seconda parentesi, prima che si chiuda.
+Il port faceva run_one, pwr_ctl_close, cleanup; la cattura ferma il tono, rimette
+il moltiplicatore e il coupler, cammina la lista degli override a #13749-#13918, e
+SOLO DOPO riprogramma la tabella di potenza aggiustata. Trovato col confronto
+posizionale: allineando dopo la coda del passo 2, il vendore fa PHY.RD 0xc7
+(stop_playback) dove il port faceva PHY.RD 0x1e7 e le 84 celle.
+
+Due righe scambiate:
+
+  blocchi contigui 20982 -> 21074 (91% -> 92%)
+  a freddo         18983 -> 19333 (69% -> 70%)
+  cal-papd          forma da 847 2x344 224 182 a 847 2x344 316 274
+  buco portabile     616 -> 524 op
+
+E' il rapporto migliore fra righe toccate e op recuperate di tutta la serie, meglio
+delle due corse della scala TX I/Q LO.
+
+---
+
+---
+
+E in coda alla cal PAPD gli offset epsilon tornano dentro e il motore si accende,
+con le riletture di stato che la cattura ha in mezzo. A #13842-#13854: l'adjust per
+il core 0, le due letture di 0x2bf e 0x2c0, l'adjust per il core 1, le due letture
+di 0x2b1 e 0x2b2, poi il bit di enable su entrambe le catene. Servono quattro nomi
+nuovi in phy_n.h per le celle di stato, che b43 non aveva.
+
+Contando registro per registro, ora TUTTI e dieci quelli del motore combaciano:
+0x297, 0x298, 0x29b, 0x29c, 0x2a3, 0x2a4, 0x2b1, 0x2b2, 0x2bf, 0x2c0.
+
+Numeri fermi: quelle op cadono dentro un blocco che il matcher non appaia comunque.
+Sta dentro perche' e' il bit che ACCENDE il motore, e la cal PAPD senza quello non
+serve a niente.
+
+---
+
+---
+
+E la cal PAPD pulsa il reset della valutazione di canale libero. Subito dopo il hold
+della carrier search e molto prima delle tabelle, la cattura a #10773-#10776 legge
+BBCFG, lo riscrive col bit RSTCCA a uno e poi con RSTCCA e RSTRX a zero. Il port
+non lo faceva: aveva solo la write che salva e azzera il reset RX, che la cattura ha
+anch'essa ma DENTRO la finestra papd-tables, come PHY.MOD mask=0x8000. Sono due
+scritture distinte in due punti distinti, e il port ne aveva una.
+
+Il posto conta e l'ho sbagliato due volte prima di trovarlo: messo al posto della
+write esistente, o prima delle tabelle scalari, la run per fase perde 262 op e la
+finestra papd-tables passa da ok a noto - perche' il confronto la' e' posizionale e
+l'op in piu' sposta tutto. Dopo il hold e prima delle tabelle, tutto torna pieno.
+
+Numeri fermi (21074, 8756, 19333) e papd-tables di nuovo ok. Sta dentro perche' una
+singola write del valore azzerato, che e' quello che c'era, lascia lo stesso valore
+dietro e non resetta mai la valutazione.
+
+---
+
+---
+
+E la cal TX I/Q LO rimette i registri radio che si prende. b43_nphy_tx_cal_radio_
+setup_rev7() salva nove celle per core - TX_SSI_MASTER, IQCAL_VCM_HG, IQCAL_IDAC,
+TSSI_VCM, TX_SSI_MUX, TSSIA, TSSIG, TSSI_MISC1 - le riscrive coi valori della
+calibrazione, e NIENTE le rimetteva: restavano sporche per tutto il tempo che
+l'interfaccia stava su. Sedici registri del radio.
+
+La cattura le ripristina in ordine di indirizzo a #10737-#10752, subito dopo che i
+gain di trasmissione tornano al loro posto e prima che il hold della carrier search
+si rilasci, coi valori 5, 0, 0, 3, 0xe, 0, 2, 0 sul core 0.
+
+  blocchi contigui 21074 -> 21090 (92%)
+  a freddo         19333 -> 19349 (70%)
+
+Sedici op esatte, che e' il numero delle write. Non e' fedelta': e' stato del radio
+lasciato dietro da una calibrazione.
+
+---
+
 diff --git a/drivers/net/wireless/broadcom/b43/b43.h b/drivers/net/wireless/broadcom/b43/b43.h
-index c0d8fc0..0a0341e 100644
+index c0d8fc0..a702244 100644
 --- a/drivers/net/wireless/broadcom/b43/b43.h
 +++ b/drivers/net/wireless/broadcom/b43/b43.h
-@@ -335,6 +335,11 @@ enum {
+@@ -302,6 +302,7 @@ enum {
+ #define B43_SHM_SH_BEACPHYCTL		0x0054	/* Beacon PHY TX control word (see PHY TX control) */
+ #define B43_SHM_SH_EXTNPHYCTL		0x00B0	/* Extended bytes for beacon PHY control (N) */
+ #define B43_SHM_SH_BCN_LI		0x00B6	/* beacon listen interval */
++#define B43_SHM_SH_CTSDUR		0x00B8	/* CTS duration the ucode protects with */
+ /* SHM_SHARED ACK/CTS control */
+ #define B43_SHM_SH_ACKCTSPHYCTL		0x0022	/* ACK/CTS PHY control word (see PHY TX control) */
+ /* SHM_SHARED probe response variables */
+@@ -335,6 +336,11 @@ enum {
  #define B43_SHM_SH_NPHY_TXIQW2		0x0704
  #define B43_SHM_SH_NPHY_TXIQW3		0x0706
  /* SHM_SHARED tx pwr ctrl */
@@ -271,7 +891,7 @@ index 817448e..7853e7a 100644
  		return;
  
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
-index 4e6644c..b0082ab 100644
+index 4818715..d0e1df3 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.c
 @@ -51,6 +51,21 @@ struct nphy_iq_est {
@@ -296,6 +916,17 @@ index 4e6644c..b0082ab 100644
  enum b43_nphy_rf_sequence {
  	B43_RFSEQ_RX2TX,
  	B43_RFSEQ_TX2RX,
+@@ -232,8 +247,8 @@ static void b43_nphy_rf_ctl_override_one_to_many(struct b43_wldev *dev,
+ 	case N_RF_CTL_OVER_CMD_TX_GAIN:
+ 		tmp = value & 0x7FFF;
+ 		b43_nphy_rf_ctl_override_rev7(dev, 0x1000, tmp, core, off, 0);
+-		tmp = value >> 14;
+-		b43_nphy_rf_ctl_override_rev7(dev, 0x4000, tmp, core, off, 0);
++		tmp = (value & 0x8000) >> 14;
++		b43_nphy_rf_ctl_override_rev7(dev, 0x2000, tmp, core, off, 0);
+ 		break;
+ 	}
+ }
 @@ -663,6 +678,15 @@ static void b43_radio_2057_chantab_upload(struct b43_wldev *dev,
  					  const struct b43_nphy_chantabent_rev7_2g *e_r7_2g)
  {
@@ -377,7 +1008,23 @@ index 4e6644c..b0082ab 100644
  }
  
  /* Calibrate resistors in LPF of PLL?
-@@ -2481,7 +2530,46 @@ static void b43_nphy_gain_ctl_workarounds_rev19(struct b43_wldev *dev)
+@@ -1975,10 +2024,12 @@ static int b43_nphy_poll_rssi(struct b43_wldev *dev, enum n_rssi_type rssi_type,
+ 
+ 	b43_nphy_rssi_select(dev, 5, rssi_type);
+ 
+-	if (dev->phy.rev < 2) {
+-		save_regs_phy[8] = b43_phy_read(dev, B43_NPHY_GPIO_SEL);
++	/* The reference reads this on every revision and only writes it back on
++	 * the ones that overwrite it.
++	 */
++	save_regs_phy[8] = b43_phy_read(dev, B43_NPHY_GPIO_SEL);
++	if (dev->phy.rev < 2)
+ 		b43_phy_write(dev, B43_NPHY_GPIO_SEL, 5);
+-	}
+ 
+ 	for (i = 0; i < 4; i++)
+ 		buf[i] = 0;
+@@ -2481,7 +2532,46 @@ static void b43_nphy_gain_ctl_workarounds_rev19(struct b43_wldev *dev)
  
  static void b43_nphy_gain_ctl_workarounds_rev7(struct b43_wldev *dev)
  {
@@ -425,7 +1072,46 @@ index 4e6644c..b0082ab 100644
  }
  
  static void b43_nphy_gain_ctl_workarounds_rev3(struct b43_wldev *dev)
-@@ -3025,7 +3113,6 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+@@ -2698,7 +2788,13 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+ 
+ 	/* TX to RX */
+ 	u8 tx2rx_events[7] = { 4, 3, 5, 2, 1, 8, 31, };
+-	u8 tx2rx_delays[7] = { 8, 4, 4, 4, 4, 6, 1, };
++	/* The first delay is 0x46 and not 8: the capture writes it at #806, and
++	 * for rev 7 and up the reference is no help - wlc_phy_workarounds_nphy_rev7()
++	 * never programs the TX2RX sequence at all, so the 8 that was here had
++	 * nothing behind it. The six that follow, and all seven events, match the
++	 * capture as they were.
++	 */
++	u8 tx2rx_delays[7] = { 0x46, 4, 4, 4, 4, 6, 1, };
+ 	/* RX to TX */
+ 	u8 rx2tx_events_ipa[9] = { 0x0, 0x1, 0x2, 0x8, 0x5, 0x6, 0xF, 0x3,
+ 					0x1F };
+@@ -2770,6 +2866,23 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+ 	b43_ntab_write_bulk(dev, B43_NTAB16(7, 0x15d), 3, ntab7_15e_16e);
+ 	b43_ntab_write_bulk(dev, B43_NTAB16(7, 0x16d), 3, ntab7_15e_16e);
+ 
++	/* Eight masksets on the two AFE control registers, in this order and with
++	 * no touch of the override pair beside them: bits 2, 3 and 6 to one and
++	 * bit 7 to zero, core 0 then core 1 each time. The capture has them at
++	 * #796-#803; the reference touches these bits only in its temperature
++	 * sense path, and there always together with 0x8f and 0xa5.
++	 */
++	if (phy->radio_rev == 8) {
++		b43_phy_set(dev, B43_NPHY_AFECTL_C1, 0x0004);
++		b43_phy_set(dev, B43_NPHY_AFECTL_C2, 0x0004);
++		b43_phy_set(dev, B43_NPHY_AFECTL_C1, 0x0008);
++		b43_phy_set(dev, B43_NPHY_AFECTL_C2, 0x0008);
++		b43_phy_set(dev, B43_NPHY_AFECTL_C1, 0x0040);
++		b43_phy_set(dev, B43_NPHY_AFECTL_C2, 0x0040);
++		b43_phy_mask(dev, B43_NPHY_AFECTL_C1, ~0x0080);
++		b43_phy_mask(dev, B43_NPHY_AFECTL_C2, ~0x0080);
++	}
++
+ 	b43_nphy_set_rf_sequence(dev, 1, tx2rx_events, tx2rx_delays,
+ 				 ARRAY_SIZE(tx2rx_events));
+ 	if (b43_nphy_ipa(dev))
+@@ -3025,7 +3138,6 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
  				}
  				break;
  			case 7:
@@ -433,7 +1119,7 @@ index 4e6644c..b0082ab 100644
  				if (!b43_is_40mhz(dev)) {
  					b43_radio_write(dev, 0x5F, 0x14);
  					b43_radio_write(dev, 0xE8, 0x12);
-@@ -3034,6 +3121,26 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+@@ -3034,6 +3146,26 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
  					b43_radio_write(dev, 0xE8, 0x16);
  				}
  				break;
@@ -460,7 +1146,7 @@ index 4e6644c..b0082ab 100644
  			case 14:
  				for (core = 0; core < 2; core++) {
  					int o = core ? 0x85 : 0;
-@@ -3122,6 +3229,18 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
+@@ -3122,18 +3254,45 @@ static void b43_nphy_workarounds_rev7plus(struct b43_wldev *dev)
  	noise_tbl[1] = b43_is_40mhz(dev) ? 0x14D : 0x18D;
  	b43_ntab_write_bulk(dev, B43_NTAB32(16, 0x7E), 2, noise_tbl);
  
@@ -478,8 +1164,75 @@ index 4e6644c..b0082ab 100644
 +
  	b43_nphy_gain_ctl_workarounds(dev);
  
- 	/* TODO
-@@ -3731,6 +3850,201 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+-	/* TODO
+-	b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x08), 4,
+-			    aux_adc_vmid_rev7_core0);
+-	b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x18), 4,
+-			    aux_adc_vmid_rev7_core1);
+-	b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x0C), 4,
+-			    aux_adc_gain_rev7);
+-	b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x1C), 4,
+-			    aux_adc_gain_rev7);
+-	*/
++	/* The auxiliary ADC midpoints and gains, one set per core. The reference
++	 * picks the last element of each from the power detector range and the
++	 * band; only the combination this board has is here, because the others
++	 * have no capture behind them.
++	 *
++	 * For power detector range 2 on radio 2057 rev 8 in 2 GHz the capture
++	 * writes 0x8b for core 0 and leaves core 1 at 0x96, where brcmsmac
++	 * writes 0x8c on both. The gain element agrees at 0.
++	 */
++	if (phy->radio_rev == 8 &&
++	    b43_current_band(dev->wl) == NL80211_BAND_2GHZ &&
++	    dev->dev->bus_sprom->fem.ghz2.pdet_range == 2) {
++		static const u16 aux_adc_vmid_core0[] = {
++			0x8E, 0x96, 0x96, 0x8B };
++		static const u16 aux_adc_vmid_core1[] = {
++			0x8F, 0x9F, 0x9F, 0x96 };
++		static const u16 aux_adc_gain[] = { 0x02, 0x02, 0x02, 0x00 };
++
++		b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x08), 4,
++				    aux_adc_vmid_core0);
++		b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x18), 4,
++				    aux_adc_vmid_core1);
++		b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x0C), 4, aux_adc_gain);
++		b43_ntab_write_bulk(dev, B43_NTAB16(8, 0x1C), 4, aux_adc_gain);
++	}
+ }
+ 
+ static void b43_nphy_workarounds_rev3plus(struct b43_wldev *dev)
+@@ -3601,6 +3760,7 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+ 	struct b43_phy_n *nphy = dev->phy.n;
+ 	u8 i;
+ 	u16 bmask, val, tmp;
++	u16 zeros[84];
+ 	enum nl80211_band band = b43_current_band(dev->wl);
+ 
+ 	if (nphy->hang_avoid)
+@@ -3624,13 +3784,14 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
+ 				B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
+ 		}
+ 
+-		b43_phy_write(dev, B43_NPHY_TABLE_ADDR, 0x6840);
+-		for (i = 0; i < 84; i++)
+-			b43_phy_write(dev, B43_NPHY_TABLE_DATALO, 0);
+-
+-		b43_phy_write(dev, B43_NPHY_TABLE_ADDR, 0x6C40);
+-		for (i = 0; i < 84; i++)
+-			b43_phy_write(dev, B43_NPHY_TABLE_DATALO, 0);
++		/* Same shape as the enable branch below, which goes through
++		 * b43_ntab_write_bulk() on the same two tables at the same
++		 * offset. Open-coding the table port here wrote the identical
++		 * cells by a different route.
++		 */
++		memset(zeros, 0, sizeof(zeros));
++		b43_ntab_write_bulk(dev, B43_NTAB16(26, 64), 84, zeros);
++		b43_ntab_write_bulk(dev, B43_NTAB16(27, 64), 84, zeros);
+ 
+ 		tmp = B43_NPHY_TXPCTL_CMD_COEFF | B43_NPHY_TXPCTL_CMD_HWPCTLEN;
+ 		if (dev->phy.rev >= 3)
+@@ -3735,6 +3896,212 @@ static void b43_nphy_tx_power_ctrl(struct b43_wldev *dev, bool enable)
  		b43_nphy_stay_in_carrier_search(dev, 0);
  }
  
@@ -549,12 +1302,23 @@ index 4e6644c..b0082ab 100644
 +			b43_ntab_write(dev, B43_NTAB16(7, 0x110 + core),
 +				       saved->rad_gain);
 +
++			/* Both cells, like the forcing path below: the capture
++			 * read-modify-writes 87 and then 95 here too. The
++			 * reference only touches 87.
++			 */
 +			m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 87));
 +			if (core == 0)
 +				m1m2 = (m1m2 & 0x00FF) | (saved->bbmult << 8);
 +			else
 +				m1m2 = (m1m2 & 0xFF00) | saved->bbmult;
 +			b43_ntab_write(dev, B43_NTAB16(15, 87), m1m2);
++
++			m1m2 = b43_ntab_read(dev, B43_NTAB16(15, 95));
++			if (core == 0)
++				m1m2 = (m1m2 & 0x00FF) | (saved->bbmult << 8);
++			else
++				m1m2 = (m1m2 & 0xFF00) | saved->bbmult;
++			b43_ntab_write(dev, B43_NTAB16(15, 95), m1m2);
 +
 +			if (restore_cals) {
 +				regval[0] = saved->iqcomp_a;
@@ -681,14 +1445,13 @@ index 4e6644c..b0082ab 100644
  /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/TxPwrFix */
  static void b43_nphy_tx_power_fix(struct b43_wldev *dev)
  {
-@@ -3778,12 +4092,14 @@ static void b43_nphy_tx_power_fix(struct b43_wldev *dev)
+@@ -3782,12 +4149,13 @@ static void b43_nphy_tx_power_fix(struct b43_wldev *dev)
  	    (txpi[0] < 40 || txpi[0] > 100 || txpi[1] < 40 || txpi[1] > 100))
  		txpi[0] = txpi[1] = 91;
  
 -	/*
 +	/* The internal index is what the PAPD calibration puts back when it is
-+	 * done, so it has to be remembered here. This was commented out for as
-+	 * long as nothing could program an index.
++	 * done, so it has to be remembered here.
 +	 */
  	for (i = 0; i < 2; i++) {
  		nphy->txpwrindex[i].index_internal = txpi[i];
@@ -698,7 +1461,7 @@ index 4e6644c..b0082ab 100644
  
  	for (i = 0; i < 2; i++) {
  		const u32 *table = b43_nphy_get_tx_gain_table(dev);
-@@ -4246,8 +4562,12 @@ static void b43_nphy_tx_gain_table_upload(struct b43_wldev *dev)
+@@ -4250,8 +4618,12 @@ static void b43_nphy_tx_gain_table_upload(struct b43_wldev *dev)
  		rf_pwr_offset_table = b43_ntab_get_rf_pwr_offset_table(dev);
  		if (!rf_pwr_offset_table)
  			return;
@@ -713,7 +1476,74 @@ index 4e6644c..b0082ab 100644
  	}
  
  	for (i = 0; i < 128; i++) {
-@@ -5323,6 +5643,27 @@ static void b43_nphy_restore_cal(struct b43_wldev *dev)
+@@ -4783,6 +5155,34 @@ static void b43_nphy_tx_cal_radio_setup_rev7(struct b43_wldev *dev)
+ 	}
+ }
+ 
++/* Puts back the nine radio cells per core that the rev 7 setup above saved and
++ * then overwrote. Nothing did, so they kept the calibration's values for as long
++ * as the interface stayed up. The capture restores eight of them in address
++ * order at #10737-#10752, right after the transmit gains go back and before the
++ * carrier search hold is released.
++ */
++static void b43_nphy_tx_cal_radio_cleanup_rev7(struct b43_wldev *dev)
++{
++	struct b43_phy_n *nphy = dev->phy.n;
++	const u16 *save = nphy->tx_rx_cal_radio_saveregs;
++	int core, off;
++	u16 r;
++
++	for (core = 0; core < 2; core++) {
++		r = core ? 0x20 : 0;
++		off = core * 11;
++
++		b43_radio_write(dev, r + R2057_TX0_TX_SSI_MASTER, save[off + 0]);
++		b43_radio_write(dev, r + R2057_TX0_IQCAL_VCM_HG, save[off + 1]);
++		b43_radio_write(dev, r + R2057_TX0_IQCAL_IDAC, save[off + 2]);
++		b43_radio_write(dev, r + R2057_TX0_TSSI_VCM, save[off + 3]);
++		b43_radio_write(dev, r + R2057_TX0_TX_SSI_MUX, save[off + 5]);
++		b43_radio_write(dev, r + R2057_TX0_TSSIA, save[off + 6]);
++		b43_radio_write(dev, r + R2057_TX0_TSSIG, save[off + 7]);
++		b43_radio_write(dev, r + R2057_TX0_TSSI_MISC1, save[off + 8]);
++	}
++}
++
+ /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/TxCalRadioSetup */
+ static void b43_nphy_tx_cal_radio_setup(struct b43_wldev *dev)
+ {
+@@ -4894,11 +5294,17 @@ static void b43_nphy_update_tx_cal_ladder(struct b43_wldev *dev, u16 core)
+ 		tmp >>= 8;
+ 	tmp &= 0xff;
+ 
++	/* The two ladders go in one after the other, not interleaved: the capture
++	 * writes cells 0 to 17 and then 32 to 49, in two runs. Same cells and
++	 * same values either way, and the reference interleaves them.
++	 */
+ 	for (i = 0; i < 18; i++) {
+ 		scale = (ladder_lo[i].percent * tmp) / 100;
+ 		entry = ((scale & 0xFF) << 8) | ladder_lo[i].g_env;
+ 		b43_ntab_write(dev, B43_NTAB16(15, i), entry);
++	}
+ 
++	for (i = 0; i < 18; i++) {
+ 		scale = (ladder_iq[i].percent * tmp) / 100;
+ 		entry = ((scale & 0xFF) << 8) | ladder_iq[i].g_env;
+ 		b43_ntab_write(dev, B43_NTAB16(15, i + 32), entry);
+@@ -5010,6 +5416,13 @@ static struct nphy_txgains b43_nphy_get_tx_gains(struct b43_wldev *dev)
+ 			B43_NPHY_TXPCTL_STAT_BIDX) >>
+ 			B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
+ 
++		/* The index the two chains are on right now. The tail of the
++		 * periodic calibration puts these back, and this is the read the
++		 * capture takes them from.
++		 */
++		nphy->pwr_idx_at_gain[0] = index[0];
++		nphy->pwr_idx_at_gain[1] = index[1];
++
+ 		for (i = 0; i < 2; ++i) {
+ 			table = b43_nphy_get_tx_gain_table(dev);
+ 			if (!table)
+@@ -5327,6 +5740,27 @@ static void b43_nphy_restore_cal(struct b43_wldev *dev)
  	b43_nphy_rx_iq_coeffs(dev, true, rxcal_coeffs);
  }
  
@@ -741,7 +1571,28 @@ index 4e6644c..b0082ab 100644
  /* https://bcm-v4.sipsolutions.net/802.11/PHY/N/CalTxIqlo */
  static int b43_nphy_cal_tx_iq_lo(struct b43_wldev *dev,
  				struct nphy_txgains target,
-@@ -5772,19 +6113,375 @@ static int b43_nphy_rev2_cal_rx_iq(struct b43_wldev *dev,
+@@ -5547,8 +5981,20 @@ static int b43_nphy_cal_tx_iq_lo(struct b43_wldev *dev,
+ 	}
+ 
+ 	b43_nphy_tx_cal_phy_cleanup(dev);
++
++	/* The internal calibration turns override field 0x8 on at setup and
++	 * nothing turned it back off, so it stayed on after the calibration was
++	 * done - an override left enabled on both cores. The capture clears it
++	 * immediately before the gains go back, at #10729 and #10731.
++	 */
++	if (nphy->use_int_tx_iq_lo_cal && dev->phy.rev >= 8)
++		b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, 0x3, true, 0);
++
+ 	b43_ntab_write_bulk(dev, B43_NTAB16(7, 0x110), 2, save);
+ 
++	if (dev->phy.rev >= 7)
++		b43_nphy_tx_cal_radio_cleanup_rev7(dev);
++
+ 	if (dev->phy.rev < 2 && (!mphase || nphy->mphase_cal_phase_id == last))
+ 		b43_nphy_tx_iq_workaround(dev);
+ 
+@@ -5776,19 +6222,379 @@ static int b43_nphy_rev2_cal_rx_iq(struct b43_wldev *dev,
  	return ret;
  }
  
@@ -769,6 +1620,10 @@ index 4e6644c..b0082ab 100644
 +	regs[12] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER4);
 +	regs[13] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER5);
 +	regs[14] = b43_phy_read(dev, B43_NPHY_REV7_RF_CTL_OVER6);
++	/* Saved and not put back, the way the capture has it: the read is there,
++	 * a write to it in this phase is not.
++	 */
++	regs[15] = b43_phy_read(dev, B43_NPHY_REV7_SAMP_CTL);
 +	regs[9] = b43_phy_read(dev, B43_NPHY_PAPD_EN0);
 +	regs[10] = b43_phy_read(dev, B43_NPHY_PAPD_EN1);
 +
@@ -1121,7 +1976,7 @@ index 4e6644c..b0082ab 100644
  	if (dev->phy.rev >= 3)
  		return b43_nphy_rev3_cal_rx_iq(dev, target, type, debug);
  	else
-@@ -5831,6 +6528,8 @@ static void b43_nphy_set_rx_core_state(struct b43_wldev *dev, u8 mask)
+@@ -5835,6 +6641,8 @@ static void b43_nphy_set_rx_core_state(struct b43_wldev *dev, u8 mask)
  	b43_mac_enable(dev);
  }
  
@@ -1130,7 +1985,7 @@ index 4e6644c..b0082ab 100644
  static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
  							bool ignore_tssi)
  {
-@@ -5871,6 +6570,60 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+@@ -5875,6 +6683,60 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
  	b43_ppr_add(dev, ppr, -hw_gain);
  #endif
  
@@ -1191,7 +2046,7 @@ index 4e6644c..b0082ab 100644
  	/* Make sure we didn't go too low */
  	b43_ppr_apply_min(dev, ppr, INT_TO_Q52(8));
  
-@@ -5906,6 +6659,8 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
+@@ -5910,6 +6772,8 @@ static enum b43_txpwr_result b43_nphy_op_recalc_txpower(struct b43_wldev *dev,
  	nphy->tx_pwr_last_recalc_freq = channel->center_freq;
  	nphy->tx_pwr_last_recalc_limit = phy->desired_txpower;
  
@@ -1200,13 +2055,12 @@ index 4e6644c..b0082ab 100644
  	return B43_TXPWR_RES_DONE;
  }
  
-@@ -5995,6 +6750,755 @@ static void b43_nphy_superswitch_init(struct b43_wldev *dev, bool init)
+@@ -5998,6 +6862,796 @@ static void b43_nphy_superswitch_init(struct b43_wldev *dev, bool init)
+ 	}
  }
  
- /* http://bcm-v4.sipsolutions.net/802.11/PHY/Init/N */
-+/* Initialise the tables the PAPD engine reads once it is enabled: the scalar
-+ * lookup with its constants, and the epsilon tables cleared. Without this the
-+ * engine runs on whatever the tables happened to contain.
++/* The scalar lookup the PAPD engine reads, one copy per core. Without it the
++ * engine runs on whatever the table happened to contain.
 + */
 +static void b43_nphy_papd_scalar_tables(struct b43_wldev *dev)
 +{
@@ -1215,9 +2069,7 @@ index 4e6644c..b0082ab 100644
 +}
 +
 +/* The two epsilon tables, cleared one cell at a time, one core after the other,
-+ * the way brcmsmac and the hardware's own driver do it. A bulk write leaves the
-+ * same tables behind for one table address setup instead of 64, but it leans on
-+ * the address incrementing by itself, which nothing here has tested.
++ * the way brcmsmac and the hardware's own driver do it.
 + */
 +static void b43_nphy_papd_epsilon_tables_clear(struct b43_wldev *dev)
 +{
@@ -1362,6 +2214,10 @@ index 4e6644c..b0082ab 100644
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x800, 1, 0x3, true, 1);
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x8, 0, 0x3, true, 0);
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x800, 0, 0x3, true, 0);
++	/* Again 0x1000, and on its own: the capture clears it a second time here,
++	 * at #12820 and #13788, after the pair with 0x2000 at the head of this
++	 * cleanup. Not a duplicate to drop.
++	 */
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x1000, 0, 0x3, true, 0);
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x4, 1, 0x3, true, 1);
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x1, 0, 0x3, true, 1);
@@ -1385,17 +2241,10 @@ index 4e6644c..b0082ab 100644
 +	b43_nphy_rf_ctl_override_rev7(dev, 0x80, 0, 0, true, 1);
 +}
 +
-+/* The PAPD calibration, brcmsmac's wlc_phy_a4(). Only the part that does not
-+ * depend on the gain index search is here so far: the scalar and epsilon tables
-+ * the PAPD engine reads. It belongs in the calibration and not in the PHY init -
-+ * in an MMIO capture of wl 6.30.102.7 on this radio, table 32 appears exactly
-+ * twice in 70796 records, once per interface init, both times inside the
-+ * calibration and never during the init proper.
-+ */
-+/* La parentesi che il riferimento mette attorno a ogni passo che puo' muovere il
-+ * gain: legge il tx gain originale, salva lo stato del controllo di potenza e lo
-+ * spegne. La chiude b43_nphy_pwr_ctl_close(), e il ripristino e' quello che
-+ * riprogramma la tabella di potenza aggiustata.
++/* The bracket the reference puts around every step that can move the transmit
++ * gain: read the original gain, return the transmit power control state and turn
++ * the control off. b43_nphy_pwr_ctl_close() puts the state back, and it is that
++ * restore which reprogrammes the adjusted power table.
 + */
 +static bool b43_nphy_pwr_ctl_open(struct b43_wldev *dev, u16 *orig_tx_gain)
 +{
@@ -1438,49 +2287,6 @@ index 4e6644c..b0082ab 100644
 +		*real -= 0x2000;
 +}
 +
-+/* Smooths the epsilon table in place over a sliding window, decoding each cell,
-+ * averaging the two fields across the window and writing the result back. Reads
-+ * the whole table once and writes the smoothed range once, so the source cells
-+ * are the unsmoothed ones throughout - a cell at a time would feed the average
-+ * back into itself.
-+ */
-+static void b43_nphy_papd_smooth_epsilon(struct b43_wldev *dev, u8 core,
-+					 u32 winsz, u32 start, u32 end)
-+{
-+	u16 tbl = core ? 33 : 31;
-+	u32 *src, *dst;
-+	u32 sz = end - start + 1;
-+
-+	u32 buf[2 * B43_NPHY_PAPD_EPS_TBL_SIZE];
-+
-+	src = buf;
-+	dst = buf + B43_NPHY_PAPD_EPS_TBL_SIZE;
-+
-+	b43_ntab_read_bulk(dev, B43_NTAB32(tbl, 0),
-+			   B43_NPHY_PAPD_EPS_TBL_SIZE, src);
-+
-+	do {
-+		u32 lo, hi;
-+		s32 n, real, imag, sum_real = 0, sum_imag = 0;
-+
-+		lo = end - min(end, winsz >> 1);
-+		hi = min_t(u32, B43_NPHY_PAPD_EPS_TBL_SIZE - 1,
-+			   end + (winsz >> 1));
-+		n = hi - lo + 1;
-+
-+		do {
-+			b43_nphy_papd_decode_epsilon(src[hi], &real, &imag);
-+			sum_real += real;
-+			sum_imag += imag;
-+		} while (hi-- != lo);
-+
-+		sum_real /= n;
-+		sum_imag /= n;
-+		dst[end] = ((u32)sum_imag << 13) | ((u32)sum_real & 0x1FFF);
-+	} while (end-- != start);
-+
-+	b43_ntab_write_bulk(dev, B43_NTAB32(tbl, start), sz, dst + start);
-+}
 +
 +/* One pass of the PAPD engine on one core: program the transmit gain the caller
 + * wants measured, silence the other core, set the engine up and let it sweep.
@@ -1607,12 +2413,16 @@ index 4e6644c..b0082ab 100644
 +	return codes[idx];
 +}
 +
++/* The PAPD calibration, brcmsmac's wlc_phy_a4(): the tables the engine reads,
++ * then two passes of the engine per core, the first searching for a pad gain
++ * code that does not clip.
++ */
 +static void b43_nphy_papd_cal(struct b43_wldev *dev)
 +{
 +	struct b43_phy *phy = &dev->phy;
 +	struct b43_phy_n *nphy = phy->n;
 +	struct nphy_papd_restore_state state;
-+	u16 bbcfg;
++	u16 bbcfg, tmp16;
 +	u8 core;
 +
 +	if (!b43_nphy_ipa(dev))
@@ -1621,6 +2431,23 @@ index 4e6644c..b0082ab 100644
 +	/* Only radio 2057 rev 8 is known to want these constants. */
 +	if (phy->rev != 8 || phy->radio_rev != 8)
 +		return;
++
++	/* Held for the whole calibration, the way wlc_phy_a4() does: the
++	 * carrier search hold is refcounted, so without it the brackets the
++	 * inner steps take show up as enter and exit pairs of their own.
++	 */
++	b43_nphy_stay_in_carrier_search(dev, true);
++
++	/* A pulse on the clear-channel assessment, right after the hold and long
++	 * before the tables: the capture reads the register at #10773, writes it
++	 * with the CCA reset bit set and then with both reset bits clear. This is
++	 * a different write from the one that saves and clears the receive reset
++	 * below, which the capture also has, inside the papd-tables window.
++	 */
++	tmp16 = b43_phy_read(dev, B43_NPHY_BBCFG);
++	b43_phy_write(dev, B43_NPHY_BBCFG, tmp16 | B43_NPHY_BBCFG_RSTCCA);
++	b43_phy_write(dev, B43_NPHY_BBCFG,
++		      tmp16 & ~(B43_NPHY_BBCFG_RSTCCA | B43_NPHY_BBCFG_RSTRX));
 +
 +	b43_nphy_papd_scalar_tables(dev);
 +
@@ -1662,11 +2489,34 @@ index 4e6644c..b0082ab 100644
 +
 +		pwr_ctl = b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
 +		b43_nphy_papd_run_one(dev, gain, false, core);
-+		b43_nphy_papd_smooth_epsilon(dev, core, 5, 0, 40);
-+		b43_nphy_pwr_ctl_close(dev, pwr_ctl);
 +
++		/* The cleanup goes inside the second bracket, before it closes:
++		 * the capture stops the tone, puts the multiplier and the coupler
++		 * back and walks the override list at #13749-#13918, and only
++		 * then reprogrammes the adjusted power table.
++		 */
 +		b43_nphy_papd_cal_cleanup(dev, &state);
++		b43_nphy_pwr_ctl_close(dev, pwr_ctl);
 +	}
++
++	/* The epsilon offsets go back in and the engine goes on, once per chain,
++	 * with the status readbacks the capture has between them. At
++	 * #13842-#13854: the adjust for core 0, the two reads of 0x2bf and
++	 * 0x2c0, the adjust for core 1, the two reads of 0x2b1 and 0x2b2, and
++	 * then the enable bit on both chains. The two adjust writes are the same
++	 * pair b43_nphy_papd_epsilon_offset() does at the PHY init, and the
++	 * capture repeats them here.
++	 */
++	b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ0, 0x007F,
++			nphy->papd_epsilon_offset[0] << 7);
++	b43_phy_read(dev, B43_NPHY_PAPD_STAT_ADDR0);
++	b43_phy_read(dev, B43_NPHY_PAPD_STAT_ADDR1);
++	b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ1, 0x007F,
++			nphy->papd_epsilon_offset[1] << 7);
++	b43_phy_read(dev, B43_NPHY_PAPD_STAT_YRE);
++	b43_phy_read(dev, B43_NPHY_PAPD_STAT_YIM);
++	b43_phy_set(dev, B43_NPHY_PAPD_EN0, 0x0001);
++	b43_phy_set(dev, B43_NPHY_PAPD_EN1, 0x0001);
 +
 +	/* The comparison shift the setup switched on for the core it was
 +	 * calibrating goes off again: what stays on outside the calibration has
@@ -1694,6 +2544,8 @@ index 4e6644c..b0082ab 100644
 +		b43_nphy_txpwr_index(dev, 1 << 1,
 +				     nphy->txpwrindex[1].index_internal, false);
 +	}
++
++	b43_nphy_stay_in_carrier_search(dev, false);
 +}
 +
 +/* The offset the PAPD engine applies to the epsilon table. brcmsmac computes it
@@ -1748,7 +2600,16 @@ index 4e6644c..b0082ab 100644
 + */
 +static void b43_nphy_precal_txgain(struct b43_wldev *dev)
 +{
++	struct b43_phy_n *nphy = dev->phy.n;
++
 +	b43_nphy_txpwr_index(dev, 0x3, 10, false);
++
++	/* The multiplier at the forced index, which is what
++	 * b43_nphy_update_tx_cal_ladder() scales the calibration ladder by. It
++	 * has no other writer, so without this the ladder comes out at zero
++	 * amplitude everywhere.
++	 */
++	nphy->txcal_bbmult = b43_ntab_read(dev, B43_NTAB16(15, 87));
 +}
 +
 +/* The vendor driver reaches its periodic calibration from the end of the PHY
@@ -1758,13 +2619,13 @@ index 4e6644c..b0082ab 100644
 + * type is not PHY_PERICAL_AUTO.
 + */
 +static void b43_nphy_cal_perical_phyinit(struct b43_wldev *dev,
-+					 struct nphy_txgains target)
++					 struct nphy_txgains target,
++					 struct nphy_txgains cal_target,
++					 bool entry_pwr_ctrl_state)
 +{
 +	struct b43_phy_n *nphy = dev->phy.n;
-+	struct nphy_txgains cal_target = target;
 +	u16 orig_tx_gain[2];
 +	bool full;
-+	bool entry_pwr_ctrl_state;
 +	u8 id;
 +
 +	/* Full or partial is not a constant: brcmsmac calibrates fully when the
@@ -1800,43 +2661,25 @@ index 4e6644c..b0082ab 100644
 +	nphy->mphase_txcal_cmdidx = 0;
 +	nphy->mphase_txcal_numcmds = B43_NPHY_MPHASE_TXCAL_NUMCMDS;
 +
-+	/* Il riferimento la rilegge a ogni invocazione, ma la cattura no: una
-+	 * lettura sola per tutta la sequenza. Con una per passo la fase cal-papd
-+	 * perde 53 op e coeff-setup-2 29.
-+	 */
-+	target = b43_nphy_get_tx_gains(dev);
-+	entry_pwr_ctrl_state = nphy->txpwrctrl;
-+
 +	for (id = B43_NPHY_MPHASE_INIT; id <= B43_NPHY_MPHASE_IDLETSSI; id++) {
 +		nphy->mphase_cal_phase_id = id;
 +
-+		/* The six TX phases are one step here, and the capture is why.
-+		 * The reference splits the twelve calibration commands over
-+		 * them, two at a time; the capture issues all twelve back to
-+		 * back, with a single gain read at #8505 opening the block
-+		 * rather than one per phase. Split into six, the calibration
-+		 * emits the per-chunk table and coefficient work between them
-+		 * and the matched run falls from 428 to 331 in 28 fragments -
-+		 * measured both with a bracket around each chunk and without,
-+		 * so it is the split and not the bracket.
++		/* The six TX phases are one step here. The reference splits the
++		 * twelve calibration commands over them, two at a time; the
++		 * capture issues all twelve back to back, with a single gain
++		 * read opening the block rather than one per phase.
 +		 */
 +		if (id > B43_NPHY_MPHASE_TXPHASE0 &&
 +		    id <= B43_NPHY_MPHASE_TXPHASE5)
 +			continue;
 +
-+		bool tx_pwr_ctrl_state;
-+
-+		tx_pwr_ctrl_state = b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
-+
 +		switch (id) {
 +		case B43_NPHY_MPHASE_INIT:
-+			/* precal_txgain lo fa il blocco differito, prima di
-+			 * entrare qui. Rifarlo forzava l'indice una seconda
-+			 * volta: la storia di 15/0x57 mostra il port che dopo la
-+			 * restituzione risale a 2e2c e 2e2e (#7091, #7490) dove
-+			 * il vendore resta su 2c2c, e da li' la scala si sfasa.
++			/* Nothing to do: the gains the TX I/Q LO calibration
++			 * aims for are taken by the caller, right after it
++			 * forces the index, which is where the capture has the
++			 * read.
 +			 */
-+			cal_target = b43_nphy_get_tx_gains(dev);
 +			break;
 +		case B43_NPHY_MPHASE_TXPHASE0:
 +			/* All twelve commands, and the coefficients come out of
@@ -1846,27 +2689,56 @@ index 4e6644c..b0082ab 100644
 +				id = B43_NPHY_MPHASE_IDLETSSI;
 +			break;
 +		case B43_NPHY_MPHASE_PAPDCAL:
-+			b43_nphy_papd_cal(dev);
-+			/* La restituzione dell'indice va QUI, fra la PAPD e la RX
-+			 * IQ, e la cattura lo dice: fra le due fasi ci sono due
-+			 * chiamate a txpwr_index, una per core, ognuna col suo
-+			 * salva e riapplica - #14101 e #14305 per il core 0,
-+			 * #14524 e #14728 per il core 1, riconoscibili da 7/0x110
-+			 * e 7/0x111 con 15/0x57, 15/0x50 e 15/0x55.
++			/* The PAPD calibration transmits longer than the
++			 * receive one, and the medium gets protected for
++			 * longer: 31000 here against the 10000 of the RX I/Q
++			 * step below. The capture writes it at #10759, with the
++			 * MAC running, in the same shape as the other. The
++			 * reference writes only the 10000 one, and only in the
++			 * RXCAL phase.
 +			 */
++			b43_mac_enable(dev);
++			b43_shm_write16(dev, B43_SHM_SHARED,
++					B43_SHM_SH_CTSDUR, 31000);
++			b43_mac_suspend(dev);
++
++			/* The one bracket the capture has between the TX I/Q LO
++			 * calibration and the PAPD one. The audit of the phase
++			 * boundaries finds no transition before the TX I/Q LO
++			 * step and none after the RX I/Q one, so the other steps
++			 * do not get one: the control is already off and an open
++			 * here is 172 operations the hardware never sees.
++			 */
++			b43_nphy_pwr_ctl_open(dev, orig_tx_gain);
++			b43_nphy_papd_cal(dev);
 +			break;
 +		case B43_NPHY_MPHASE_RXCAL:
-+			/* La RX IQ e la RSSI sono un passo solo, e la cattura e'
-+			 * il motivo: fra la rilettura dei coefficienti di
-+			 * save_cal (#21169, 15/0x50 len 8) e quella che apre
-+			 * coef_setup (#21187, len 7) ci sono diciotto op e
-+			 * nient'altro. Tenendoli in due passi, fra i due passa la
-+			 * chiusura e la riapertura della parentesi, cioe' due
-+			 * riprogrammazioni da 84 celle, e la sequenza si spezza:
-+			 * coeff-setup-2 perde le 29 op che nel base le stavano
-+			 * attaccate davanti.
++			/* The calibration transmits for a long time, so the
++			 * medium gets protected for as long: the reference sets
++			 * the duration the ucode sends CTS for at the head of
++			 * this phase and of no other, and it has to happen with
++			 * the MAC running. Nothing else in b43 writes this cell.
 +			 */
-+			if (b43_nphy_cal_rx_iq(dev, target, 2, 0) == 0)
++			b43_mac_enable(dev);
++			b43_shm_write16(dev, B43_SHM_SHARED,
++					B43_SHM_SH_CTSDUR, 10000);
++			b43_mac_suspend(dev);
++
++			/* The RX I/Q calibration, the power coefficients and the
++			 * RSSI calibration are one step: in the capture they run
++			 * back to back, with nothing between the end of one and
++			 * the start of the next that a bracket could hold. The
++			 * RSSICAL phase below is therefore empty.
++			 */
++			/* The gains at the forced index, the same ones the TX
++			 * I/Q LO calibration used, and not the ones the
++			 * sequence was entered with: the capture writes 0x4077
++			 * on both chains, which is the calibration gain for
++			 * index 10, the index the precalibration forces on
++			 * both. Entering with the per-chain indices would give
++			 * 0x4077 and 0x4067.
++			 */
++			if (b43_nphy_cal_rx_iq(dev, cal_target, 2, 0) == 0)
 +				b43_nphy_save_cal(dev);
 +			b43_nphy_tx_pwr_ctrl_coef_setup(dev);
 +			b43_nphy_rssi_cal(dev);
@@ -1877,86 +2749,110 @@ index 4e6644c..b0082ab 100644
 +		case B43_NPHY_MPHASE_IDLETSSI:
 +			/* What the reference does on the first calibration
 +			 * after an association, which an interface coming up
-+			 * is. The power control table lands at #24391.
++			 * is.
 +			 */
 +			b43_nphy_tx_power_ctl_idle_tssi(dev);
 +			b43_nphy_tx_power_ctl_setup(dev);
 +			break;
 +		}
 +
-+		/* Il test e' sullo stato all'INGRESSO della sequenza, non su
-+		 * quello del passo: con la chiusura unica alla fine il controllo
-+		 * e' spento dopo la prima apertura, quindi lo stato per passo e'
-+		 * falso e la restituzione non partirebbe. Il riferimento lo
-+		 * prova contro quello che aveva l'invocazione, che nella
-+		 * macchina a stati e' l'unico che vale.
-+		 */
-+		/* Nessuna restituzione in coda alla sequenza: le due coppie di
-+		 * txpwr_index stanno entrambe PRIMA delle cal, dentro
-+		 * perical-ingresso. Il vendore forza a #7445 e #7868 e
-+		 * restituisce a #8096 e #8294, e il blocco differito in
-+		 * b43_phy_initn() le fa gia' - precal_txgain forza, la coppia
-+		 * con indice -1 restituisce. Rifarla qui aggiungeva una terza
-+		 * coppia dopo le cal, e le prime write di 15/0x57 che
-+		 * combaciano passano da cinque a sette togliendola.
-+		 */
-+
-+		/* Nessuna chiusura per passo: il controllo resta spento per tutta
-+		 * la sequenza e si ripristina una volta alla fine. L'audit dei
-+		 * confini nella cattura non trova UNA accensione fra le fasi,
-+		 * solo spegnimenti, e quelli sono le aperture: nessuna
-+		 * transizione fra perical e la TX I/Q LO, una fra questa e la
-+		 * PAPD (#10790 e #10876), quattro coppie fra la PAPD e la RX IQ
-+		 * (#14121 #14207, #14344 #14430, #14544 #14630, #14767 #14853),
-+		 * nessuna fra la RX IQ e l'idle TSSI. Tutte con payload di 84
-+		 * zeri.
-+		 */
 +	}
 +
++	/* Both chains go back on the index their power control was on when the
++	 * sequence started, one core at a time. The reference does this in the
++	 * tail of every invocation, gated on the control having been on.
++	 */
++	if (entry_pwr_ctrl_state) {
++		b43_nphy_txpwr_index(dev, 1 << 0, nphy->pwr_idx_at_gain[0],
++				     false);
++		b43_nphy_txpwr_index(dev, 1 << 1, nphy->pwr_idx_at_gain[1],
++				     false);
++	}
++
++	/* The control stays off for the whole sequence and comes back once, on
++	 * the state the sequence was entered with: the capture has no transition
++	 * that turns it on between two phases, only the ones that turn it off.
++	 */
 +	b43_nphy_pwr_ctl_close(dev, entry_pwr_ctrl_state);
 +	nphy->mphase_cal_phase_id = 0;
 +}
 +
-+/* La sequenza differita della cal periodica. Non gira in coda a b43_phy_initn():
-+ * la cattura la mette DOPO recalc_txpower, non prima. Il vendore fa init, poi
-+ * recalc a #5726-6500, poi la cal a #7034 in avanti; chiamandola da initn le op
-+ * di recalc uscivano diciassettemila record piu' avanti della loro finestra e la
-+ * fase recalc-txpower faceva zero su 716 con nessun blocco.
-+ *
-+ * Il punto di chiamata e' la coda di b43_nphy_op_recalc_txpower(), che e' il solo
-+ * posto fra i due in cui l'harness passa. Nel riferimento la sequenza la fa
-+ * partire il watchdog, che qui non c'e'.
++/* The deferred calibration sequence. It runs after b43_nphy_op_recalc_txpower()
++ * rather than at the end of b43_phy_initn(), because that is the order the
++ * capture has: init, then the power recalculation, then the calibration. In the
++ * reference the watchdog is what starts it, and b43 has no equivalent.
 + */
 +static void b43_nphy_run_pending_perical(struct b43_wldev *dev)
 +{
 +	struct b43_phy_n *nphy = dev->phy.n;
 +	struct nphy_txgains target;
++	struct nphy_txgains cal_target;
++	bool entry_pwr_ctrl_state;
 +
 +	if (!nphy->perical_pending)
 +		return;
 +	nphy->perical_pending = false;
 +
-+		/* Anche il passo INIT della sequenza fa precal_txgain, e non e'
-+		 * un doppione da togliere: la cattura ne ha due, e togliendo
-+		 * questo perical-ingresso passa da 6x172 a 2x172 e i blocchi
-+		 * contigui da 17830 a 17100.
-+		 */
-+		b43_nphy_precal_txgain(dev);
-+		target = b43_nphy_get_tx_gains(dev);
-+		/* The forced index was only ever there to read those gains
-+		 * off: the hardware goes back to what it had, while the
-+		 * calibrations keep the gains. The capture hands it back here,
-+		 * one core at a time, immediately after the read.
-+		 */
-+		b43_nphy_txpwr_index(dev, 1 << 0, -1, true);
-+		b43_nphy_txpwr_index(dev, 1 << 1, -1, true);
-+		b43_nphy_cal_perical_phyinit(dev, target);
-+	}
++	/* What the two chains were on when the sequence started: the index, and
++	 * the gains if the power control was running. The reference reads both
++	 * here and uses neither afterwards - the tail puts back the index taken
++	 * with the gains, not this one - but the hardware sees the reads, and
++	 * without them everything downstream in this phase sits six operations
++	 * early.
++	 */
++	nphy->cal_orig_pwr_idx[0] =
++		(b43_phy_read(dev, B43_NPHY_C1_TXPCTL_STAT) &
++		 B43_NPHY_TXPCTL_STAT_BIDX) >> B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
++	nphy->cal_orig_pwr_idx[1] =
++		(b43_phy_read(dev, B43_NPHY_C2_TXPCTL_STAT) &
++		 B43_NPHY_TXPCTL_STAT_BIDX) >> B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
++	if (nphy->txpwrctrl)
++		b43_ntab_read_bulk(dev, B43_NTAB16(7, 0x110), 2,
++				   nphy->cal_orig_tx_gain);
++	else
++		nphy->cal_orig_tx_gain[0] = nphy->cal_orig_tx_gain[1] = 0;
 +
++	/* The gains the receive calibration aims for, taken at the index the
++	 * hardware is already on. The reference takes them here, before the
++	 * index is forced; the gains at the forced index are a different thing
++	 * and the INIT phase of the sequence takes those.
++	 */
++	target = b43_nphy_get_tx_gains(dev);
++
++	/* The power control goes off here, before anything forces an index, and
++	 * stays off for the whole sequence. The reference does it at the head of
++	 * the run for the same reason: every index forced from now on restores to
++	 * off, so none of them reprogrammes the adjusted power table.
++	 */
++	entry_pwr_ctrl_state = nphy->txpwrctrl;
++	b43_nphy_tx_power_ctrl(dev, false);
++
++	/* The index the calibrations want to run at, forced here and once more by
++	 * the INIT phase of the sequence: the capture forces it twice.
++	 */
++	b43_nphy_precal_txgain(dev);
++
++	/* The gains at the forced index, which are the ones the TX I/Q LO
++	 * calibration aims for. They are a different thing from target above,
++	 * and the capture takes them here, between the forcing and the
++	 * hand-back.
++	 */
++	cal_target = b43_nphy_get_tx_gains(dev);
++
++	/* The forced index was only ever there to read gains off: the hardware
++	 * goes back to what it had, while the calibrations keep the gains. The
++	 * capture hands it back here, one core at a time.
++	 */
++	b43_nphy_txpwr_index(dev, 1 << 0, -1, false);
++	b43_nphy_txpwr_index(dev, 1 << 1, -1, false);
++	b43_nphy_cal_perical_phyinit(dev, target, cal_target,
++				     entry_pwr_ctrl_state);
++}
++
+ /* http://bcm-v4.sipsolutions.net/802.11/PHY/Init/N */
  static int b43_phy_initn(struct b43_wldev *dev)
  {
- 	struct ssb_sprom *sprom = dev->dev->bus_sprom;
-@@ -6007,6 +7511,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6011,6 +7665,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
  
  	u16 clip[2];
  	bool do_cal = false;
@@ -1964,7 +2860,7 @@ index 4e6644c..b0082ab 100644
  
  	if ((dev->phy.rev >= 3) &&
  	   (sprom->boardflags_lo & B43_BFL_EXTLNA) &&
-@@ -6097,6 +7602,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6101,6 +7756,7 @@ static int b43_phy_initn(struct b43_wldev *dev)
  	}
  
  	if (b43_nphy_ipa(dev)) {
@@ -1972,7 +2868,7 @@ index 4e6644c..b0082ab 100644
  		b43_phy_set(dev, B43_NPHY_PAPD_EN0, 0x1);
  		b43_phy_maskset(dev, B43_NPHY_EPS_TABLE_ADJ0, 0x007F,
  				nphy->papd_epsilon_offset[0] << 7);
-@@ -6190,14 +7696,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6194,14 +7850,27 @@ static int b43_phy_initn(struct b43_wldev *dev)
  					    nphy->txpwrindex[0].index_internal;
  					nphy->cal_orig_pwr_idx[1] =
  					    nphy->txpwrindex[1].index_internal;
@@ -2004,7 +2900,7 @@ index 4e6644c..b0082ab 100644
  			}
  		} else {
  			b43_nphy_restore_cal(dev);
-@@ -6213,6 +7732,17 @@ static int b43_phy_initn(struct b43_wldev *dev)
+@@ -6217,6 +7886,17 @@ static int b43_phy_initn(struct b43_wldev *dev)
  	if (phy->rev >= 3)
  		b43_nphy_spur_workaround(dev);
  
@@ -2022,7 +2918,7 @@ index 4e6644c..b0082ab 100644
  	return 0;
  }
  
-@@ -6474,6 +8004,12 @@ static void b43_nphy_op_prepare_structs(struct b43_wldev *dev)
+@@ -6478,6 +8158,12 @@ static void b43_nphy_op_prepare_structs(struct b43_wldev *dev)
  	nphy->perical = 2; /* avoid additional rssi cal on init (like wl) */
  	/* 128 can mean disabled-by-default state of TX pwr ctl. Max value is
  	 * 0x7f == 127 and we check for 128 when restoring TX pwr ctl. */
@@ -2035,7 +2931,7 @@ index 4e6644c..b0082ab 100644
  	nphy->tx_pwr_idx[0] = 128;
  	nphy->tx_pwr_idx[1] = 128;
  
-@@ -6654,6 +8190,63 @@ static void b43_nphy_op_switch_analog(struct b43_wldev *dev, bool on)
+@@ -6658,6 +8344,63 @@ static void b43_nphy_op_switch_analog(struct b43_wldev *dev, bool on)
  	}
  }
  
@@ -2100,7 +2996,7 @@ index 4e6644c..b0082ab 100644
  				      unsigned int new_channel)
  {
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.h b/drivers/net/wireless/broadcom/b43/phy_n.h
-index b96ded0..2631632 100644
+index b96ded0..7a81b55 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.h
 +++ b/drivers/net/wireless/broadcom/b43/phy_n.h
 @@ -604,6 +604,15 @@
@@ -2119,19 +3015,42 @@ index b96ded0..2631632 100644
  #define B43_NPHY_CRS_CHECK			B43_PHY_N(0x1CB) /* CRS check */
  #define B43_NPHY_ML_LOGSS_RAT			B43_PHY_N(0x1CC) /* ML/logss ratio */
  #define B43_NPHY_DUPSCALE			B43_PHY_N(0x1CD) /* Dup scale */
-@@ -835,6 +844,11 @@
+@@ -835,6 +844,12 @@
  #define B43_NPHY_RADAR_T2_MIN			B43_PHY_N(0x295)
  #define B43_NPHY_TXPWRCTRLDAMPING		B43_PHY_N(0x296)
  #define B43_NPHY_PAPD_EN0			B43_PHY_N(0x297) /* PAPD Enable0 TBD */
-+/* Pad gain index the PAPD gain search settles on, from a capture of the vendor
-+ * driver on radio 2057 rev 8 in 2.4 GHz. Placeholder for the search itself.
++/* The pad gain code the PAPD gain search settles on, from a capture of the
++ * vendor driver on radio 2057 rev 8 in 2.4 GHz. The epsilon offset is programmed
++ * during the PHY init, before the search has run, so it uses this instead.
 + */
 +#define B43_NPHY_PAPD_CAL_PAD_GAIN		15
 +
  #define B43_NPHY_EPS_TABLE_ADJ0			B43_PHY_N(0x298) /* EPS Table Adj0 TBD */
  #define B43_NPHY_EPS_OVERRIDEI_0		B43_PHY_N(0x299)
  #define B43_NPHY_EPS_OVERRIDEQ_0		B43_PHY_N(0x29A)
-@@ -932,8 +946,14 @@ struct b43_phy_n_pwr_ctl_info {
+@@ -861,6 +876,21 @@
+ #define B43_NPHY_REV3_C2_CLIP2_GAIN_A		B43_PHY_N(0x2AF)
+ #define B43_NPHY_REV3_C2_CLIP2_GAIN_B		B43_PHY_N(0x2B0)
+ 
++/* The capture saves this one across the receive I/Q calibration, right after the
++ * four rev 7 override registers. brcmsmac never reads it, only sets and clears
++ * bits 0, 13, 14 and 15 in the rev 7 override path.
++ */
++/* Four status cells the PAPD engine exposes. The capture reads them once, in
++ * this order, between the two epsilon offset writes at the end of the
++ * calibration; nothing here uses the values.
++ */
++#define B43_NPHY_PAPD_STAT_ADDR0		B43_PHY_N(0x2BF)
++#define B43_NPHY_PAPD_STAT_ADDR1		B43_PHY_N(0x2C0)
++#define B43_NPHY_PAPD_STAT_YRE			B43_PHY_N(0x2B1)
++#define B43_NPHY_PAPD_STAT_YIM			B43_PHY_N(0x2B2)
++
++#define B43_NPHY_REV7_SAMP_CTL			B43_PHY_N(0x2FF)
++
+ #define B43_NPHY_REV7_RF_CTL_MISC_REG3		B43_PHY_N(0x340)
+ #define B43_NPHY_REV7_RF_CTL_MISC_REG4		B43_PHY_N(0x341)
+ #define B43_NPHY_REV7_RF_CTL_OVER3		B43_PHY_N(0x342)
+@@ -932,8 +962,24 @@ struct b43_phy_n_pwr_ctl_info {
  };
  
  struct b43_phy_n {
@@ -2141,12 +3060,22 @@ index b96ded0..2631632 100644
 +	 */
 +	s32 chan_meas;
  	u8 antsel_type;
++	/* The index each chain was on and the gains it was at when the periodic
++	 * calibration started. The reference keeps both and reads neither
++	 * afterwards; they are here because the two reads that fill them are
++	 * what the hardware sees at the head of the sequence.
++	 */
  	u8 cal_orig_pwr_idx[2];
++	u16 cal_orig_tx_gain[2];
++	/* The index the two chains are on when the gains are taken, which is
++	 * what the tail of the sequence puts back.
++	 */
++	u8 pwr_idx_at_gain[2];
 +	bool perical_pending;
  	u8 measure_hold;
  	u8 phyrxchain;
  	u8 hw_phyrxchain;
-@@ -974,7 +994,11 @@ struct b43_phy_n {
+@@ -974,7 +1020,11 @@ struct b43_phy_n {
  	int tx_pwr_last_recalc_limit;
  
  	u8 txrx_chain;
@@ -2155,24 +3084,22 @@ index b96ded0..2631632 100644
 +	 * registers than the earlier revisions - 0x342, 0x343, 0x346 and 0x347,
 +	 * the RF control override enables - at indices 11 to 14.
 +	 */
-+	u16 tx_rx_cal_phy_saveregs[15];
++	u16 tx_rx_cal_phy_saveregs[16];
  	u16 tx_rx_cal_radio_saveregs[22];
  
  	u16 rfctrl_intc1_save;
 diff --git a/drivers/net/wireless/broadcom/b43/ppr.c b/drivers/net/wireless/broadcom/b43/ppr.c
-index 26514cc..5bf4d77 100644
+index 26514cc..3f79cec 100644
 --- a/drivers/net/wireless/broadcom/b43/ppr.c
 +++ b/drivers/net/wireless/broadcom/b43/ppr.c
-@@ -32,6 +32,23 @@ void b43_ppr_add(struct b43_wldev *dev, struct b43_ppr *ppr, int diff)
+@@ -32,6 +32,21 @@ void b43_ppr_add(struct b43_wldev *dev, struct b43_ppr *ppr, int diff)
  	}
  }
  
-+/* Come b43_ppr_apply_max() ma su un gruppo solo di rate.
-+ *
-+ * Serve perche' il limite non e' uno: i gruppi che usano due catene - CDD, STBC
-+ * e SDM - hanno bisogno di piu' arretramento degli stessi rate a una catena, e la
-+ * differenza e' del PA, non del regolatore. brcmsmac ha la stessa forma in
-+ * wlc_phy_txpwr_nphy_po_apply(), che lavora su un intervallo di rate.
++/* Like b43_ppr_apply_max() but over one group of rates, because the limit is not
++ * one number: the groups that use two chains need more backoff than the same
++ * rates on one. brcmsmac has the same shape in wlc_phy_txpwr_nphy_po_apply(),
++ * which works on a range of rates.
 + */
 +void b43_ppr_apply_max_group(struct b43_wldev *dev, u8 *rates, unsigned int num,
 +			     u8 max)
@@ -2328,7 +3255,7 @@ index e761f89..2e88dd9 100644
  
  /* Extracted from MMIO dump of 6.30.223.141 */
 diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.c b/drivers/net/wireless/broadcom/b43/tables_nphy.c
-index 22da741..258762d 100644
+index 22da741..20c9d99 100644
 --- a/drivers/net/wireless/broadcom/b43/tables_nphy.c
 +++ b/drivers/net/wireless/broadcom/b43/tables_nphy.c
 @@ -2928,14 +2928,36 @@ static const s16 b43_ntab_rf_pwr_offset_2057_rev9_5g[] = {
@@ -2375,14 +3302,6 @@ index 22da741..258762d 100644
  };
  
  /* Extracted from MMIO dump of 6.30.223.248
-@@ -3184,6 +3206,7 @@ static const struct nphy_rf_control_override_rev7
- 	{ 0x0040, 0x07A, 0x07D, 0x0040, 6 },
- 	{ 0x0080, 0x07A, 0x07D, 0x0080, 7 },
- 	{ 0x0400, 0x0F8, 0x0FA, 0x0070, 4 },
-+	/* TODO: unused field, the vendor writes 0x07B/0x07E during cal */
- 	{ 0x0800, 0x07B, 0x07E, 0xFFFF, 0 },
- 	{ 0x1000, 0x07C, 0x07F, 0xFFFF, 0 },
- 	{ 0x6000, 0x348, 0x349, 0x00FF, 0 },
 diff --git a/drivers/net/wireless/broadcom/b43/tables_nphy.h b/drivers/net/wireless/broadcom/b43/tables_nphy.h
 index 3876786..73b6288 100644
 --- a/drivers/net/wireless/broadcom/b43/tables_nphy.h

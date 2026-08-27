@@ -1,0 +1,55 @@
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Sun, 24 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: square both terms of the N-PHY RSSI VCM search
+
+The narrowband RSSI calibration picks, out of eight VCM settings, the one
+whose polled I and Q results are closest to zero. The distance it minimises
+is meant to be I^2 + Q^2, and b43 computes
+
+	currd = results[vcm][i] * results[vcm][i] +
+		results[vcm][i + 1] * results[vcm][i];
+
+so the second term is Q*I, not Q*Q. The reference squares both:
+
+	curr_d = poll_results[vcm][result_idx] * poll_results[vcm][result_idx] +
+		 poll_results[vcm][result_idx + 1] *
+		 poll_results[vcm][result_idx + 1];
+
+Q*I is not a distance. It is negative whenever the two rails have opposite
+signs, which is most of the sweep, so the minimum lands wherever that
+product happens to be most negative rather than where the pair is smallest.
+The calibration then programs that VCM and derives the fine digital offsets
+from its results, so a wrong pick costs both.
+
+Measured on an MMIO capture of wl 6.30.102.7 on a BCM6362, N-PHY rev 8 with
+radio 2057 rev 8: with the term squared the port picks VCM 2 for core 0,
+which is what the vendor driver picks, and the two narrowband offsets that
+follow come out identical to the capture as well. Without it the port picks
+3. The second RSSI calibration of an interface coming up goes from 623 to
+956 matched operations out of 960, and from 22 contiguous blocks to 3.
+
+Not tested on hardware.
+
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n22476
+Link: https://github.com/aleferri/b43-6362-wip/blob/HEAD/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+The selection for core 0 and the two offsets it decides are records #22953
+to #22958 of that capture:
+
+  53677.051000 #22953    cpu0 RAD.MOD  addr=0x00b4 val=0x0002 mask=0x0007
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+---
+ drivers/net/wireless/broadcom/b43/phy_n.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -2166,7 +2166,7 @@ static void b43_nphy_rev3_rssi_cal(struct b43_wldev *dev)
+ 				continue;
+ 			for (vcm = 0; vcm < 8; vcm++) {
+ 				currd = results[vcm][i] * results[vcm][i] +
+-					results[vcm][i + 1] * results[vcm][i];
++					results[vcm][i + 1] * results[vcm][i + 1];
+ 				if (currd < mind) {
+ 					mind = currd;
+ 					minvcm = vcm;

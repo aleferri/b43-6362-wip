@@ -240,7 +240,7 @@ quella legacy e' centrata piu' in alto. Quindi il tetto basso viene da la'.
 
 E `maxpwr20[BRCMS_MAXPWR_MIMO_TBL_SIZE]` con `SIZE = 14` **non e' per gruppo di
 modulazione**: il commento di brcmsmac dice «index by channel for 2.4 GHz limits»,
-quindi sono i 14 canali. Per un giro ho creduto fossero quattordici gruppi.
+quindi sono i 14 canali, non quattordici gruppi di modulazione.
 
 Cosa manca per derivarlo invece di misurarlo: l'EIRP di Linux (20 dBm) meno il
 guadagno d'antenna di questa board (`ag0 = 2`) fa 72 qdBm, non 68. I 4 qdBm che

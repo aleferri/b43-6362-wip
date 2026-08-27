@@ -263,9 +263,9 @@ allora i valori tornano da soli senza posizionare niente per chiamata.
 
 Misurato dentro l'unica finestra, `up-ch1` (#132-26100): nell'intervallo della cal
 i blocchi contigui sono a **#10966 (847 op)**, #11822 (334), #12784 (145), #12936
-(334), #13752 (90), #13856 (48), #13921 (172). Le region per fase, `papd-cal` e
-`papd-cal-freddo`, sono esistite due sessioni e sono state togliere: una fase presa
-da sola non dice niente su cio' che le arriva addosso da prima. La struttura:
+(334), #13752 (90), #13856 (48), #13921 (172). Non ci sono region per fase, e non
+per dimenticanza: una fase presa da sola non dice niente su cio' che le arriva
+addosso da prima. La struttura:
 
 | da | op contigue | cosa |
 |---|---|---|

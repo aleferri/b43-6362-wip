@@ -20,8 +20,8 @@ trova.
 `b43/MESSAGES.md#0006` non ha citazioni, e resta senza: misura una cosa che il vendore in quella
 cattura non fa.
 
-`mainline/` sono **nove patch separate**, non una serie, per difetti di mainline
-indipendenti da questo hardware: vanno inviate per prime e in nove thread distinti,
+`mainline/` sono **dodici patch separate**, non una serie, per difetti di mainline
+indipendenti da questo hardware: vanno inviate per prime e in dodici thread distinti,
 vedi `patches/mainline/README.md`, che e' la fonte per l'elenco.
 
 `b43/` e' il lavoro di questo port, e finche' si costruisce sta in **un file solo**,
