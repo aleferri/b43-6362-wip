@@ -63,10 +63,15 @@ documentazione (che invecchia). Riferimento: `torvalds/linux` @ `848acc8ffe1b`,
 3 ago 2026. Per rifare la verifica:
 
 ```sh
-./scripts/fetch-upstream-state.sh ~/src/linux      # sparse checkout
+./scripts/fetch-upstream-state.sh ~/src/linux      # sparse checkout, ma di master
 ./reverse-tools/check_gaps.py --tree ~/src/linux --format md
 ./reverse-tools/brcmsmac_xref.py --tree ~/src/linux --format md
 ```
+
+Per l'albero **pinnato** quel comando non basta e non puo' bastare: uno sha
+abbreviato non si fetcha. La ricetta col tarball sta in testa a
+`scripts/fetch-upstream-state.sh`, ed e' quella con cui i numeri di `CLAUDE.md`
+sono stati rifatti.
 
 Per riverificare le tabelle merged contro il blob OEM:
 

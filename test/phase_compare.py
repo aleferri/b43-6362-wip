@@ -21,10 +21,9 @@ guardare, e la prima riga di differenza e' il punto.
 
 import argparse
 import collections
-import difflib
 import importlib.util
+import lcsmatch as LCS
 import os
-import re
 import re
 import subprocess
 import sys
@@ -198,7 +197,7 @@ def canon_contig(op):
 # `write_objmem16()`, che e' un indirizzo di parola con un altro selettore di
 # spazio (vedi CLAUDE.md, `o708`/`o70e`). E' la stessa esclusione che coverage.py
 # dichiara, e qui serve a sapere contro cosa si sta misurando: nella regione di
-# init sono 1181 op su 9692, cioe' il 12%, e nelle regioni di calibrazione zero.
+# init sono 1180 op su 9692, cioe' il 12%, e nelle regioni di calibrazione zero.
 NOT_COMPARABLE = ('OBJ.WR', 'OBJ.RD', 'MAC.MCTRL', 'MAC.MHF', 'MAC.MHF.RD',
                   'TPL.RAMW', 'GPIO.OUT', 'GPIO.CTL')
 
@@ -211,8 +210,10 @@ def comparable(op):
 def contig_blocks(vops, tops, minsize=16):
     """I blocchi contigui in comune, con il record da cui parte ciascuno.
 
-    difflib da' la struttura giusta: sequenze di op identiche nello stesso
-    ordine, che e' esattamente la domanda "fin dove siamo in passo".
+L'appaiamento e' quello ottimo di `lcsmatch`, non quello di difflib: la
+    domanda "fin dove siamo in passo" ha senso solo se il conto e' ottimo, e su
+    una fase che ripete la stessa sequenza sette volte difflib aggancia
+    l'iterazione sbagliata e lascia spaiata un'iterazione intera per lato.
 
     `minsize` decide solo cosa si STAMPA. Il totale si conta su tutti i blocchi:
     filtrare anche il conteggio era un sottoconteggio, e su una finestra da 22951
@@ -223,8 +224,7 @@ def contig_blocks(vops, tops, minsize=16):
     """
     a = [canon_contig(o) for o in vops]
     b = [canon_contig(o) for o in tops]
-    sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
-    blocks = [bl for bl in sm.get_matching_blocks() if bl.size]
+    blocks = LCS.matching_blocks(a, b)
     total = sum(bl.size for bl in blocks)
     shown = [(vops[bl.a].ep, bl.a, bl.size) for bl in blocks
              if bl.size >= minsize]
@@ -441,6 +441,69 @@ def find_anchor(tops, anchor, nth):
     return -1
 
 
+def spare_pool(tops, blocks):
+    """Le op del port che nessun blocco ha appaiato, contate per stringa.
+
+    Si costruisce UNA volta e si passa a chi la consuma, perche' se ogni
+    chiamante se la ricostruisce due regioni rivendicano la stessa op del port e
+    la colonna `spostate` si gonfia.
+    """
+    pool = collections.Counter(tops)
+    for b in blocks:
+        for k in range(b.size):
+            pool[tops[b.b + k]] -= 1
+    return pool
+
+
+def displaced_or_absent(vops, matched, pool, idx):
+    """Delle op confrontabili non appaiate di `idx`, quante sono SPOSTATE.
+
+    Il conto per blocchi risponde a "in che ordine", non a "ci sono": quando
+    scende non si sa se il port ha smesso di fare un'op o se il matcher ha
+    riancorato. Questa risponde all'altra domanda, e lo fa senza ordine.
+
+    Non si ritaglia il port. Un trace del port non ha numeri di record, quindi
+    una regione definita sui record del vendore non si puo' ritagliare la', e
+    ogni tentativo di dedurne i confini dagli appaiamenti eredita la golosita'
+    del matcher -- provato in due modi, min/max degli indici coperti e
+    scostamento del blocco piu' lungo, e gonfiava di 1258 op su `cal PAPD` il
+    primo e di ~1180 su `init` il secondo.
+
+    Si guarda invece l'avanzo di `spare_pool()`: per ogni op confrontabile non
+    appaiata, se nell'avanzo ce n'e' una uguale allora quell'op il port la fa,
+    altrove, ed e' spostata; se non c'e', il port non la fa affatto, e quella e'
+    una voce da portare. `pool` si consuma, quindi va passata nell'ordine del
+    flusso e la somma delle colonne torna col totale non appaiato.
+    """
+    disp = absent = 0
+    for i in idx:
+        if i in matched or not comparable(vops[i]):
+            continue
+        op = vops[i]
+        if pool[op] > 0:
+            pool[op] -= 1
+            disp += 1
+        else:
+            absent += 1
+    return disp, absent
+
+
+def gaps_of(vops, matched):
+    """I tratti di op del vendore non appaiate, di fila, in ordine di flusso."""
+    out = []
+    cur = None
+    for i in range(len(vops)):
+        if i in matched:
+            if cur:
+                out.append(cur)
+                cur = None
+            continue
+        cur = [i, i] if cur is None else [cur[0], i]
+    if cur:
+        out.append(cur)
+    return out
+
+
 def multiset_verdict(vops, tops, allow):
     """Confronto per multiinsieme dentro la finestra.
 
@@ -510,14 +573,7 @@ WINDOWS = [
     dict(name='txdigi-filts', rng='289:348', test_len=45,
          anchor='PHY.WR addr=0x186 val=0xfe87',
          flow=('init', '1'),
-         what='b43_nphy_int_pa_set_tx_dig_filters',
-         known='mancano 15: il vendore riscrive 0x195-0x1a3 con la riga 1 una '
-               'seconda volta, con valori IDENTICI alla prima, quindi lo stato '
-               'della tabella e\' lo stesso e la differenza e\' solo nel '
-               'conteggio delle op. Lo fa in due punti indipendenti della '
-               'cattura (#334-348 all\'init, #13904-13918 in coda alla cal). In '
-               'b43 quella riscrittura c\'e\' solo nel ramo phy rev 17, dove e\' '
-               'altrettanto idempotente.'),
+         what='b43_nphy_int_pa_set_tx_dig_filters'),
     # La tabella dei campioni, id 17: il tono che ogni cal che suona campioni
     # usa come stimolo. Due finestre perche' le due chiamate hanno ampiezze
     # diverse, e l'ampiezza e' cio' che rende visibile il difetto di 0010.
@@ -632,16 +688,14 @@ WINDOWS = [
          anchor='PHY.RD addr=0x1ed val=0x1900',
          flow=('txpower', '1'),
          what='ingresso della cal periodica: precal, gain, hand-back',
-         known='19 op in due gruppi, entrambi dichiarati. Quattro sono la '
-               'rilettura a 9 bit delle tabelle 26/27 oltre l\'offset 576, che '
-               'e\' dell\'hardware e non del port (0x1e9 contro 0xffe9, il '
-               'mirror dello strumento tiene i 32 bit interi) e sono inerti: il '
-               'solo consumatore fa (((s16)v) << 4) & 0x1ff0 e i due valori danno '
-               'lo stesso 0x1e90. Le altre quindici sono il confine con la fase '
-               'dopo: a #8482 il vendore e\' gia\' dentro il setup della cal TX '
-               'I/Q LO (0xb0, 0x2c, 0x42, 0x1) mentre il port sta ancora aprendo '
-               'la parentesi del primo passo. La run e\' 573 su 1402 e i tre '
-               'blocchi sono 573, 409 e 401, cioe\' la fase e\' appaiata a pezzi '
+         known='5 posizioni, tutte attribuite. Quattro sono la rilettura a 9 bit '
+               'delle tabelle 26/27 oltre l\'offset 576, che e\' dell\'hardware e '
+               'non del port (0x1e9 contro 0xffe9, il mirror dello strumento tiene '
+               'i 32 bit interi) e sono inerti: il solo consumatore fa '
+               '(((s16)v) << 4) & 0x1ff0 e i due valori danno lo stesso 0x1e90. La '
+               'quinta e\' su 0xb0 a @1389, dove i conteggi combaciano e cambia '
+               'l\'ordine, come in rxiq-ingresso. La run e\' 575 su 1403 e i tre '
+               'blocchi sono 575, 409 e 401, cioe\' la fase e\' appaiata a pezzi '
                'interi.'),
     dict(name='rxiq-ingresso', rng='14297:15920',
          # Comincia a #14297 e non a #14093, che e' l'inizio della regione: le
@@ -651,20 +705,16 @@ WINDOWS = [
          anchor='TBL.RD id=0x1a off=0xde len=1',
          flow=('txpower', '1'),
          what='ingresso della cal RX IQ, dalla prima op ancorabile',
-         known='555 op, e sono tutte a valle di UNA: la lettura di 0xb0 a '
-               '#14943, che il port serve con 0xdf7 dove il vendore ha 0xdf4. Il '
-               'piano di lettura e\' posizionale e per registro, quindi il port ha '
-               'consumato una voce di 0xb0 in piu\' prima di entrare qui - ne ha 25 '
-               'contro 16 in tutta up-ch1, e una coppia di carrier search in piu\', '
-               '7 contro 6. Da la\' ogni lettura di 0xb0 rende il valore sbagliato '
-               'e la parita\' non si recupera. Le op ci sono e sono le stesse: '
-               'mancano 18 e ce ne sono 18 in piu\', su 1503. Il resto e\' noto: sei '
-               'op di rilettura a 9 bit delle tabelle 26/27 oltre l\'offset 576, due '
-               'PHY.CLK che il tracer del vendore non vede perche\' aggancia '
-               'core_phy_clk e non phyclk_fgc, e ventotto di confine con la fase '
-               'dopo. La run e\' 500 su 1503 con blocchi 500, 401, 178, 79: si '
-               'chiude togliendo la coppia di carrier search di troppo, non '
-               'lavorando qui.'),
+         known='37 op in tre gruppi, tutti attribuiti. Sei sono la rilettura a 9 '
+               'bit delle tabelle 26/27 oltre l\'offset 576, che e\' '
+               'dell\'hardware: @31, @434, @947 con la word alta accanto. Due sono '
+               'su 0xb0, dove i conteggi combaciano -- 16 0xdf7 e 6 0xdf4 su '
+               'entrambi i lati -- e cambia solo l\'ordine: il port riceve 0xdf7 '
+               'dove il vendore ha 0xdf4, e lo scambio si chiude undici posizioni '
+               'dopo. Le altre 29 sono da @1481 alla fine e sono il confine con la '
+               'fase dopo: il taglio della finestra cade dentro una stima I/Q e i '
+               'due lati sono a punti diversi dentro quella. Il residuo per '
+               'multiinsieme e\' 7 e 7.'),
     dict(name='papd-digifilt', rng='11741:11755',
          anchor='PHY.WR addr=0x186 val=0xfed9',
          flow=('init', '1'),
@@ -673,6 +723,20 @@ WINDOWS = [
                  'tbl_tx_filter_coef_rev4 ma nessun equivalente di '
                  'wlc_phy_ipa_restore_tx_digi_filts_nphy, che la scrive solo '
                  'per la durata della cal.'),
+    # I due blocchi del canale nuovo NON sono finestre, e non per dimenticanza:
+    # sono 23649 e 29979 op del vendore contro 46307 e 55304 del port, e a quelle
+    # dimensioni lcsmatch costa minuti -- e' O(n*m/64) per livello di Hirschberg.
+    # Si misurano con la global run, che ci arriva in un paio di minuti:
+    #
+    #   ./phase_compare.py --vendor .../opinit-ch1-ch6-bw20.decoded \
+    #       --global-run 34938 61971 --flow chancal --channel 6
+    #   -> 21593 su 23649, il 91%   (a caldo, ch6)
+    #
+    #   ./phase_compare.py --vendor .../full-init-ch1-bw20.decoded \
+    #       --global-run 98383 133120 --flow chancalpor --channel 11
+    #   -> 25526 su 29979, l'85%    (a freddo, ch11)
+    #
+    # Vedi la voce in CLAUDE.md.
     dict(name='chanswitch-ch6', rng='34940:34990', test_len=42,
          anchor='RAD.WR addr=0x16 val=0x58',
          flow=('chanset', '6'),
@@ -834,9 +898,7 @@ def main():
                             'dsl3580l', args.channel], stdout=fh,
                            stderr=subprocess.DEVNULL)
         tops = CMP.load_test(out)
-        import difflib
-        sm = difflib.SequenceMatcher(None, vops, tops, autojunk=False)
-        blocks = [b for b in sm.get_matching_blocks() if b.size]
+        blocks = LCS.matching_blocks([str(o) for o in vops], tops)
         matched = set()
         for b in blocks:
             matched.update(range(b.a, b.a + b.size))
@@ -866,9 +928,11 @@ def main():
                   ' finestre.')
         print('\nper regione (il numero di record se lo porta dietro l\'op, '
               'vedi CMP.Op):')
-        print('  %-34s %-16s %6s %9s %7s %9s'
-              % ('regione', 'record', 'op', 'appaiate', 'n.conf', 'su conf.'))
-        tot_nc = 0
+        print('  %-34s %-16s %6s %9s %7s %9s %9s %8s'
+              % ('regione', 'record', 'op', 'appaiate', 'n.conf', 'su conf.',
+                 'spostate', 'assenti'))
+        tot_nc = tot_disp = tot_abs = 0
+        pool = spare_pool(tops, blocks)
         for rlo, rhi, name in REGIONS:
             idx = [i for i, o in enumerate(vops) if rlo <= o.ep <= rhi]
             if not idx:
@@ -877,10 +941,62 @@ def main():
             nc = sum(1 for i in idx if not comparable(vops[i]))
             tot_nc += nc
             conf = len(idx) - nc
-            print('  %-34s %-16s %6d %5d %3.0f%% %7d %8.0f%%'
+            disp, absent = displaced_or_absent(vops, matched, pool, idx)
+            tot_disp += disp
+            tot_abs += absent
+            print('  %-34s %-16s %6d %5d %3.0f%% %7d %8.0f%% %9d %8d'
                   % (name, '#%d-%d' % (rlo, rhi), len(idx), m,
                      100.0 * m / len(idx), nc,
-                     100.0 * m / conf if conf else 0.0))
+                     100.0 * m / conf if conf else 0.0, disp, absent))
+        print('  %-34s %-16s %6s %9s %7s %9s %9d %8d'
+              % ('TOTALE', '', '', '', '', '', tot_disp, tot_abs))
+        print('\n  spostate/assenti: delle op confrontabili NON appaiate, quante'
+              ' il port le fa')
+        print('  altrove e quante non le fa affatto. Si guarda quando `appaiate`'
+              ' scende: se')
+        print('  `assenti` non si muove, si e\' spostato il metro e non il '
+              'driver. Il conto non')
+        print('  ritaglia il port, che non ha numeri di record: usa l\'avanzo,'
+              ' cioe\' le op del')
+        print('  port che nessun blocco ha appaiato, contate per stringa su tutto'
+              ' il flow. E le')
+        print('  consuma, quindi due regioni non rivendicano la stessa op e la'
+              ' somma torna.')
+
+        # I tratti non appaiati, che sono cio' che la colonna `appaiate` non
+        # dice: dove stanno. Serve perche' 49 op spostate spalmate su 9696
+        # non si cercano, e in tratto sono un sito.
+        gaps = gaps_of(vops, matched)
+        pool2 = spare_pool(tops, blocks)
+        rows = []
+        for lo, hi in gaps:
+            d, a = displaced_or_absent(vops, matched, pool2, range(lo, hi + 1))
+            if not (d or a):
+                continue
+            wr = sum(1 for i in range(lo, hi + 1)
+                     if i not in matched and comparable(vops[i])
+                     and '.RD' not in vops[i] and '.RAMR' not in vops[i])
+            rows.append((d + a, d, a, wr, hi - lo + 1, vops[lo].ep))
+        rows.sort(reverse=True)
+        print('\ntratti non appaiati piu\' grossi, per op confrontabili '
+              '(%d tratti in tutto):' % len(gaps))
+        print('  %-10s %8s %8s %8s %8s %s'
+              % ('da record', 'conf.', 'spostate', 'assenti', 'scrivono',
+                 'op nel tratto'))
+        for tot, d, a, wr, n, ep in rows[:12]:
+            print('  #%-9d %8d %8d %8d %8d %d' % (ep, tot, d, a, wr, n))
+        print('  scrivono: delle op del tratto, quante cambiano lo stato del'
+              ' PHY invece di')
+        print('  leggerlo. E\' la colonna con cui ordinare il lavoro: un tratto'
+              ' di sole letture')
+        print('  vale nel conto e non nel driver. Su tutta la finestra le'
+              ' assenti sono 122 che')
+        print('  scrivono e 176 che leggono, quindi il tratto piu\' grosso non'
+              ' e\' il piu\' urgente.')
+        print('  Le op non confrontabili sono nel tratto ma non nelle colonne:'
+              ' la differenza')
+        print('  fra `conf.` e `op nel tratto` e\' object memory e stato del'
+              ' MAC.')
         if tot_nc:
             print('\n  n.conf: op di famiglie che il port non puo\' emettere, '
                   'perche\' l\'harness compila')

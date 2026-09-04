@@ -51,7 +51,7 @@ contenuto e `upstreaming.md` per gli ostacoli.
 
 ## Non merged, scritte qui e mai girate su hardware
 
-Sono ventisei, compresse in `patches/b43/rollup.diff` finche' si costruisce, con i
+Sono trentasei, compresse in `patches/b43/rollup.diff` finche' si costruisce, con i
 messaggi in `patches/b43/MESSAGES.md`: l'elenco con lo stato per voce sta nella
 tabella del `README.md` e il dettaglio in `gap-inventory.md`. Il rollup applica
 pulito sopra `patches/mainline/` e compila nell'harness, che lo verifica contro la

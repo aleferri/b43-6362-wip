@@ -387,7 +387,7 @@ static struct hook hooks[] = {
 	 * wlc_bmac_write_objmem (160), wlc_bmac_copyto_objmem (160),
 	 * wlc_bmac_copyfrom_objmem (156). I wlapi_* omonimi sono trampolini da
 	 * 16 byte e non si agganciano: il detour non ci sta.
-	 */
+	 *
 	 * I tre numeri sono (addr, val, aux) come indici di a1..a3, e la prima
 	 * versione di queste quattro righe li aveva sbagliati tutti: la cattura
 	 * vd630 lo mostra, ogni OBJ.CPTO esce con val=0x0000 perche' le avevo
