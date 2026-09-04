@@ -33,6 +33,54 @@ KINDS = {'PHY.RD': 'phy', 'RAD.RD': 'radio', 'MMIO.RD': 'mmio'}
 # un altro momento. Lasciate fuori, le gestisce il mirror.
 TABLE_PORT = {0x72, 0x73, 0x74}
 
+# I registri di comando la cui fine il sorgente del vendore legge DUE volte, e
+# b43 una. Non si deduce dalla cattura, e ci ho provato: una regola generale
+# "togli la coda duplicata di ogni poll" tocca anche 0x21a e 0x219, che nella
+# seconda cal RSSI sono otto campionamenti uguali di fila e non un poll, e
+# affamerebbe il loro piano di 416 voci. L'informazione e' semantica e va
+# dichiarata qui, una riga per registro, con la ragione.
+#
+# PHY 0x129 (IQEST_CMD): il riferimento fa SPINWAIT sul bit di start
+# (brcmsmac phy_n.c:26050) e poi lo riguarda nell'if che apre la lettura degli
+# accumulatori (26056), quindi il valore con lo start spento compare due volte in
+# ogni gruppo -- verificato, 8 gruppi su 8 in up-ch1. b43_nphy_rx_iq_est() legge
+# una volta sola, e quella lettura gli serve sia da test d'uscita sia da guardia.
+# La voce di troppo resta in coda e se la prende la chiamata dopo, che esce al
+# primo giro: 65 letture in 8 chiamate con forme 5 1 5 1 4 1 47 1, e 47 op
+# spostate nel buco a #17913.
+#
+# PHY 0x0c0 (IQLOCAL_CMD) NON e' nella lista e non ci va: i suoi 24 gruppi
+# finiscono con il valore che cambia una volta sola (0x8434 0x8434 0x8434 0x434),
+# quindi b43 e il vendore ne fanno lo stesso numero.
+POLL_DOUBLE_TAIL = {('phy', 0x129)}
+
+# Due letture della stessa cella a meno di questo numero di record sono lo stesso
+# poll. Piu' lontane sono due punti diversi del flusso che leggono lo stesso
+# registro, e la coda duplicata di uno non e' la coda dell'altro.
+POLL_GAP = 4
+
+
+def drop_double_tails(plans):
+    """Toglie la voce terminale duplicata dai poll dichiarati in POLL_DOUBLE_TAIL."""
+    for key in list(plans):
+        if key not in POLL_DOUBLE_TAIL:
+            continue
+        vals = plans[key]
+        groups = [[vals[0]]]
+        for prev, cur in zip(vals, vals[1:]):
+            if cur[0] - prev[0] <= POLL_GAP:
+                groups[-1].append(cur)
+            else:
+                groups.append([cur])
+        out = []
+        for g in groups:
+            n = 1
+            while n < len(g) and g[-1 - n][1] == g[-1][1]:
+                n += 1
+            out.extend(g[:len(g) - (n - 1)] if n > 1 else g)
+        plans[key] = out
+    return plans
+
 
 def cell_plans(path, lo, hi):
     """I piani per CELLA di tabella, dalle sole celle che li meritano.
@@ -169,7 +217,7 @@ def emit(plans, name, source, argv, reads, matched, out, cells=None):
             p('%s0x%04x,' % ('\n\t' if j % 8 == 0 else ' ', v))
         p('\n};\n')
 
-    p('\nstatic inline void b43_test_load_readplans(void)\n{\n')
+    p('\nstatic inline void b43_test_load_readplans_%s(void)\n{\n' % name)
     for (kind, addr), sym in names.items():
         fn = {'phy': 'b43_test_plan_phy_reads',
               'radio': 'b43_test_plan_radio_reads',
@@ -204,6 +252,7 @@ def main():
                                    [tuple(x) for x in args.skip])
     if not plans:
         sys.exit('nessuna read con RETVAL appaiato: e\' il trace giusto?')
+    plans = drop_double_tails(plans)
     cells = cell_plans(args.trace, lo, hi)
     argv = 'gen_readplans.py ' + ' '.join(sys.argv[1:])
     emit(plans, args.name, args.trace.split('/')[-1], argv, reads, matched,

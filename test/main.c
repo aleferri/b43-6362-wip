@@ -28,6 +28,8 @@
  * loop guidati dallo stato fanno un giro e finiscono. B43_TEST_NOPLANS=1
  * nell'ambiente li disattiva, che serve a misurare la differenza. */
 #include "readplans_init.h"
+#include "readplans_ch6.h"
+#include "readplans_ch11.h"
 /* Generato da reverse-tools/gen_seed.py: lo stato che op_init e rfkill lasciano
  * dietro, cioe" cio' che la finestra sotto misura non puo' avere. */
 #include "seed_up.h"
@@ -390,7 +392,7 @@ static int flow_init(void)
 
 	b43_test_plans_reset();
 	if (!getenv("B43_TEST_NOPLANS"))
-		b43_test_load_readplans();
+		b43_test_load_readplans_init();
 
 	/* I seed: lo stato che op_init e rfkill hanno prodotto e che la finestra
 	 * misurata non puo' avere. Si applicano DOPO l'init a freddo e prima del
@@ -498,23 +500,113 @@ static int flow_initcal(void)
 	return err;
 }
 
-/* La corsa piu' lunga che il driver permette dagli ingressi pubblici: init con
- * la cal accesa, poi il TX power control, poi un cambio canale. Serve a misurare
- * quanta parte dell'init vendor il port copre, non a riprodurre una sequenza
- * reale: sul device queste cose non arrivano una dietro l'altra. */
-static int flow_initcal(void);
-
-static int flow_full(unsigned int channel)
+/* La corsa piu' lunga che il driver permette dagli ingressi pubblici: l'init che
+ * la cattura contiene, poi il TX power control, poi un cambio canale. Parte da
+ * flow_init come chanset e txpower, non da initcal: initcal fa un init a freddo
+ * senza seed e senza il primo init non tracciato, quindi non e' l'init che la
+ * cattura contiene e non si confronta con lei.
+ *
+ * Copre op_init fino alla fine di op_switch_channel, che nella cattura sono
+ * #132-26100 per l'init e #34938-61971 per il periodo su ch6. In mezzo la
+ * cattura ha quattordici salti dell'ACI scan, che e' una politica sopra il PHY e
+ * il port non li fa: quel pezzo non e' confrontabile per costruzione.
+ */
+/* Il periodo su ch6 provato da solo. Il vendore, dopo il cambio canale,
+ * ricalibra da zero; b43 non ha niente che lo schedula, perche' il riferimento
+ * la ricalibrazione la fa arrivare dal watchdog e quel pezzo non e' portato.
+ * Qui la si fa arrivare dal banco, azzerando le chanspec di cal prima del
+ * cambio: e' la stessa cosa che flow_init fa prima dell'init tracciato, e serve
+ * a misurare se il CODICE della calibrazione sa fare il canale nuovo, che e' una
+ * domanda diversa da "chi la chiama".
+ *
+ * Con perical == 2, che e' quello che l'init lascia, chanspec_setup mette
+ * perical_pending invece di calibrare in linea, e il recalc in coda la tira:
+ * e' la stessa sequenza differita di flow_initpor.
+ */
+static int flow_chancal_from(int (*base)(void), unsigned int channel,
+			     void (*load_plans)(void), const char *tag)
 {
-	int err = flow_initcal();
+	int err = base();
 
 	if (err)
 		return err;
-	fprintf(stderr, "--- recalc_txpower ---\n");
-	b43_phyops_n.recalc_txpower(&dev, true);
+
+	dev.phy.n->iqcal_chanspec_2G.center_freq = 0;
+	dev.phy.n->txiqlocal_coeffsvalid = false;
+	dev.phy.n->txiqlocal_chanspec.center_freq = 0;
+
 	fprintf(stderr, "--- cambio a canale %u ---\n", channel);
 	set_channel(channel);
 	printf("cpu0 CHANSPEC ch=%u\n", channel);
+	err = b43_phyops_n.switch_channel(&dev, channel);
+	if (err)
+		return err;
+
+	/* E poi l'init da capo sul canale nuovo, che e' cio' che la cattura
+	 * contiene: il blocco su ch6 e' il 94% della stessa sequenza dell'init
+	 * su ch1, misurato con la sottosequenza comune piu' lunga fra i due
+	 * pezzi di cattura, 22308 op su 23649. Non e' una scorciatoia del
+	 * banco per far girare qualcosa: e' la forma che il device ha.
+	 */
+	/* I piani di lettura di up-ch1 finiscono con up-ch1. Senza quelli del
+	 * range nuovo ogni attesa cade sul mirror e gira a vuoto fino al suo
+	 * limite: misurato, 181338 letture di 0x2be in un solo poll della cal
+	 * PAPD e quattro milioni di op in tutto.
+	 */
+	b43_test_plans_reset();
+	if (!getenv("B43_TEST_NOPLANS")) {
+		load_plans();
+		fprintf(stderr, "piani di lettura %s caricati\n", tag);
+	}
+
+	fprintf(stderr, "--- init da capo su ch%u ---\n", channel);
+	err = init_once(false);
+	if (err)
+		return err;
+
+	/* Con perical == 2 l'init mette perical_pending e non calibra in linea;
+	 * il recalc e' cio' che la tira, come in flow_initpor.
+	 */
+	dev.phy.n->tx_pwr_last_recalc_freq = 0;
+	/* Il valore di ritorno e' un enum B43_TXPWR_RES_*, non un errno: 1 e'
+	 * NEED_ADJUST e non e' un errore. Come in flow_txpower, si scarta.
+	 */
+	b43_phyops_n.recalc_txpower(&dev, true);
+	return 0;
+}
+
+/* Il gemello a caldo e quello a freddo. Le due basi c'erano gia' e sono le
+ * stesse che le finestre usano: flow_txpower per la cattura opinit-*, che e' un
+ * init a caldo, e flow_initpor per full-init-*, che e' un init da power-on. Cio'
+ * che mancava era un set di piani di lettura per il range nuovo, uno per
+ * cattura, perche' quelli dell'init finiscono con l'init.
+ */
+static int flow_chancal(unsigned int channel)
+{
+	return flow_chancal_from(flow_txpower, channel,
+				 b43_test_load_readplans_ch6, "ch6");
+}
+
+static int flow_chancalpor(unsigned int channel)
+{
+	return flow_chancal_from(flow_initpor, channel,
+				 b43_test_load_readplans_ch11, "ch11");
+}
+
+static int flow_full(unsigned int channel)
+{
+	int err = flow_txpower();
+
+	if (err)
+		return err;
+	fprintf(stderr, "--- cambio a canale %u ---\n", channel);
+	set_channel(channel);
+	printf("cpu0 CHANSPEC ch=%u\n", channel);
+	/* Si ferma qui, e le sue 60 op sono quante b43 ne fa davvero al cambio
+	 * canale: la calibrazione sul canale nuovo non e' schedulata da nessuno
+	 * (vedi la voce in CLAUDE.md), quindi appendere un recalc non emette
+	 * niente. Per misurare il blocco del canale nuovo c'e' chancal.
+	 */
 	return b43_phyops_n.switch_channel(&dev, channel);
 }
 
@@ -550,7 +642,7 @@ int main(int argc, char **argv)
 	setup(b, strcmp(flow, "chanset") ? channel : 1);
 	b43_test_plans_reset();
 	if (!getenv("B43_TEST_NOPLANS")) {
-		b43_test_load_readplans();
+		b43_test_load_readplans_init();
 		fprintf(stderr, "piani di lettura caricati\n");
 	}
 
@@ -568,6 +660,10 @@ int main(int argc, char **argv)
 		err = flow_initcal();
 	else if (!strcmp(flow, "full"))
 		err = flow_full(channel > 1 ? channel : 6);
+	else if (!strcmp(flow, "chancal"))
+		err = flow_chancal(channel > 1 ? channel : 6);
+	else if (!strcmp(flow, "chancalpor"))
+		err = flow_chancalpor(channel > 1 ? channel : 11);
 	else {
 		fprintf(stderr, "flow sconosciuto: %s\n", flow);
 		return 2;

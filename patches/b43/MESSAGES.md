@@ -1,10 +1,13 @@
 # patches/b43 — messaggi della serie prima del rollup
 
 
-I ventisei messaggi della serie, estratti dai rispettivi file quando la serie e'
+I trentasei messaggi della serie, estratti dai rispettivi file quando la serie e'
 stata compressa in `rollup.diff`. Il diff sta la', questo tiene cio' che il diff
 non porta: il razionale, le misure, gli intervalli di record della cattura e i
 trailer `Link:`.
+
+**L'ordine qui sotto e' quello di scoperta, e non e' l'ordine in cui spedirle.** Per
+chi le deve rivedere sono otto serie separate, una per competenza: `SERIES.md`.
 
 Serve a due cose. Le citazioni per numero sparse nei documenti e in
 `test/phase_compare.py` sono nella forma `patches/b43/MESSAGES.md#0003` e
@@ -1427,6 +1430,438 @@ Verified: records #15296-#15310, from
 "TBL.RD   id=0x000f off=0x005f len=1"
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n24234
 Link: https://github.com/aleferri/b43-6362-wip/blob/2e298fc/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0027
+
+b43: read the two lpf bandwidth misc registers when playing samples
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: read the two lpf bandwidth misc registers when playing samples
+
+On N-PHY rev 7 and up, b43_nphy_run_samples() reads the two rf control
+override registers to find out whether the lpf bandwidth override is already
+set, and stops there. The reference reads two more and throws both values
+away, with a comment naming them: lpf_bw_ctl_miscreg3 and miscreg4.
+
+The device does the same. Of the 28 reads of 0x340 in the capture, 22 are
+preceded by exactly a read of 0x342 and a read of 0x343 - that is, every
+sample play. The remaining six belong to two other sites, the override path
+and the one that saves the registers around a temperature measurement, and
+both of those b43 already has.
+
+A discarded value is not a reason to drop the access: a read of a PHY
+register is not free of side effects, and neither the reference nor the
+capture gives any way to find out whether these two matter. They stay reads.
+
+The measurement wants a note, because the headline number goes the wrong way.
+Contiguous blocks on the up-ch1 region fall from 21110 to 19454, and the gain
+sweep of the RX IQ calibration falls from 5784 paired operations to 4112. That
+count answers "in what order", not "are they there": of the operations that
+stop being paired, the port still emits every one somewhere - they move from
+the displaced column to it, 58 to 1744 - while the absent column, which is
+the one that measures this driver, goes DOWN in every region: 403 to 366 in
+total, and 75 to 61 in the sweep itself. coverage.py over the same region is
+identical before and after, 46 PHY registers of 46 and 332 table cells of 844.
+Five phases improve: the RX IQ entry window from 57 declared divergences to
+37, the second RSSI calibration from 940 paired operations to 960 of 960, the
+idle TSSI run from 357 to 432, and the per-phase run total from 8779 to 8896.
+
+Nothing here ran on hardware.
+
+Verified: records #15843-#15847, from
+"PHY.WR   addr=0x00a1 val=0x0000"
+Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n23109
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0028
+
+b43: rewrite the second transmit filter row on the BCM6362
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: rewrite the second transmit filter row on the BCM6362
+
+b43_nphy_int_pa_set_tx_dig_filters() writes the first three rows of
+tbl_tx_filter_coef_rev4 to 0x186, 0x195 and 0x2c5, fifteen registers each, and
+then writes the second row to 0x195 a second time only when the PHY revision
+is 17.
+
+This device is N-PHY rev 8 and does it too. The capture shows the write twice
+over, at two independent points: records #304 and #334 during init, and #13874
+and #13904 at the tail of the power detector calibration. Both times the
+fifteen values are the same as the first pass, so the register file ends up in
+the same state whether the second write happens or not.
+
+Leaving it out is still wrong, and the reason is the shape rather than the
+state. The three rows are written back to back as one block of forty-five
+registers; a missing group of fifteen in the middle of it means nothing after
+that point sits where the device puts it. With the write in place the window
+that covers this function goes from fifteen operations short to matching the
+capture exactly, sixty of sixty, and the whole init region gains fifteen
+paired operations.
+
+The gate is the revision this was measured on. brcmsmac does not write 0x195
+twice in the 20 MHz path, so the capture is the only evidence, and it is not
+evidence about any other revision.
+
+Nothing here ran on hardware.
+
+Verified: records #13874-#13918, from
+"PHY.WR   addr=0x0195 val=0xffb3"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0029
+
+b43: bracket the whole power detector calibration once, not once per pass
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: bracket the whole power detector calibration once, not once per pass
+
+b43_nphy_papd_cal() turns the transmit power control off and back on around
+each pass of the engine, two passes per chain, four brackets in all. What the
+restore does is reprogramme the adjusted power table, eighty-four cells on each
+of two tables, and the capture disagrees about how often that should happen: in
+the whole region the device writes that table exactly once, at the end.
+
+The count is worth spelling out because it is the only place where it does not
+line up. Attributing each of the driver's writes to a region of the capture
+through the paired operations, so the record numbers are the capture's own
+rather than guessed:
+
+  region              device   driver
+  init                    13       13
+  power detector cal       1        8
+  receive I/Q entry        7        7
+  receive I/Q gain sweep   9        9
+  second RSSI cal          0        0
+  tail                     6        6
+
+Every region matches write for write except this one, and the seven extra are
+all here.
+
+So bracket once, around the whole calibration, and close it after the filter
+rows at the end - which is where the device writes the table, immediately after
+the last of those rows. The passes still need the control off and still get it:
+the disable only touches the table when the control is on in the hardware, so
+the brackets inside b43_nphy_txpwr_index() find the bits already clear and emit
+nothing.
+
+The comment this replaces claimed the capture opens a bracket per pass and that
+an open bracket is what lets the close reprogramme the table. The first half is
+right and the second is not: the brackets are there, and they reprogramme
+nothing.
+
+Measured, on the warm init capture: the calibration region goes from 2573 paired
+operations to 2644 of 2662, and its displaced operations - present in the driver
+but in the wrong place - from 75 to 4. The gain sweep reaches 100%. Across the
+whole window the displaced total falls from 153 to 76 and the contiguous blocks
+rise from 21239 to 21316 of 23060. Nothing regresses; the absent count does not
+move, which is the point: this changes when the driver does something, not
+whether.
+
+Nothing here ran on hardware.
+
+Verified: records #13842-#13921, from
+"PHY.MOD  addr=0x0298 val=0xf400 mask=0xff80"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0030
+
+b43: program the transmit to receive sequence a second time on the BCM6362
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: program the transmit to receive sequence a second time on the BCM6362
+
+The device programs the transmit to receive RF sequence twice during the PHY
+init, with the same seven events and the same seven delays both times, and the
+second pass comes after the auxiliary ADC tables at the end of the workarounds
+and is preceded by eight masksets on the two AFE control registers.
+
+In the capture the first pass is at records #390-#420 and the second at
+#796-#874, with the masksets at #796-#803 and the auxiliary ADC writes above
+them at #771-#789. Counting the table writes over the whole warm init window:
+the device writes table 7 offset 0x10 twice, and offset 0x90, and each of the
+nine single cells that pad the sequence; this driver writes each once. The values
+are identical between the two passes and between the device and the driver, which
+is why this shows up as missing operations rather than as wrong ones.
+
+Neither this driver nor the reference has the second pass. The masksets did
+already exist here but in the wrong pass, ahead of the first one, where the
+capture has nothing of the sort.
+
+This is the largest single hole that was left in the init. Measured on the warm
+init capture, with the operations the harness cannot emit excluded: the init
+region goes from 8217 paired operations to 8297 of 9696, and its absent ones -
+present in the capture and nowhere in the driver - from 254 to 183. Over the
+whole window the absent total falls from 332 to 261 and the contiguous blocks
+rise from 21316 to 21396 of 23060. On the cold init capture the blocks rise from
+21177 to 21257.
+
+What remains of that stretch is a separate thing and starts at #877: a readback
+sequence over 0x20 and 0x2a7, 0x21 and 0x2a8, 0x22 and 0x2a9, and the four
+shared memory writes at 0x1570-0x1576 that name 0x8f, 0xa6, 0xa5 and 0xa7 to the
+microcode. Fifty-one operations, and none of them is in this patch.
+
+Nothing here ran on hardware.
+
+Verified: records #796-#874, from
+"PHY.MOD  addr=0x00a6 val=0x0004 mask=0x0004"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0031
+
+b43: fill in the N-PHY spur workaround for the BCM6362
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: fill in the N-PHY spur workaround for the BCM6362
+
+b43_nphy_spur_workaround() is a stub: it opens and closes the carrier search
+bracket and does nothing in between. The device does something there, and it is
+the first hole in the whole initialisation - records #203 to #234, immediately
+after the write of 0x3830 to the duplicate 40 MHz data tone count, which is the
+call site.
+
+The reference emits nothing here for a 20 MHz channel on radio revision 8, and
+that is why the stub was never noticed: the analogue receive filter adjustment
+applies to PHY revisions below 7, the minimum noise variance list is empty
+outside the 40 MHz channels 3 to 10, and the carrier sense minimum power path
+only restores what an earlier adjustment saved. So the capture is the only
+voice, and both captures agree.
+
+What it does: the same value, 0x1591, into the two STR address 2 registers, then
+a readback - one pair of cells from table 7 at offset 0x106, and then twice over
+three cells of table 0 at 0x0b, 0x13 and 0x23 and the transmit/receive loss
+register.
+
+The read values are dropped. That is not a reason to leave the reads out: a read
+of a PHY register is not free of side effects, and these sit between two writes
+the device does keep.
+
+Measured on the warm init capture: the init region goes from 8297 paired
+operations to 8351 of 9696 and its absent ones from 183 to 129, so this closes
+fifty-four - the twenty-seven of its own stretch and twenty-seven more further
+on that were only unpaired because the alignment had drifted. Over the whole
+window the absent total falls from 261 to 207, the contiguous blocks rise from
+21396 to 21450 of 23060, and on the cold init capture from 21257 to 21299.
+
+Nothing here ran on hardware.
+
+Verified: records #203-#234, from
+"PHY.WR   addr=0x01df val=0x1591"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0032
+
+b43: read the gain control baseline back after the workarounds
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: read the gain control baseline back after the workarounds
+
+Once the workarounds are in, the device reads its whole gain control and carrier
+sense baseline back, between the second transmit to receive pass and the
+baseband reset that follows. Records #877 to #987, and this driver emitted
+nothing there at all: it went from #876 straight to #988.
+
+Every register read is one that the gain control workarounds and the gain
+control tables have just written - the four initial gain and clip thresholds on
+each core, the narrowband clip thresholds, the two carrier sense minimum power
+registers, the twelve energy detect carrier sense thresholds, two blocks of the
+gain table, and the master and RSSI IDAC registers on both radio cores. Reading
+back exactly what was just programmed is what a driver does before something is
+allowed to change it, and the something here is the adjacent channel
+interference scan, which the capture runs later and which this driver does not
+have.
+
+The values are dropped for now. That is not a reason to skip the reads: a read
+of a PHY register is not free of side effects, and the sequence sits between two
+things the device does keep.
+
+What is deliberately not in this patch is the rest of that stretch: the shared
+memory list at 0x1570 to 0x1576, which names 0x8f, 0xa6, 0xa5 and 0xa7 to the
+microcode, and a bit in hostflag word 4. That bit has no name in this driver nor
+in the reference, and setting an unnamed microcode flag on the strength of a
+capture alone would be a guess about firmware behaviour.
+
+Measured on the warm init capture: the init region goes from 8351 paired
+operations to 8406 of 9696, which is 99% of the operations the harness can
+compare, and its absent ones from 129 to 76. Over the whole window the absent
+total falls from 207 to 154 and the contiguous blocks rise from 21450 to 21505
+of 23060; on the cold init capture from 21299 to 21350.
+
+Nothing here ran on hardware.
+
+Verified: records #877-#987, from
+"PHY.RD   addr=0x0020 val=0x007e"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0033
+
+b43: read the four TSSI registers back before setting them up
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: read the four TSSI registers back before setting them up
+
+b43_nphy_ipa_internal_tssi_setup() writes seven radio registers per core on
+N-PHY revision 7 and up. The device reads four of them first, in this order -
+the TSSI VCM, the transmit SSI mux, and the two TSSI band registers - once per
+core: records #1251 to #1257 for core 0 and #1266 to #1272 for core 1, both
+immediately ahead of the writes.
+
+The values are dropped, which is not a reason to skip the reads: a read of a
+radio register is not free of side effects.
+
+Measured on the warm init capture: the init region goes from 8406 paired
+operations to 8414 of 9696 and its absent ones from 76 to 68.
+
+Nothing here ran on hardware.
+
+Verified: records #1251-#1257, from
+"RAD.RD   addr=0x0178 val=0x00000003"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0034
+
+b43: leave the G band TSSI register alone on the BCM6362
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: leave the G band TSSI register alone on the BCM6362
+
+In b43_nphy_ipa_internal_tssi_setup(), on the 2 GHz path, this driver writes 1
+to the G band TSSI register of each core for any PHY revision but 7, and 0x31
+for revision 7. That follows the reference exactly.
+
+The device does neither. It reads that register - the read is in the patch
+before this one - finds 2, and leaves it: records #1251 to #1281 for core 0
+contain no write of 0x17b, and none of 0x19b for core 1. The value 2 is still
+there later, when the transmit I/Q LO calibration sets 0x31 at #8537 and puts 2
+back at #10743, so nothing in between changes it either.
+
+So the capture is the only voice against the reference here, and what it says is
+not an operation out of place but a wrong value left in the radio for the whole
+initialisation. Gate the write out on the radio revision this was measured on.
+
+With this the window that covers the function matches the capture exactly, 19
+operations of 19, and the count of windows with declared divergences goes from
+six to five.
+
+Nothing here ran on hardware.
+
+Verified: records #1259-#1281, from
+"RAD.WR   addr=0x0175 val=0x0005"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0035
+
+b43: turn the transmit power control on after the indices, not before
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: turn the transmit power control on after the indices, not before
+
+On the path that turns the transmit power control on, this driver sets the
+coefficient bit and the two enable bits in one write and only then puts the saved
+power indices back. The device does the opposite: it clears the two enable bits,
+puts the indices back, and sets all three bits afterwards.
+
+Four operations, twice over in the warm init capture with the same values both
+times - #4958 to #4961 and #6330 to #6333:
+
+  clear 0xc000 of the command register, the hardware and software enables
+  the index for core 0 into the low seven bits of the same register
+  the index for core 1 into the low byte of the init register
+  set 0xe000, the two enables and the coefficient bit
+
+The order matters on its own terms and not only for the trace: as it was, the
+control ran with the previous indices for the length of two register writes.
+
+This patch does the two bit operations. The two index writes still do not
+appear, because they are gated on both saved indices differing from 128 and
+because the values this driver has there are not the ones the device writes -
+0x19 against 0xa and 0xc - which is a separate question about what the index
+save keeps.
+
+Measured on the warm init capture: the absent operations fall from 138 to 135
+and the contiguous blocks rise from 21522 to 21525 of 23060.
+
+Nothing here ran on hardware.
+
+Verified: records #4958-#4961, from
+"PHY.MOD  addr=0x01e7 val=0x0000 mask=0xc000"
+
+Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
+```
+
+## 0036
+
+b43: turn the low pass filter override off where the calibration turned it on
+
+```
+From: Alessio Ferri <alessio.ferri@mythread.it>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] b43: turn the low pass filter override off where the calibration turned it on
+
+b43_nphy_tx_cal_phy_setup() turns the low pass filter bandwidth override on and
+nothing turns it back off, so it stays on for the rest of the initialisation.
+
+The counts say it plainly. Over the warm init window the device turns that
+override on nine times and off nine times; this driver turned it on nine times
+and off eight. The pair it lost is the long one, records #8629 to #10715: the
+override goes on in the transmit I/Q LO calibration setup and comes off at the
+end of the matching cleanup, twenty-one records after the sample playback stops
+and after the rest of that cleanup has run.
+
+b43_nphy_stop_playback() cannot be the one to do it, and adding a counter there
+would be the wrong fix. That function reverts the override it owns - the one a
+sample play sets - and a single bool is enough for that. This override belongs to
+the calibration and outlives several plays: between the two records above the
+capture has exactly one playback stop, at #10693, and the override survives it.
+
+So turn it off at the end of b43_nphy_tx_cal_phy_cleanup(), where its owner
+finishes.
+
+Measured on the warm init capture: nine on and nine off on both sides now, the
+init region goes from 8416 paired operations to 8420 of 9696 and its absent ones
+from 66 to 62, and the contiguous blocks rise from 21525 to 21529 of 23060.
+
+Nothing here ran on hardware.
+
+Verified: records #10693-#10717, from
+"PHY.AND  addr=0x00c3 val=0xfffb"
 
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ```

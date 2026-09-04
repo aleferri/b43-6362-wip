@@ -65,6 +65,26 @@ CLR_OP = re.compile(r'^(PHY|RAD)\.AND\s+addr=(0x[0-9a-fA-F]+)\s+val=(0x[0-9a-fA-
 # loro (vedi docs/blob-inventory.md), quindi il marcatore si scarta.
 VENDOR_BOOKKEEPING = re.compile(r'^PHY\.ARRW\b')
 
+# Il simmetrico: op che il PORT emette e che il tracer del vendore non ha modo di
+# mostrare, perche' non aggancia la funzione che le produce. Vanno **togliate dal
+# flusso del port**, non contate a parte come fa NOT_COMPARABLE per il lato
+# vendore: il danno che fanno non e' nel denominatore, e' nell'allineamento. Il
+# confronto per finestra e' posizionale, quindi una sola op che un lato ha e
+# l'altro non puo' avere sfasa di uno tutto quello che segue e non si riallinea
+# piu' -- in `rxiq-ingresso` una PHY.CLK si portava dietro 486 divergenze su 492.
+#
+# PHY.CLK la emette b43_phy_force_clock() (wrap.c), che sul bus bcma tocca il solo
+# bit BCMA_IOCTL_FGC ed e' l'equivalente di brcms_b_phyclk_fgc(). Il tracer
+# aggancia wlc_bmac_core_phy_clk, che e' un'altra funzione: brcms_b_core_phy_clk()
+# mette il PHY in reset con PRST e GMODE, e la chiama il percorso di attach/down,
+# non il PHY. Quindi le sei phyclk_fgc di phy_n.c non compaiono in nessuna
+# cattura, e in quelle della DSL-3580L le occorrenze di PHY.CLK sono zero.
+#
+# Attenzione se un giorno si confronta contro `router-data/vd630/fullinit.txt`:
+# la' due PHY.CLK ci sono, sono entrambe val=0x1 e vengono dall'altra funzione.
+# Lo stesso nome copre due cose, e vanno separate prima di misurare quella.
+PORT_UNSHOWABLE = re.compile(r'^PHY\.CLK\b')
+
 # Op di alto livello e loro "ombra" a livello di core register: il tracer
 # vendor logga entrambe, l'harness (come il driver) solo la prima. Le ombre sono
 # la coppia addr/data del regcontrol del chipcommon e i registri GPIO; le altre
@@ -230,24 +250,45 @@ def drop_rmw_shadows(ops):
 
     b43 fa la stessa cosa con b43_radio_mask e ne registra una sola. Le due
     ombre sono artefatto di strumentazione e vanno via, come gia' si fa per le
-    SI.COREREG di PMU e GPIO. Si scartano SOLO se seguono immediatamente una MOD
-    sullo stesso indirizzo e famiglia: una RD o una WR isolata resta, perche'
-    la' e' l'op vera.
+    SI.COREREG di PMU e GPIO.
+
+    L'ombra e' la COPPIA, e si riconosce come coppia: una RD seguita da una WR
+    sullo stesso indirizzo e famiglia, subito dopo la MOD. Riconoscerla dal solo
+    prefisso non basta e non e' conservativo, perche' la lettura di una
+    read-modify-write non arriva mai da sola -- se il tracer registra la read
+    interna registra anche la write. Quindi una RD che segue una MOD e non ha una
+    WR dietro e' un'op vera e resta, e sono due i casi in cui succede:
+
+      - il poll di un registro di comando, che sta a valle della MOD che ha
+        acceso il comando (PHY 0x129, IQEST_CMD: 110 letture su up-ch1);
+      - la read della chiamata SEGUENTE, quando due chiamate della stessa
+        funzione si susseguono (PHY 0xb0, la read di b43_nphy_classifier(),
+        che dentro stay_in_carrier_search viene chiamata due volte di fila).
+
+    Una WR che segue una MOD senza read davanti si scarta: la' la read interna
+    non e' agganciata e l'unica op che resta e' la scrittura della MOD.
     """
     out = []
-    pending = None          # (famiglia, indirizzo) della MOD appena vista
-    for op in ops:
-        m = MOD_OP.match(op)
-        if m:
-            pending = (m.group(1), m.group(2))
-            out.append(op)
-            continue
-        if pending:
-            r = RD_OP.match(op) or WR_OP.match(op)
-            if r and (r.group(1), r.group(2)) == pending:
-                continue    # ombra della MOD precedente
-        pending = None
+    i, n = 0, len(ops)
+    while i < n:
+        op = ops[i]
         out.append(op)
+        i += 1
+        m = MOD_OP.match(op)
+        if not m:
+            continue
+        fam, addr = m.group(1), m.group(2)
+
+        def same(rx, j):
+            if j >= n:
+                return False
+            g = rx.match(ops[j])
+            return bool(g) and (g.group(1), g.group(2)) == (fam, addr)
+
+        if same(RD_OP, i) and same(WR_OP, i + 1):
+            i += 2
+        elif same(WR_OP, i):
+            i += 1
     return out
 
 
@@ -286,8 +327,12 @@ def load_test(path):
     out = []
     for line in open(path):
         m = TEST_LINE.match(line)
-        if m:
-            out.append(normalize_op(m.group(1)))
+        if not m:
+            continue
+        op = normalize_op(m.group(1))
+        if PORT_UNSHOWABLE.match(op):
+            continue
+        out.append(op)
     return out
 
 def find_offset(test, target_op):

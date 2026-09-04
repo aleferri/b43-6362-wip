@@ -62,6 +62,11 @@ Il repo non tiene una copia dei sorgenti del driver.
   `b43_phyops_n`. I valori della board sono decodificati dalla SROM del device.
 - `compare.py` normalizza i due lati (via timestamp, numero di record, colonna
   cpu; `PHY.OR`/`PHY.AND` unificate a `PHY.MOD`) e diffa.
+- `lcsmatch.py` appaia le due sequenze in modo **ottimo**, e non è un ornamento:
+  `difflib` cerca il blocco contiguo più lungo, non la sottosequenza comune più
+  lunga, e su `up-ch1` lascia 1686 appaiamenti sul tavolo perché sulla cal RX IQ,
+  che ripete sette volte quasi la stessa sequenza, aggancia l'iterazione sbagliata.
+  `python3 lcsmatch.py` gira i suoi test.
 
 ## Warning
 
@@ -448,6 +453,19 @@ serve la prima entry che viene dal cursore in poi invece della prossima in coda.
 Quando per un indirizzo non c'e' nessuna entry dal cursore in avanti, la read
 cade sul mirror e il contatore lo dice: prima al suo posto usciva uno zero, che e'
 la bugia piu' silenziosa possibile.
+
+Con `B43_TEST_TBLDBG=id:off` (esadecimale, senza `0x`) ogni lettura di quella cella
+esce col `backtrace()` di chi l'ha chiesta. Serve quando la stessa lettura viene da
+più siti e bisogna sapere quale è fuori posto: le nove letture del gain corrente
+(`7:110`) vengono da quattro punti diversi, e la posizione nel trace non lo dice.
+
+Con `B43_TEST_PWRCTLDBG=1` ogni scrittura della tabella di potenza aggiustata
+(`26/0x40`, 84 celle) esce con il `backtrace()` di chi l'ha chiesta, offset nel
+binario compresi, che si risolvono con `addr2line -f -e nphy_trace`. Serve perché la
+commutazione del controllo di potenza emette sempre le stesse 176 op (86 + 86 + 4) da
+qualunque dei suoi nove chiamanti arrivi, quindi la posizione nel trace non dice da
+dove venga. È così che le 75 op spostate della cal PAPD sono diventate quattro
+parentesi di troppo nel gain search della cal RX IQ.
 
 Con `B43_TEST_PLANDBG=1` ogni hit e ogni miss escono con il record servito e il
 cursore. E' quello che ha trovato il difetto vero, che non era la posizione:

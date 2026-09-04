@@ -24,6 +24,7 @@
  */
 
 #include <stdio.h>
+#include <execinfo.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -802,11 +803,52 @@ u32 __wrap_b43_ntab_read(struct b43_wldev *dev, u32 offset)
 	}
 }
 
+/* Chi ha chiesto questo accesso, per sito di chiamata. La posizione nel trace non
+ * basta quando la stessa op viene da piu' punti: il controllo di potenza emette le
+ * stesse 176 op da nove chiamanti diversi, e le nove letture del gain corrente
+ * vengono da sei siti. Gli offset si risolvono con addr2line -e nphy_trace.
+ *
+ * __builtin_return_address(1) non si puo' usare, -Wframe-address lo rifiuta e qui
+ * si compila con -Werror; backtrace_symbols() da' anche l'offset nel binario, che
+ * con PIE e' cio' che serve.
+ */
+static void who(const char *tag)
+{
+	void *bt[8];
+	int n = backtrace(bt, 8);
+	char **sym = backtrace_symbols(bt, n);
+	int k;
+
+	fprintf(stderr, "%s", tag);
+	for (k = 2; k < n && sym; k++) {
+		const char *p = strchr(sym[k], '+');
+
+		fprintf(stderr, " %s", p ? p : sym[k]);
+	}
+	fprintf(stderr, "\n");
+	free(sym);
+}
+
 void __wrap_b43_ntab_read_bulk(struct b43_wldev *dev, u32 offset,
 			       unsigned int nr_elements, void *_data)
 {
+	const char *want = getenv("B43_TEST_TBLDBG");
+
 	fprintf(trace(), "cpu0 TBL.RD   id=0x%04x off=0x%04x len=%u\n",
 		ntab_id(offset), ntab_off(offset), nr_elements);
+
+	/* B43_TEST_TBLDBG=id:off, in esadecimale senza 0x, stampa chi legge
+	 * quella cella. Serve quando la stessa lettura viene da piu' siti e
+	 * bisogna sapere quale e' fuori posto.
+	 */
+	if (want) {
+		unsigned int id = 0, off = 0;
+
+		if (sscanf(want, "%x:%x", &id, &off) == 2 &&
+		    ntab_id(offset) == id && ntab_off(offset) == off)
+			who("tblrd");
+	}
+
 	in_ntab = 1;
 	__real_b43_ntab_read_bulk(dev, offset, nr_elements, _data);
 	in_ntab = 0;
@@ -827,6 +869,18 @@ void __wrap_b43_ntab_write_bulk(struct b43_wldev *dev, u32 offset,
 {
 	fprintf(trace(), "cpu0 TBL.WR   id=0x%04x off=0x%04x len=%u\n",
 		ntab_id(offset), ntab_off(offset), nr_elements);
+
+	/* Chi scrive la tabella di potenza aggiustata, per sito di chiamata.
+	 * Serve perche' il port ne fa 43 scritture dove il vendore ne fa 36 e
+	 * la posizione nel trace non dice da dove arrivano: la commutazione del
+	 * controllo di potenza emette sempre le stesse 176 op (86+86+4) da
+	 * qualunque dei suoi nove chiamanti venga. Gli indirizzi si risolvono
+	 * con addr2line -e nphy_trace.
+	 */
+	if (getenv("B43_TEST_PWRCTLDBG") && ntab_id(offset) == 26 &&
+	    ntab_off(offset) == 64 && nr_elements == 84)
+		who("pwrtbl");
+
 	tbl_mirror_set_bulk(offset, nr_elements, _data);
 	in_ntab = 1;
 	__real_b43_ntab_write_bulk(dev, offset, nr_elements, _data);
