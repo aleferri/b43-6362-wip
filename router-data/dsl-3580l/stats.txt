@@ -1,0 +1,128 @@
+# wl -i wl0 curpower
+Power Control:         On, HW
+Current Channel:       1
+BSS Channel:           1
+BSS Local Max:         20.0 dBm
+BSS Local Constraint:  0.0 dB
+Channel Width:         20MHz
+User Target:           31.75 dBm
+SROM Antgain 2G:       2.0 dB
+SROM Antgain 5G:       2.0 dB
+SAR:                   -
+Current rate:          [MCS15] ht mcs 15 Tx Exp 0 BW 20 sgi
+
+Regulatory Limits:
+Rate                  Chains 20MHz
+DSSS                   1     17.0
+OFDM                   1     17.0
+MCS0_7                 1     17.0
+VHT8_9SS1              1     17.0
+DSSS_MULTI1            2     14.0
+OFDM_CDD1              2     14.0
+MCS0_7_CDD1            2     14.0
+VHT8_9SS1_CDD1         2     14.0
+MCS0_7_STBC            2     14.0
+VHT8_9SS1_STBC         2     14.0
+MCS8_15                2     14.0
+VHT8_9SS2              2     14.0
+DSSS_MULTI2            3     12.25
+OFDM_CDD2              3     12.25
+MCS0_7_CDD2            3     12.25
+VHT8_9SS1_CDD2         3     12.25
+MCS0_7_STBC_SPEXP1     3     12.25
+VHT8_9SS1_STBC_SPEXP1  3     12.25
+MCS8_15_SPEXP1         3     12.25
+VHT8_9SS2_SPEXP1       3     12.25
+MCS16_23               3     12.25
+VHT8_9SS3              3     12.25
+OFDM_TXBF1             2     11.0
+MCS0_7_TXBF1           2     11.0
+VHT8_9SS1_TXBF1        2     11.0
+MCS8_15_TXBF0          2     14.0
+OFDM_TXBF2             3      7.50
+MCS0_7_TXBF2           3      7.50
+VHT8_9SS1_TXBF2        3      7.50
+MCS8_15_TXBF1          3     10.50
+VHT8_9SS2_TXBF1        3     10.50
+MCS16_23_TXBF0         3     12.25
+
+Core Index:            0
+Board Limits:
+Rate                  Chains 20MHz
+DSSS                   1     18.50
+OFDM                   1     16.50
+MCS0_7                 1     16.50
+VHT8_9SS1              1     -
+DSSS_MULTI1            2     18.50
+OFDM_CDD1              2     15.50
+MCS0_7_CDD1            2     15.50
+VHT8_9SS1_CDD1         2     -
+MCS0_7_STBC            2     15.50
+VHT8_9SS1_STBC         2     -
+MCS8_15                2     15.50
+VHT8_9SS2              2     -
+DSSS_MULTI2            3     -
+OFDM_CDD2              3     -
+MCS0_7_CDD2            3     -
+VHT8_9SS1_CDD2         3     -
+MCS0_7_STBC_SPEXP1     3     -
+VHT8_9SS1_STBC_SPEXP1  3     -
+MCS8_15_SPEXP1         3     -
+VHT8_9SS2_SPEXP1       3     -
+MCS16_23               3     -
+VHT8_9SS3              3     -
+OFDM_TXBF1             2     -
+MCS0_7_TXBF1           2     -
+VHT8_9SS1_TXBF1        2     -
+MCS8_15_TXBF0          2     -
+OFDM_TXBF2             3     -
+MCS0_7_TXBF2           3     -
+VHT8_9SS1_TXBF2        3     -
+MCS8_15_TXBF1          3     -
+VHT8_9SS2_TXBF1        3     -
+MCS16_23_TXBF0         3     -
+
+Power Targets:
+Rate                  Chains 20MHz
+DSSS                   1     15.50
+OFDM                   1     15.0
+MCS0_7                 1     15.0
+VHT8_9SS1              1      8.0
+DSSS_MULTI1            2     12.50
+OFDM_CDD1              2     12.50
+MCS0_7_CDD1            2     12.50
+VHT8_9SS1_CDD1         2      8.0
+MCS0_7_STBC            2     12.50
+VHT8_9SS1_STBC         2      8.0
+MCS8_15                2     12.50
+VHT8_9SS2              2      8.0
+DSSS_MULTI2            3      8.0
+OFDM_CDD2              3      8.0
+MCS0_7_CDD2            3      8.0
+VHT8_9SS1_CDD2         3      8.0
+MCS0_7_STBC_SPEXP1     3      8.0
+VHT8_9SS1_STBC_SPEXP1  3      8.0
+MCS8_15_SPEXP1         3      8.0
+VHT8_9SS2_SPEXP1       3      8.0
+MCS16_23               3      8.0
+VHT8_9SS3              3      8.0
+OFDM_TXBF1             2      8.0
+MCS0_7_TXBF1           2      8.0
+VHT8_9SS1_TXBF1        2      8.0
+MCS8_15_TXBF0          2      8.0
+OFDM_TXBF2             3      8.0
+MCS0_7_TXBF2           3      8.0
+VHT8_9SS1_TXBF2        3      8.0
+MCS8_15_TXBF1          3      8.0
+VHT8_9SS2_TXBF1        3      8.0
+MCS16_23_TXBF0         3      8.0
+
+Maximum Power Target among all rates:   15.50  15.50
+Last est. power                     :    0.00  15.75
+Power Target for the current rate   :   15.50  15.50
+Last adjusted est. power            :    0.00  15.75
+# wl -i wl0 phy_txpwrindex
+txpwrindex for core{0...3}: 10 12 0 0
+
+# wl -i wl0 phy_rxiqest
+-66dBm -66dBm
