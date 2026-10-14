@@ -1,99 +1,101 @@
-# Il trace di init 2.4 GHz della DSL-3580L
+# The DSL-3580L 2.4 GHz init trace
 
-Cattura con `wl-diag-2630` sul firmware stock, blob `wl 6.30.102.7`, radio
-integrato del BCM6362 (N-PHY rev 8, radio 2057 rev 8), 2.4 GHz bw20.
+Captured with `wl-diag/2-6-30` on the stock firmware, blob `wl 6.30.102.7`,
+integrated radio of the BCM6362 (N-PHY rev 8, radio 2057 rev 8), 2.4 GHz bw20.
 
-Il flow sono **due cicli `wl down` / `wl up`**, non un attach: il primo con
-canale operativo 1, il secondo con canale operativo 6. Fra i due, 15 s di radio
-giù. In entrambi i cicli il driver esce dal canale operativo ogni 2 s — a ch5 nel
-primo, a ch2 e ch10 nel secondo — e rientra subito.
+The flow is **two `wl down` / `wl up` cycles**, not an attach: the first with
+operating channel 1, the second with operating channel 6. Between the two, 15 s
+of radio down. In both cycles the driver leaves the operating channel every 2 s
+— to ch5 in the first, to ch2 and ch10 in the second — and comes straight back.
 
-Il dato sta in `router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded`, decodificato;
-il binario non è nel repo (vedi il verbale accanto per sha256 e verifica di non
-perdita).
+The data is in `router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded`, decoded; the
+binary is not in the repository (see the record next to it for the sha256 and
+the no-loss check).
 
-## Qualità della cattura
+## Quality of the capture
 
-70796 record, 39.8 s, **zero `OP_DROP` e zero discontinuità di sequenza**:
-niente perdite, quindi il confronto posizionale col port è lecito.
+70796 records, 39.8 s, **zero `OP_DROP` and zero sequence discontinuities**: no
+loss, so the positional comparison with the port is legitimate.
 
-| record | contenuto |
+| records | contents |
 |---|---|
-| 1 - 131 | init radio iniziale (45 `RAD.WR`) |
-| 132 - 26100 | primo `up`, canale 1: init PHY completo (16834 `PHY.WR`, 771 `TBL.WR`) |
-| 26101 - 34156 | 7 escursioni a ch5 e ritorno |
-| 34157 - 34937 | `down` e 15 s di attesa: 781 record, `GPIO.CTL`/`GPIO.OUT`, 15 `MAC.MCTRL` |
-| 34938 - 61971 | secondo `up`, canale 6: init PHY completo (16855 `PHY.WR`, 775 `TBL.WR`) |
-| 61972 - 70796 | 5 cicli ch2 / ch10 / ch6 |
+| 1 - 131 | initial radio init (45 `RAD.WR`) |
+| 132 - 26100 | first `up`, channel 1: complete PHY init (16834 `PHY.WR`, 771 `TBL.WR`) |
+| 26101 - 34156 | 7 excursions to ch5 and back |
+| 34157 - 34937 | `down` and 15 s of waiting: 781 records, `GPIO.CTL`/`GPIO.OUT`, 15 `MAC.MCTRL` |
+| 34938 - 61971 | second `up`, channel 6: complete PHY init (16855 `PHY.WR`, 775 `TBL.WR`) |
+| 61972 - 70796 | 5 cycles ch2 / ch10 / ch6 |
 
-**Due sequenze di init, non una.** Averne due su canali operativi diversi è la
-cosa più utile della cattura: permette di distinguere ciò che dipende dal canale
-da ciò che è fisso.
+**Two init sequences, not one.** Having two on different operating channels is
+the most useful thing about the capture: it tells what depends on the channel
+from what is fixed.
 
-Istogramma: 38616 `PHY.WR`, 11049 `RETVAL`, 9410 `PHY.RD`, 2314 `OBJ.WR`, 1901
+Histogram: 38616 `PHY.WR`, 11049 `RETVAL`, 9410 `PHY.RD`, 2314 `OBJ.WR`, 1901
 `PHY.MOD`, 1606 `TBL.WR`, 1314 `RAD.WR`, 1251 `OBJ.RD`, 856 `PHY.OR`, 781
-`PHY.AND`, 570 `TBL.RD`, 332 `RAD.RD`, 223 `PHY.ARRW`, 184 `RAD.MOD`, più i
-marcatori.
+`PHY.AND`, 570 `TBL.RD`, 332 `RAD.RD`, 223 `PHY.ARRW`, 184 `RAD.MOD`, plus the
+markers.
 
-## Cosa ha risolto sul tracer
+## What it settled about the tracer
 
-Tre incertezze che erano annotate come tali nel codice del tracer:
+Three uncertainties that were noted as such in the tracer's code:
 
-- **`phy_reg_write_array`**: il secondo argomento è il numero di **word**, non
-  di record. `#5 PHY.ARRW val=0x000c` seguito da 4 `PHY.WR` → 12 word, record da
-  3 word. E la scelta di agganciarla come solo marcatore è confermata giusta:
-  tutte le op che ne discendono sono nel trace via gli accessor.
-- **ordine `len`/`off` in `wlc_phy_table_write_nphy`**: risolto. Gli offset
-  osservati (0x00, 0x04, 0x08, 0x20, 0x10, 0x1c) e le lunghezze (1, 2, 4, 10)
-  hanno senso solo nell'assegnazione attuale del decoder; invertite darebbero
+- **`phy_reg_write_array`**: the second argument is the number of **words**, not
+  of records. `#5 PHY.ARRW val=0x000c` followed by 4 `PHY.WR` → 12 words,
+  3-word records. And the choice of hooking it as a marker only is confirmed
+  right: every op that follows from it is in the trace through the accessors.
+- **`len`/`off` order in `wlc_phy_table_write_nphy`**: settled. The offsets
+  observed (0x00, 0x04, 0x08, 0x20, 0x10, 0x1c) and the lengths (1, 2, 4, 10)
+  make sense only in the decoder's current assignment; swapped, they would give
   `len=0`.
-- **`si_pmu_spuravoid`, `and_radio_reg`, `or_radio_reg`**: **zero** record in
-  tutta la cattura, e zero record PMU di qualsiasi tipo. Su questo SoC il
-  clocking non passa dal PMU bcma, quindi è coerente; gli hook restano perché
-  non costano nulla, ma non aspettarsi record da lì.
+- **`si_pmu_spuravoid`, `and_radio_reg`, `or_radio_reg`**: **zero** records in
+  the whole capture, and zero PMU records of any kind. On this SoC the clocking
+  does not go through the bcma PMU, so it is consistent; the hooks stay because
+  they cost nothing, but no records are to be expected from there.
 
-## Cosa ha confermato del kernel
+## What it confirmed about the kernel
 
-**La chantab merged è quella giusta, su tutti i canali che la cattura tocca.**
-`reverse-tools/verify_chantab_trace.py` confronta i 18 campi della variante 2.4
-GHz per ogni `CHANSPEC`: **31 cambi canale su 31, zero differenze**, sui cinque
-canali presenti (1, 2, 5, 6, 10), con gli stessi valori e nello stesso ordine in
-cui `b43_radio_2057_chantab_upload()` li scrive. Per esempio al passaggio a ch5:
+**The merged chantab is the right one, on every channel the capture touches.**
+`reverse-tools/verify_chantab_trace.py` compares the 18 fields of the 2.4 GHz
+variant for every `CHANSPEC`: **31 channel changes out of 31, zero
+differences**, on the five channels present (1, 2, 5, 6, 10), with the same
+values and in the same order in which `b43_radio_2057_chantab_upload()` writes
+them. For example on the change to ch5:
 
     016=55 017=16 022=30 025=1b 027=0a 028=0a 029=30 02c=80 02d=09
     037=0f 041=09 047=06 05c=61 05e=73 09a=f0 0e1=61 0e3=73 11f=f0
 
-Include `R1=0x1b`, `C1=C2=0x0a`, `CP_KPD_IDAC=0x30`, cioè la conferma sul
-silicio che il `case 8` mancante in `b43_radio_2057_setup()` è un no-op (vedi
-`gap-inventory.md`, voce 2), e la conferma vale su cinque canali diversi, non su
-uno.
+That includes `R1=0x1b`, `C1=C2=0x0a`, `CP_KPD_IDAC=0x30`, i.e. the confirmation
+on silicon that the missing `case 8` in `b43_radio_2057_setup()` is a no-op (see
+`gap-inventory.md`, entry 2), and the confirmation holds on five different
+channels, not on one.
 
-## Cosa ha corretto
+## What it corrected
 
-**I valori del gain control non sono quelli di brcmsmac.** La prima bozza della
-patch veniva da `wlc_phy_workarounds_nphy_gainctrl_2057_rev6`; il device fa
-altro:
+**The gain control values are not brcmsmac's.** The first draft of the patch
+came from `wlc_phy_workarounds_nphy_gainctrl_2057_rev6`; the device does
+otherwise:
 
-| cosa | brcmsmac | device |
+| what | brcmsmac | device |
 |---|---|---|
 | LNA1 gain | 9, 14, 19, 24 | **8, 13, 18, 25** |
 | W1 clip (0x300/0x301) | 13 | **24** |
-| 0x283 | 0x40, poi 0x44 dal dispatcher | **solo 0x44** |
-| LNA2, TIA gain, TIA gain bits in 2.4 GHz | non scritti | **scritti** |
+| 0x283 | 0x40, then 0x44 from the dispatcher | **0x44 only** |
+| LNA2, TIA gain, TIA gain bits at 2.4 GHz | not written | **written** |
 
-Il ramo 2 GHz di brcmsmac è più povero di quello che il blob 6.30 esegue: LNA2
-(`fc 06 0a 0f`), TIA gain (`ff 00 03 06...`) e i gain bits (`00 01 02 03...`)
-vengono programmati, e ci sono anche i clip1 low gain code (0x37/0x2ad = 0x74,
-0x38/0x2ae = 0x18). `patches/b43/MESSAGES.md#0001` è stata riscritta su questi numeri.
+brcmsmac's 2 GHz branch is poorer than what the 6.30 blob runs: LNA2
+(`fc 06 0a 0f`), TIA gain (`ff 00 03 06...`) and the gain bits (`00 01 02 03...`)
+are programmed, and there are also the clip1 low gain codes
+(0x37/0x2ad = 0x74, 0x38/0x2ae = 0x18). `patches/b43/MESSAGES.md#0001` was
+rewritten on these numbers.
 
-I due init danno lo stesso blocco identico — stessi registri, stessi valori,
-stesso ordine, a #685-#770 con canale operativo 1 e a #35491-#35576 con canale
-operativo 6. Quindi questi valori **non dipendono dal canale**, ed è lecito
-inchiodarli in C come fa la patch.
+The two inits give the same identical block — same registers, same values, same
+order, at #685-#770 with operating channel 1 and at #35491-#35576 with operating
+channel 6. So these values **do not depend on the channel**, and it is legitimate
+to hard-code them in C as the patch does.
 
-## Cosa ha trovato di nuovo
+## What it found that was new
 
-Sul cambio canale il vendore scrive **dieci registri in più**, tutti a zero:
+On the channel change the vendor writes **ten more registers**, all to zero:
 
     0x043 LOGEN_MX5G_TUNE          0x04a LOGEN_INDBUF5G_TUNE
     0x070 PGA_BOOST_TUNE_CORE0     0x0f5 PGA_BOOST_TUNE_CORE1
@@ -101,33 +103,32 @@ Sul cambio canale il vendore scrive **dieci registri in più**, tutti a zero:
     0x074 PAD5G_TUNE_MISC_PUS_CORE0 0x0f9 PAD5G_TUNE_MISC_PUS_CORE1
     0x0a0 LNA5G_TUNE_CORE0         0x125 LNA5G_TUNE_CORE1
 
-Sono i campi 5 GHz e PGA della entry **dual band**: il vendore usa il record da
-44 byte anche in 2.4 GHz e azzera la parte 5 GHz, mentre b43 usa la variante
-`chantabent_rev7_2g` e quei registri non li tocca affatto.
+They are the 5 GHz and PGA fields of the **dual-band** entry: the vendor uses the
+44-byte record at 2.4 GHz too and clears the 5 GHz part, while b43 uses the
+`chantabent_rev7_2g` variant and does not touch those registers at all.
 
-**SALAME**: che lasciarli al valore precedente abbia un effetto misurabile
-(corrente, perdite dal ramo 5 GHz) è un'ipotesi, non un dato. Prima di toccare
-il percorso condiviso di `chantab_upload`, che riguarda anche altri device,
-serve una misura. Voce aperta, non patch.
+**SALAME**: that leaving them at their previous value has a measurable effect
+(current, leakage from the 5 GHz branch) is a hypothesis, not data. Before
+touching the shared path of `chantab_upload`, which concerns other devices too,
+a measurement is needed. Open entry, not a patch.
 
-## Da catturare ancora
+## Still to capture
 
-Nota sul 40 MHz, che nell'elenco non c'è per un motivo: su questa board il driver
-vendor non usa i 40 MHz in 2.4 GHz, 31 chanspec su 31 sono bw20. I rami HT40 del
-driver non si verificano qui nemmeno volendo, serve hardware diverso — e nei
-commenti del codice va scritto così, non come "manca la cattura", che suona come
-se non ci avessimo provato.
+A note on 40 MHz, which is not in the list for a reason: on this board the
+vendor driver does not use 40 MHz at 2.4 GHz, 31 chanspecs out of 31 are bw20.
+The driver's HT40 branches cannot be verified here even if one wanted to,
+different hardware is needed — and code comments have to say it that way, not
+as "the capture is missing", which sounds as if nobody had tried.
 
+- `cal`: `wl phy_forcecal 1`, for rcal/rccal/tx iq-lo/papd.
+- a complete round of channels 1-13: there are five here (1, 2, 5, 6, 10) and on
+  those nothing depends on the channel beyond the chantab, but 13 and 14 remain
+  to be seen (spuravoid, for example, which never shows up here).
+- the cold init **again, without the hole**: the one there is
+  (`full-init-ch1-bw20.decoded`, 81397 records) loses 65285 records between
+  `#32769` and `#98055` to a FIFO overflow, so only `#2-32769` can be compared
+  positionally. Its record says how to take it again.
 
-- `cal`: `wl phy_forcecal 1`, per rcal/rccal/tx iq-lo/papd.
-- un giro completo dei canali 1-13: qui ce ne sono cinque (1, 2, 5, 6, 10) e su
-  quelli nulla dipende dal canale oltre alla chantab, ma 13 e 14 restano da
-  vedere (spuravoid, per esempio, che qui non compare mai).
-- l'init a freddo **di nuovo, senza il buco**: quello che c'è
-  (`full-init-ch1-bw20.decoded`, 81397 record) perde 65285 record fra `#32769` e
-  `#98055` per overflow della fifo, quindi solo `#2-32769` è confrontabile
-  posizionalmente. Il verbale dice come rifarla.
-
-I valori letti nei punti di decisione ci sono già: `skipphyrd` era vuoto in
-entrambe le catture e i `RETVAL` sono attivi (11049 qui, 11795 nella cattura a
-freddo), da cui i piani di lettura dell'harness — 2089 read appaiate su 2089.
+The values read at the decision points are already there: `skipphyrd` was
+empty in both captures and the `RETVAL`s are on (11049 here, 11795 in the cold
+capture), from which the harness's read plans — 2089 reads paired out of 2089.
