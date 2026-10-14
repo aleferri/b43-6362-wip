@@ -1,51 +1,61 @@
-# La serie resta un file solo, e il confine sta nella storia
+# The series stays unsplit, and the boundary lives in the history
 
-Le dodici di `patches/mainline/` sono file separati perché partono presto: sono
-difetti di mainline, corti, indipendenti da questo hardware, e vanno in dodici thread.
+The twelve in `patches/mainline/` are separate files because they leave early:
+they are mainline defects, short, independent of this hardware, and they go in
+twelve threads.
 
-Tutto il resto no. Il supporto al BCM6362 non parte finché la SPROM non ha una strada
-upstream (`docs/upstreaming.md`), quindi tenere trentasei file per una serie che si
-spedisce fra mesi costa e non rende: si desincronizzano. **È già successo.**
+Everything else does not. BCM6362 support does not leave until the SPROM has a
+road upstream (`docs/upstreaming.md`), so keeping thirty-six files for a series
+that ships in months costs and gives nothing back: they drift. **It has
+already happened.**
 
-## Cosa è già costato
+## What it has already cost
 
-I ventisei file per patch sono esistiti, fino a `394c9e2`. Sono ancora in storia e si
-estraggono, ma **non sono usabili**: applicati su `848acc8ffe1b` più le dodici mainline
-lasciano l'albero a **718 righe e 37 hunk** dal rollup, perché `rollup.diff` è stato
-rigenerato tre volte dopo che quei file erano stati cancellati e le modifiche di quei
-giri stanno solo nel rollup. I file c'erano e mentivano, che è peggio del non averli.
+The twenty-six per-patch files existed until `394c9e2`. They are still in the
+history and can be extracted, but **they are not usable**: applied on
+`848acc8ffe1b` plus the twelve mainline patches they leave the tree **718 lines
+and 37 hunks** away from the series, because `rollup.diff` was regenerated three
+times after those files had been deleted, and the changes of those rounds were
+only in the rollup. The files were there and lied, which is worse than not
+having them.
 
-## La regola, che costa niente
+## The rule, which costs nothing
 
-**Un commit per patch, con la sua voce di `MESSAGES.md` nello stesso commit.**
+**One commit per patch, with its `MESSAGES.md` entry in the same commit.**
 
-Il confine per patch sta lì, non in una directory, e `scripts/patch-from-commit.sh` lo
-tira fuori quando serve: per un commit su `b43/` è il diff del commit coi percorsi
-del kernel; per un commit della storia di prima, quando la serie stava in
-`rollup.diff`, applica il rollup di `<commit>^` e quello di `<commit>` a due copie
-dell'albero pinnato e diffa i risultati.
+The per-patch boundary lives there, not in a directory, and
+`scripts/patch-from-commit.sh` extracts it when needed: for a commit on `b43/`
+it is the commit's diff with the kernel paths; for a commit from before, when
+the series was in `rollup.diff`, it applies the rollup of `<commit>^` and that
+of `<commit>` to two copies of the pinned tree and diffs the results.
 
 ```sh
 sh scripts/patch-from-commit.sh <commit> ~/src/pin > 00NN.patch
 ```
 
-Verificato: sui nove commit da `0027` a `0036` lo script dà esattamente le dieci patch,
-e applicate in sequenza sopra il rollup di partenza danno un albero **identico byte per
-byte** a quello del rollup di arrivo. `0033` e `0034` stavano in un commit solo e vanno
-divise a mano — un commit che porta due patch è l'unico modo di rompere la regola.
+## What the published history holds
 
-Da `96a5a4c` in poi la storia rispetta la regola. Prima no: `progress`, `advance`,
-`reorg` sono commit grossi, quindi per `0001`-`0026` il confine **è perso** e nessuno
-strumento lo recupera.
+This file used to say that `0027` to `0036` were one commit each, nine commits
+in all with `0033` and `0034` together, and that the script, run on them, gave
+exactly the ten patches and a tree identical to the final rollup. That was
+measured on a history that is not the one published: at `054601d` the ten
+patches arrive together in `a608a33` ("patches reorg", 22 files, +5834 lines),
+after `96a5a4c`, whose `MESSAGES.md` has twenty-six entries. **SALAME**: the
+per-patch commits exist in a local clone that was squashed before pushing.
+If so, pushing them is what makes the split below a command; if not, `0027`
+to `0036` are in the same state as `0001` to `0026`.
 
-## Quando si dividerà per davvero
+Before `96a5a4c`, `progress`, `advance` and `reorg` are big commits, so for
+`0001`-`0026` the boundary **is lost** and no tool recovers it.
 
-`SERIES.md` ha il piano: otto serie per competenza, con l'ordine e i sei punti dove due
-serie si contendono la stessa funzione.
+## When it is really split
 
-Per le patch dal `0027` in poi la divisione è un comando. Per le ventisei sono **37
-giudizi** su altrettanti hunk di deriva, e nessun controllo automatico li valida: il
-confronto dell'albero finale passa anche con le modifiche attribuite alla patch
-sbagliata. Se quel lavoro non vale la pena, l'alternativa legittima è mandarle come una
-serie sola divisa per competenza e non per scoperta, che è comunque quello che serve a
-chi le rivede.
+`SERIES.md` has the plan: eight series by area, with the order and the six
+places where two series contend for the same function.
+
+For the patches whose commit exists, the split is a command. For the others
+there are **37 judgements** on as many drift hunks, and no automatic check
+validates them: comparing the final tree passes even with changes attributed
+to the wrong patch. If that work is not worth it, the legitimate alternative is
+to send them as a single series split by area rather than by discovery, which
+is what reviewers need anyway.

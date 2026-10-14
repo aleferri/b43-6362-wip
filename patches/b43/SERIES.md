@@ -1,92 +1,94 @@
-# patches/b43 — come dividere le trentasei
+# patches/b43 — how to split the thirty-six
 
-Questo è un **piano per quando si spedirà**, non qualcosa da fare ora: la serie resta
-indivisa in `b43/` finché la SPROM non ha una strada upstream, e il perché sta in `SPLIT.md`.
+This is a **plan for when it ships**, not something to do now: the series stays
+unsplit in `b43/` until the SPROM has a road upstream, and why is in `SPLIT.md`.
 
-Trentasei patch in un thread non si leggono. `MESSAGES.md` le tiene in ordine di
-scoperta, che è l'ordine in cui sono state trovate e non l'ordine in cui hanno senso
-per chi le deve guardare. Questa è la divisione per competenza: **otto serie**, ognuna
-di una cosa sola, ognuna mandabile per conto suo.
+Thirty-six patches in one thread do not get read. `MESSAGES.md` keeps them in
+order of discovery, which is the order they were found in and not the order
+that makes sense to whoever reviews them. This is the split by area: **eight
+series**, each about one thing, each sendable on its own.
 
-Il criterio è chi la deve rivedere. Una serie di sole tabelle si controlla contro il
-blob e la SPROM; una di calibrazione vuole qualcuno che sappia cosa fa quella
-calibrazione. Mescolarle costringe la stessa persona a fare entrambe le cose.
+The criterion is who has to review it. A series of tables only is checked
+against the blob and the SPROM; a calibration one wants someone who knows what
+that calibration does. Mixing them makes the same person do both.
 
-## A — dati del radio 2057 rev 8 (5)
+## A — radio 2057 rev 8 data (5)
 
 `0013` `0002` `0005` `0011` `0003`
 
-Tabelle e valori di registro, nessun algoritmo. Si rivede contro il blob OEM e la
-SPROM, con `reverse-tools/blob_tables.py`, e non richiede di sapere niente delle
-calibrazioni. È la serie da mandare per prima: tutto il resto ne dipende per i dati e
-niente ne dipende per il codice.
+Tables and register values, no algorithm. Reviewed against the OEM blob and the
+SPROM, with `reverse-tools/blob_tables.py`, and needs no knowledge of the
+calibrations. It is the series to send first: everything else depends on it for
+data and nothing depends on it for code.
 
-## B — workaround dell'init e soglie RX (6)
+## B — init workarounds and RX thresholds (6)
 
 `0001` `0008` `0030` `0031` `0032` `0007`
 
-Quello che l'init programma una volta e non tocca più: gain control RX, soglie di
-carrier sense, la sequenza RF, lo spur workaround che era uno stub. Tutto dentro
-`b43_nphy_workarounds_rev7plus()` e vicini.
+What the init programs once and never touches again: RX gain control, carrier
+sense thresholds, the RF sequence, the spur workaround that was a stub. All
+inside `b43_nphy_workarounds_rev7plus()` and neighbours.
 
-## C — sample play e filtri di trasmissione (6)
+## C — sample play and transmit filters (6)
 
 `0010` `0022` `0027` `0028` `0036` `0026`
 
-Il tono che ogni calibrazione usa come stimolo: generazione della tabella dei
-campioni, la modalità del DAC test, gli override di banda del filtro e le righe dei
-filtri digitali. `0010` è anche una delle dodici di `patches/mainline/` e qui c'è la
-parte che dipende da questo hardware.
+The tone every calibration uses as its stimulus: generation of the sample
+table, the DAC test mode, the filter band overrides and the rows of the digital
+filters. `0010` is also one of the twelve in `patches/mainline/`, and here is
+the part that depends on this hardware.
 
-## D — controllo di potenza TX e TSSI (5)
+## D — TX power control and TSSI (5)
 
 `0033` `0034` `0035` `0021` `0025`
 
-Il TSSI setup, l'ordine fra abilitazione e indici, il ritorno dell'indice di potenza.
-`0034` è l'unica della serie che va contro il riferimento: la cattura è l'unica voce.
+The TSSI setup, the order between enabling and indices, the return of the power
+index. `0034` is the only one of the series that goes against the reference: the
+capture is the only voice for it.
 
-## E — calibrazione PAPD (6)
+## E — PAPD calibration (6)
 
 `0004` `0009` `0012` `0015` `0020` `0029`
 
-Il rivelatore di potenza: tabelle, offset epsilon, il giro del motore, la parentesi
-del controllo di potenza.
+The power detector: tables, epsilon offset, the engine's round, the power
+control bracket.
 
-## F — calibrazione RX I/Q (3)
+## F — RX I/Q calibration (3)
 
 `0016` `0018` `0023`
 
-Passaggio del PHY alla calibrazione, sweep dei gain, misura del tono e calcolo dei
-coefficienti.
+Switching the PHY to the calibration, the gain sweep, measuring the tone and
+computing the coefficients.
 
-## G — macchina della calibrazione periodica (4)
+## G — the periodic calibration machine (4)
 
 `0014` `0017` `0019` `0024`
 
-L'orchestrazione: chi lancia la calibrazione, se piena o parziale, il gain
-d'ingresso, la coda. Non calibra niente lei, decide chi calibra.
+The orchestration: who starts the calibration, full or partial, the input gain,
+the tail. It calibrates nothing itself, it decides who calibrates.
 
-## H — rumore di fondo (1)
+## H — noise floor (1)
 
 `0006`
 
-Sta da sola perché non dipende da niente e niente dipende da lei.
+On its own because it depends on nothing and nothing depends on it.
 
-## L'ordine, e perché non è arbitrario
+## The order, and why it is not arbitrary
 
-    A  →  B  →  C  →  D  →  G  →  E  →  F        H quando si vuole
+    A  →  B  →  C  →  D  →  G  →  E  →  F        H whenever
 
-A prima perché le tabelle servono a tutti. C e D prima delle calibrazioni perché il
-tono e il controllo di potenza sono ciò che le calibrazioni usano. G prima di E e F
-perché è chi le chiama.
+A first because the tables serve everyone. C and D before the calibrations
+because the tone and the power control are what the calibrations use. G before
+E and F because it is what calls them.
 
-## I punti di conflitto, misurati
+## The points of conflict, measured
 
-Sei funzioni sono toccate da più di una serie. Non sono dipendenze logiche — ogni
-patch sta in piedi da sola — ma sono i posti dove due serie si contendono le stesse
-righe di contesto, quindi vanno applicate nell'ordine sopra o rigenerate:
+Six functions are touched by more than one series. They are not logical
+dependencies — every patch stands on its own — but they are the places where
+two series contend for the same context lines, so they have to be applied in
+the order above or regenerated:
 
-| funzione | serie |
+| function | series |
 |---|---|
 | `b43_nphy_txpwr_index` | C D E F |
 | `b43_nphy_tx_power_fix` | C E F |
@@ -95,22 +97,22 @@ righe di contesto, quindi vanno applicate nell'ordine sopra o rigenerate:
 | `b43_nphy_iq_cal_gain_params` | F G |
 | `b43_nphy_restore_cal` | F G |
 
-`b43_nphy_txpwr_index` è il punto peggiore, quattro serie su una funzione. Se una
-delle quattro va in review lunga, le altre tre non applicano più senza rigenerare.
-Vale considerare di mandare la sola `0021` prima di tutto il resto, così il conflitto
-si risolve una volta.
+`b43_nphy_txpwr_index` is the worst point, four series on one function. If one of
+the four goes into a long review, the other three no longer apply without
+regenerating. It is worth considering sending `0021` alone before everything
+else, so the conflict is resolved once.
 
-## Cosa non è verificato, e perché
+## What is not verified, and why
 
-Che le otto serie applichino una dopo l'altra come otto file separati. Questa
-divisione è sui **soggetti**, non su hunk tagliati, e provando a tagliarla non regge:
-dei 40 hunk di `phy_n.c` nel rollup solo **9** si attribuiscono a una serie sola, 24
-stanno in funzioni che nessun messaggio nomina e 7 in funzioni contese. E c'è un buco
-nella divisione stessa — il rollup ha hunk nella calibrazione TX I/Q LO
-(`tx_cal_radio_setup_rev7`, `update_tx_cal_ladder`, `cal_tx_iq_lo`,
-`tx_cal_phy_cleanup`) e nessuna delle otto serie la rivendica.
+That the eight series apply one after the other as eight separate files. This
+split is on **subjects**, not on cut hunks, and trying to cut it does not hold:
+of the 40 hunks of `phy_n.c` in the series only **9** can be attributed to a
+single series, 24 are in functions no message names and 7 in contended
+functions. And there is a hole in the split itself — the series has hunks in the
+TX I/Q LO calibration (`tx_cal_radio_setup_rev7`, `update_tx_cal_ladder`,
+`cal_tx_iq_lo`, `tx_cal_phy_cleanup`) and none of the eight series claims it.
 
-I numeri e la strada stanno in `SPLIT.md`. In breve: dal `0027` in poi la divisione è
-un comando, perché il confine per patch sta in un commit; per le ventisei sono 37
-giudizi che nessun controllo automatico può validare, e mandarle come una serie sola
-divisa per competenza e' un'alternativa legittima.
+The numbers and the way forward are in `SPLIT.md`. In short: where the
+per-patch commit exists the split is a command; for the others there are 37
+judgements no automatic check can validate, and sending them as a single series
+split by area is a legitimate alternative.

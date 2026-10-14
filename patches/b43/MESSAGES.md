@@ -1,25 +1,27 @@
-# patches/b43 — messaggi della serie
+# patches/b43 — the messages of the series
 
+The thirty-six messages of the series, extracted from their files when the
+series was squashed into a single diff. The code is in `b43/`; this keeps what
+the code does not carry: the rationale, the measurements, the record ranges of
+the capture and the `Link:` trailers.
 
-I trentasei messaggi della serie, estratti dai rispettivi file quando la serie e'
-stata compressa in un diff solo. Il codice sta in `b43/`, questo tiene cio' che il
-codice non porta: il razionale, le misure, gli intervalli di record della cattura e i
-trailer `Link:`.
+**The order below is the order of discovery, not the order to send them in.**
+For reviewers they are eight separate series, one per area: `SERIES.md`.
 
-**L'ordine qui sotto e' quello di scoperta, e non e' l'ordine in cui spedirle.** Per
-chi le deve rivedere sono otto serie separate, una per competenza: `SERIES.md`.
+It serves two purposes. The citations by number across the documents and in
+`test/unit/phase_compare.py` have the form `patches/b43/MESSAGES.md#0003` and
+point here: the headings are the number and nothing else, so the anchor is
+`#0003` and does not move if the title changes. And the split has its starting
+material: without this, the messages would live only in this repository's git
+history.
 
-Serve a due cose. Le citazioni per numero sparse nei documenti e in
-`test/unit/phase_compare.py` sono nella forma `patches/b43/MESSAGES.md#0003` e
-puntano qui: i titoli sono il numero e nient'altro, cosi' l'ancora e' `#0003` e
-non si sposta se il titolo cambia. E la ri-divisione ha il materiale da cui
-ripartire: senza, i messaggi starebbero solo nella storia git di questo repo.
+The bodies are **verbatim**, internal references included: they refer to each
+other by bare number ("0004 depends on 0002") and were not rewritten, because an
+extract corrected by hand is no longer an extract. The paths in them are the
+ones of their time: `test/` is now `test/unit/`, `router-data/dsl-3580l/` is
+now `router-data/dsl3580l/`.
 
-I corpi sono **verbatim**, riferimenti interni compresi: dentro parlano fra loro
-per numero nudo ("0004 depends on 0002") e non sono stati riscritti, perche' un
-estratto corretto a mano non e' piu' un estratto.
-
-`0010` e `0022` sono nell'elenco ma **non** in `b43/`, vedi `NOTES.md`.
+`0010` and `0022` are in the list but **not** in `b43/`, see `NOTES.md`.
 
 
 ## 0001
@@ -880,7 +882,7 @@ reference takes six. This takes six, because it is a port of the
 reference. The capture cannot tell them apart - the field reads zero on
 every call in it - so it is not decided by measurement.
 
-Measured with test/unit/phase_compare.py on the two contiguous-block windows:
+Measured with test/phase_compare.py on the two contiguous-block windows:
 up-ch1 goes from 5791 of 22951 to 11552 (25% to 50%), up-ch1-freddo from
 8746 of 27571 to 13511 (32% to 49%), and PHY registers covered from 194
 of 218 to 203. The shape matches too, and that is the stronger statement:
@@ -959,7 +961,7 @@ so the capture decides it. Gated on phy rev 8 and radio rev 8 for that
 reason, in both calibration branches.
 
 With it the two gain cells become 0x4077, identical to the capture.
-Measured with test/unit/phase_compare.py on the contiguous-block windows:
+Measured with test/phase_compare.py on the contiguous-block windows:
 up-ch1 goes from 11552 of 22951 to 12363 (50% to 54%), up-ch1-freddo from
 13511 of 27571 to 14353 (49% to 52%).
 
@@ -1019,7 +1021,7 @@ core each: #14305 writes the gain cell of core 0 and #14728 that of core
 192 + 30. Thirty is what b43_nphy_tx_power_fix() already picks for phy rev
 7 and up, so the value is not new, only the storing of it.
 
-Measured with test/unit/phase_compare.py on the contiguous-block windows:
+Measured with test/phase_compare.py on the contiguous-block windows:
 up-ch1 goes from 12363 of 22951 to 13134 (54% to 57%), up-ch1-freddo from
 14353 of 27571 to 15087 (52% to 55%). No block of the previous measurement
 is lost or shortened, which is worth saying because the previous patch did
@@ -1100,7 +1102,7 @@ multiplier going 0x2c2c, then 0x2e2c and 0x2e2e as the index is forced on
 each core, then back to 0x2c2e and 0x2c2c at #8096 and #8294, and staying
 there through the PAPD calibration. The port was staying at 0x2e2e.
 
-Measured with test/unit/phase_compare.py on the contiguous-block windows:
+Measured with test/phase_compare.py on the contiguous-block windows:
 up-ch1 goes from 13134 of 22951 to 13625 (57% to 59%), up-ch1-freddo from
 15087 of 27571 to 15513 (55% to 56%). The PAPD calibration region is back
 to where it was before the pre-calibration patch, 2023 of 2662 matching
@@ -1215,7 +1217,7 @@ type of 2 built the tone off the wrong bandwidth. With the mode fixed, a
 type of 2 and a type of 0 produce identical operations, which is what the
 reference does, and the port carries the real type without paying for it.
 
-Measured with test/unit/phase_compare.py on the contiguous-block windows:
+Measured with test/phase_compare.py on the contiguous-block windows:
 up-ch1 goes from 13625 of 22951 to 14351 (59% to 63%), up-ch1-freddo from
 15513 of 27571 to 16231 (56% to 59%). The shape is the check that matters:
 the capture plays a measurement tone after each core's sweep, at #17542 and
@@ -1262,7 +1264,7 @@ reference has it behind - the RX IQ calibration having succeeded - instead
 of running it either way. Now that the calibration can succeed the two
 differ.
 
-Measured with test/unit/phase_compare.py: up-ch1 goes from 14351 of 22951 to
+Measured with test/phase_compare.py: up-ch1 goes from 14351 of 22951 to
 14807 (63% to 65%), and no block of the previous measurement is lost or
 shortened. Five new contiguous runs, and two of them are the point: 334
 operations at #23928, the idle TSSI tone, and 266 at #24391, the power
