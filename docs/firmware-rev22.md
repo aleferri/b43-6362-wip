@@ -1,42 +1,42 @@
-# Firmware per il d11 core rev 22
+# Firmware for the d11 core rev 22
 
-## Cosa cerca b43
+## What b43 looks for
 
-Il commit `682edc28b91c` ha aggiunto i mapping per il corerev 22:
-`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`. Sono i nomi che b43 chiede a
-`/lib/firmware/b43/` dopo l'estrazione.
+Commit `682edc28b91c` added the mappings for corerev 22: `ucode22_mimo`,
+`n0initvals22`, `n0bsinitvals22`. Those are the names b43 asks
+`/lib/firmware/b43/` for after extraction.
 
-## Cosa serve per averli
+## What it takes to have them
 
-`b43-fwcutter` estrae in base a un md5 del blob `wl` e a una descrizione dei
-suoi contenuti. Le versioni impacchettate da OpenWrt per b43 sono vecchie
-(4.150.10.5, 4.178.10.4, 5.10.56.27, 5.100.138), e nessuna di quelle contiene
-un ucode per un core rev 22: quello arriva dai blob 6.30-era, come il
-`wl 6.30.102.7` della DSL-3580L.
+`b43-fwcutter` extracts based on an md5 of the `wl` blob and on a description of
+its contents. The versions OpenWrt packages for b43 are old (4.150.10.5,
+4.178.10.4, 5.10.56.27, 5.100.138), and none of them contains a ucode for a rev
+22 core: that comes from the 6.30-era blobs, like the DSL-3580L's
+`wl 6.30.102.7`.
 
-**Da verificare sul tuo setup, non l'ho fatto io:**
+**To be checked on your setup, not done here:**
 
 ```sh
 b43-fwcutter -w /tmp/fw wlDSL-3580_EU.o_save
 ls /tmp/fw/b43/ | grep -E 'ucode22|initvals22'
 ```
 
-Tre esiti possibili:
+Three possible outcomes:
 
-1. escono i tre file → non c'è nulla da fare, va solo documentata la
-   provenienza in `router-data/dsl3580l/`;
-2. fwcutter non riconosce il blob (md5 sconosciuto) → serve una voce nuova nel
-   suo elenco, patch da mandare a monte del fwcutter;
-3. fwcutter riconosce il blob ma non estrae il rev22 → la descrizione del
-   contenuto è incompleta per questa versione.
+1. the three files come out → nothing to do, only the provenance has to be
+   documented in `router-data/dsl3580l/`;
+2. fwcutter does not recognise the blob (unknown md5) → it needs a new entry in
+   its list, a patch to send upstream of fwcutter;
+3. fwcutter recognises the blob but does not extract rev22 → the description of
+   the contents is incomplete for this version.
 
-Nel caso 2 o 3, il blob resta la fonte: i simboli sono leggibili con
-`nm`/`objdump` e il `reverse-tools/blob_tables.py` sa già estrarre regioni per
-simbolo, quindi il lavoro è capire l'incapsulamento, non trovare i dati.
+In case 2 or 3 the blob stays the source: the symbols are readable with
+`nm`/`objdump` and `reverse-tools/blob_tables.py` already extracts regions by
+symbol, so the work is understanding the encapsulation, not finding the data.
 
-## Perché conta per HT20 2x2
+## Why it matters for HT20 2x2
 
-`ucode22_mimo` è l'ucode che il vendor usa per l'11n su questo core: senza la
-certezza che sia quello caricato, ogni conclusione su un TX HT che non funziona
-è ambigua fra "il driver programma male il PHY" e "l'ucode non fa 11n". Va
-chiuso prima di M3.
+`ucode22_mimo` is the ucode the vendor uses for 11n on this core: without the
+certainty that it is the one loaded, every conclusion about an HT TX that does
+not work is ambiguous between "the driver programs the PHY wrong" and "the ucode
+does not do 11n". It has to be closed before M3.

@@ -1,12 +1,15 @@
-# Dove b43 tratta la G e non la N
+# Where b43 handles G and not N
 
-Il driver è nato per le PHY B/G e la N è arrivata dopo, quindi ci sono punti in cui
-un ramo esiste solo per G, o in cui una catena di `if` sui tipi di PHY non ha il
-caso N. Sul BCM6362 quei punti sono comportamento assente, non solo diverso.
+The driver was born for the B/G PHYs and N came later, so there are places where
+a branch exists only for G, or where a chain of `if`s on PHY types has no N
+case. On the BCM6362 those places are missing behaviour, not just different
+behaviour.
 
-Elenco generato con `reverse-tools/phy_type_audit.py --tree ~/src/linux`, che
-raggruppa le occorrenze di `B43_PHYTYPE_*` per costrutto e segnala quelli dove G
-compare e N no. Salta i file per-PHY, dove parlare di un tipo solo è corretto.
+List generated with `reverse-tools/phy_type_audit.py --tree ~/src/pin`, which
+groups the occurrences of `B43_PHYTYPE_*` by construct and flags those where G
+appears and N does not. It skips the per-PHY files, where speaking of one type
+only is correct. The block below is the tool's output, unchanged, checked again
+at `848acc8ffe1b`; the line numbers are the pinned tree's, not `b43/`'s.
 
 57 costrutti che discriminano sul tipo di PHY, fuori dai file per-PHY
 20 citano G e non N
@@ -34,35 +37,35 @@ xmit.c         b43_rx                             righe 734-736   tipi: B G LP
 xmit.c         b43_rx                             righe 780-780   tipi: G
 ```
 
-## Cosa vuol dire, voce per voce
+## What it means, entry by entry
 
-**Legittime, non sono buchi.** `lo.c` (sei voci) è la calibrazione LO della
-G-PHY: la N ha la sua in `phy_n.c`, e il file intero non la riguarda.
-`wa.c` sono i workaround G. `debugfs.c` e `sysfs.c` espongono controlli che
-esistono solo su G (`loctls`, `interfmode`).
+**Legitimate, not holes.** `lo.c` (six entries) is the G-PHY's LO calibration:
+the N has its own in `phy_n.c`, and the whole file does not concern it. `wa.c`
+holds the G workarounds. `debugfs.c` and `sysfs.c` expose controls that exist
+only on G (`loctls`, `interfmode`).
 
-**Buchi veri, con conseguenza misurabile:**
+**Real holes, with a measurable consequence:**
 
-| voce | conseguenza |
+| entry | consequence |
 |---|---|
-| `main.c b43_calculate_link_quality`, `handle_irq_noise` | **nessuna misura del rumore di fondo**: `link_noise` resta al valore iniziale e mac80211 riceve una costante. Chiuso da `patches/b43/MESSAGES.md#0006` |
-| `xmit.c b43_rssi_postprocess` (due voci) | la conversione del RSSI ha rami per G e per LP, non per N. Da guardare: è il numero che finisce in `ieee80211_rx_status.signal` |
-| `xmit.c b43_rx` (due voci) | la decodifica del PLCP e dei flag ha rami per B/G/LP. Da guardare insieme al punto sopra |
-| `main.c b43_calculate_link_quality` (top half) | vedi rumore |
+| `main.c b43_calculate_link_quality`, `handle_irq_noise` | **no noise floor measurement**: `link_noise` stays at its initial value and mac80211 receives a constant. Closed by `patches/b43/MESSAGES.md#0006` |
+| `xmit.c b43_rssi_postprocess` (two entries) | the RSSI conversion has branches for G and for LP, not for N. To be looked at: it is the number that ends up in `ieee80211_rx_status.signal` |
+| `xmit.c b43_rx` (two entries) | the decoding of the PLCP and of the flags has branches for B/G/LP. To be looked at together with the point above |
+| `main.c b43_calculate_link_quality` (top half) | see noise |
 
-**Da leggere prima di dire che sono buchi:**
+**To be read before calling them holes:**
 
-`main.c b43_wireless_core_init`, `b43_supported_bands`, `b43_wireless_core_attach`
-citano G in mezzo ad altri tipi e vanno letti nel contesto — `b43_supported_bands`
-è già una voce aperta dell'inventario per un altro motivo (`dev_id 0x435f`).
-`ppr.c` e `phy_common.c` non compaiono qui perché citano anche N, ma non è detto
-che il ramo N sia completo: lo strumento vede la presenza del caso, non la sua
-correttezza.
+`main.c b43_wireless_core_init`, `b43_supported_bands`,
+`b43_wireless_core_attach` name G among other types and have to be read in
+context — `b43_supported_bands` is already an open entry of the inventory for
+another reason (`dev_id 0x435f`). `ppr.c` and `phy_common.c` do not appear here
+because they name N too, but that does not mean the N branch is complete: the
+tool sees whether the case is there, not whether it is right.
 
-## Come rifare la misura
+## How to redo the measurement
 
 ```sh
-./reverse-tools/phy_type_audit.py --tree ~/src/linux            # solo i sospetti
-./reverse-tools/phy_type_audit.py --tree ~/src/linux --all       # tutti i 57
-./reverse-tools/phy_type_audit.py --tree ~/src/linux --context   # con le righe
+./reverse-tools/phy_type_audit.py --tree ~/src/pin            # suspects only
+./reverse-tools/phy_type_audit.py --tree ~/src/pin --all       # all 57
+./reverse-tools/phy_type_audit.py --tree ~/src/pin --context   # with the lines
 ```

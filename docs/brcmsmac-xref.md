@@ -1,8 +1,9 @@
-# Xref brcmsmac per N-PHY rev 8 / radio 2057 rev 8
+# brcmsmac xref for N-PHY rev 8 / radio 2057 rev 8
 
-Generato con `reverse-tools/brcmsmac_xref.py --tree ~/src/linux --format md`.
-brcmsmac è in-tree e GPL: è la fonte di riferimento per ogni buco dell'
-inventario.
+Generated with `reverse-tools/brcmsmac_xref.py --tree ~/src/pin --format md`
+(the table below is the tool's output, unchanged, checked again at
+`848acc8ffe1b`). brcmsmac is in tree and GPL: it is the reference source for
+every hole in the inventory.
 
 | funzione brcmsmac | primo match | radiorev==8 | NREV_IS(rev,8) |
 |---|---|---|---|
@@ -17,31 +18,29 @@ inventario.
 | `wlc_phy_a3_nphy` | 24991 | 1 | 0 |
 | `wlc_phy_a4` | 25191 | 3 | 0 |
 
-La colonna `primo match` è la riga della **prima occorrenza del pattern** dentro
-la funzione, non la riga in cui la funzione comincia: lo strumento la registra
-mentre scorre i match. Per la riga di definizione c'è la tabella qui sotto, e le
-due non coincidono — `wlc_phy_workarounds_nphy_gainctrl` comincia a `15425` e il
-suo primo `radiorev == 8` è a `15593`.
+The `primo match` column is the line of the **first occurrence of the pattern**
+inside the function, not the line where the function starts: the tool records
+it while it walks the matches. For the definition line there is the table
+below, and the two do not coincide — `wlc_phy_workarounds_nphy_gainctrl`
+starts at `15425` and its first `radiorev == 8` is at `15593`.
 
-Le prime tre righe della tabella qui sopra dicevano `wlc_phy_switch_radio_nphy`,
-`wlc_phy_radio205x_vcocal_nphy` e `wlc_phy_ipa_set_bbmult_nphy`, e `wlc_phy_a2_nphy`
-non c'era affatto. `reverse-tools/cfuncs.py` non riconosceva le firme che lo stile
-kernel manda a capo (`static void` su una riga, nome e parametri su quella dopo),
-quindi attribuiva le righe di quelle funzioni alla funzione precedente. Rigenerata
-dopo il fix.
+`reverse-tools/cfuncs.py` used not to recognise the signatures kernel style
+wraps (`static void` on one line, name and parameters on the next), and
+attributed those functions' lines to the previous function: the table above is
+generated after the fix, and `reverse-tools/test_cfuncs.py` keeps it fixed.
 
-Funzioni 2057-specifiche utili, dallo stesso file:
+Useful 2057-specific functions, from the same file:
 
-| funzione | riga | a cosa serve |
+| function | line | what it is for |
 |---|---|---|
-| `wlc_phy_workarounds_nphy_gainctrl_2057_rev6` | 15224 | il corpo che manca allo stub b43 (radiorev 3 e 8) |
-| `wlc_phy_radio_init_2057` | 19731 | init table + dispatch per phy rev |
-| `wlc_phy_radio2057_rccal` | 19874 | rccal, gruppi per radiorev |
+| `wlc_phy_workarounds_nphy_gainctrl_2057_rev6` | 15224 | the body the b43 stub lacks (radiorev 3 and 8) |
+| `wlc_phy_radio_init_2057` | 19731 | init table + dispatch by phy rev |
+| `wlc_phy_radio2057_rccal` | 19874 | rccal, groups by radiorev |
 | `wlc_phy_radio_postinit_2057` | 19957 | post-init |
-| `wlc_phy_chanspec_radio2057_setup` | 20821 | per-canale, e il blocco loopfilter RFPLL per radiorev 5/7/8 (riga 20960) |
-| `wlc_phy_radio205x_vcocal_nphy` | 20802 | vcocal, 20 righe, chiamata dai due `chanspec_radio205x_setup` e dalla cal periodica |
-| `wlc_phy_papd_cal_setup_nphy` | 24242 | setup della cal PAPD per core, 250 righe |
-| `wlc_phy_papd_cal_cleanup_nphy` | 24496 | e il suo ripristino, 124 righe |
-| `wlc_phy_a3_nphy` | 24959 | la ricerca dell'indice di gain: **legge** la tabella epsilon in un loop di 20 passi, 147 righe |
-| `wlc_phy_a2_nphy` | 24676 | il calcolo dell'epsilon: **scrive** la tabella epsilon via `set_bbmult`, 279 righe |
-| `wlc_phy_a4` | 25108 | il livello alto della cal PAPD, 276 righe |
+| `wlc_phy_chanspec_radio2057_setup` | 20821 | per channel, and the RFPLL loopfilter block for radiorev 5/7/8 (line 20960) |
+| `wlc_phy_radio205x_vcocal_nphy` | 20802 | vcocal, 20 lines, called by the two `chanspec_radio205x_setup` and by the periodic cal |
+| `wlc_phy_papd_cal_setup_nphy` | 24242 | per-core setup of the PAPD cal, 250 lines |
+| `wlc_phy_papd_cal_cleanup_nphy` | 24496 | and its restore, 124 lines |
+| `wlc_phy_a3_nphy` | 24959 | the gain index search: **reads** the epsilon table in a 20-step loop, 147 lines |
+| `wlc_phy_a2_nphy` | 24676 | the epsilon computation: **writes** the epsilon table through `set_bbmult`, 279 lines |
+| `wlc_phy_a4` | 25108 | the top level of the PAPD cal, 276 lines |

@@ -1,73 +1,74 @@
-# Piano per HT20 2x2
+# Plan for HT20 2x2
 
-Obiettivo: il radio integrato del 6362 associa e trasporta traffico a MCS 0-15
-in HT20, due stream spaziali, con b43 mainline. HT40 e 5 GHz fuori scope.
+Goal: the 6362's integrated radio associates and carries traffic at MCS 0-15 in
+HT20, two spatial streams, with mainline b43. HT40 and 5 GHz out of scope.
 
-## Punto di partenza
+## Starting point
 
-b43 non ha nulla di HT: nessuna occorrenza di `ht_cap` o `IEEE80211_HT`,
-`b43_band_2GHz` monta solo `b43_g_ratetable`, `b43_generate_tx_phy_ctl1()`
-gestisce solo rate legacy con banda fissa a `B43_TXH_PHY1_BW_20`, e in RX
-`b43_plcp_get_bitrate_idx_{cck,ofdm}()` non conosce l'HT-SIG.
+b43 has nothing of HT: no occurrence of `ht_cap` or `IEEE80211_HT`,
+`b43_band_2GHz` sets up only `b43_g_ratetable`, `b43_generate_tx_phy_ctl1()`
+handles only legacy rates with the band fixed at `B43_TXH_PHY1_BW_20`, and on RX
+`b43_plcp_get_bitrate_idx_{cck,ofdm}()` does not know the HT-SIG.
 
-Quello che c'è già e serve: in `xmit.h` sono definiti i campi MIMO del TX
-header (`B43_TXH_PHY1_MODE_{SISO,CDD,STBC,SDM}`, CRATE, MODUL), e il firmware
-`ucode22_mimo` è quello che il vendor usa per l'11n su questo core.
+What is already there and useful: `xmit.h` defines the MIMO fields of the TX
+header (`B43_TXH_PHY1_MODE_{SISO,CDD,STBC,SDM}`, CRATE, MODUL), and the
+`ucode22_mimo` firmware is the one the vendor uses for 11n on this core.
 
-## Milestone
+`b43-ac-wip` sends HT rates and A-MPDUs on the AC-PHY, on the AC TX header: a
+reference for the mac80211 side, not code to reuse (`ac-wip-xref.md`).
 
-### M0 — base legacy sana (prerequisito, nessuna riga di HT)
+## Milestones
 
-Delle sei voci iniziali di `gap-inventory.md` ne è rimasta una da chiudere: il
-gain control rev7, che è `patches/b43/MESSAGES.md#0001`, scritta sui valori della cattura.
-Le altre si sono rivelate non-buchi leggendo brcmsmac e il trace (loopfilter,
-rcal, rccal) o mal attribuite (tx cal radio setup).
+### M0 — sound legacy base (prerequisite, not a line of HT)
 
-Criterio di uscita: `docs/reports/30-rx-sensitivity.md` e `60-regression-legacy.md`
-compilati, con il legacy 2.4 GHz non peggiore di prima su tutti i canali e
-sensibilità RX misurata invece che sperata. Prima serve compilare la patch:
-oggi non lo è.
+Of the six initial entries of `gap-inventory.md` one was left to close: the
+rev7 gain control, which is `patches/b43/MESSAGES.md#0001`, written on the
+capture's values. The others turned out to be non-holes on reading brcmsmac and
+the trace (loopfilter, rcal, rccal) or misattributed (tx cal radio setup).
 
-Motivo per cui viene prima: se l'AGC è tarato male, ogni misura MIMO successiva
-misura l'AGC, non il MIMO.
+Exit criterion: `docs/reports/30-rx-sensitivity.md` and
+`60-regression-legacy.md` filled in, with legacy 2.4 GHz no worse than before on
+every channel and RX sensitivity measured instead of hoped for. The patch has to
+be built first: today it is not.
 
-### M1 — due catene attive in ricezione
+Why it comes first: if the AGC is tuned wrong, every later MIMO measurement
+measures the AGC, not the MIMO.
 
-`rxchain = 3` stabile, RSSI per-core plausibile su entrambe le catene, RX
-diversity funzionante a rate legacy. Criterio: differenza fra le due catene
-entro pochi dB su un segnale noto, e nessuna catena morta.
+### M1 — two chains active on receive
 
-### M2 — RX HT
+`rxchain = 3` stable, plausible per-core RSSI on both chains, RX diversity
+working at legacy rates. Criterion: difference between the two chains within a
+few dB on a known signal, and no dead chain.
 
-Decodifica dell'HT-SIG e riporto a mac80211: `RX_ENC_HT`, indice MCS, flag SGI
-e LDPC dove applicabile. Non serve trasmettere HT per validarlo: basta un AP
-11n che trasmette e contare i frame decodificati per MCS.
+### M2 — HT RX
 
-### M3 — TX HT SISO (MCS 0-7)
+Decoding of the HT-SIG and reporting to mac80211: `RX_ENC_HT`, MCS index, SGI
+and LDPC flags where applicable. Validating it does not need HT transmission: an
+11n AP transmitting and counting the frames decoded per MCS is enough.
 
-PLCP MIMO, `phy_ctl1` con MCS/stream/bw, `ht_cap` annunciato con **un solo**
-stream (`rx_mask` 0xFF) per separare i problemi di PLCP da quelli di MIMO.
-Criterio: iperf stabile a MCS 7, senza retry storm.
+### M3 — HT TX SISO (MCS 0-7)
 
-### M4 — TX HT 2 stream (MCS 8-15)
+MIMO PLCP, `phy_ctl1` with MCS/stream/bw, `ht_cap` announced with **one**
+stream only (`rx_mask` 0xFF) to separate PLCP problems from MIMO ones.
+Criterion: stable iperf at MCS 7, with no retry storm.
 
-Passaggio a SDM, `rx_mask` 0xFF 0xFF, tx power per-core, calibrazione su due
-catene. Criterio: `docs/reports/50-throughput-ht20.md` con throughput per MCS e
-distribuzione dei retry.
+### M4 — HT TX 2 streams (MCS 8-15)
 
-### M5 — pulizia per l'upstream
+Switch to SDM, `rx_mask` 0xFF 0xFF, per-core TX power, calibration on two
+chains. Criterion: `docs/reports/50-throughput-ht20.md` with throughput per MCS
+and the distribution of retries.
 
-Serie divisa per argomento, senza `#ifdef` di comodo; aggregazione (AMPDU)
-deliberatamente **fuori**, dichiarata come non supportata invece che
-mezza-implementata.
+### M5 — cleanup for upstream
 
-## Cose che non ho verificato e che vanno chiarite prima di M3
+Series split by subject, with no convenience `#ifdef`s; aggregation (AMPDU)
+deliberately **out**, declared unsupported rather than half implemented.
 
-- se l'`ucode22_mimo` disponibile espone davvero i rate 11n via le stesse
-  strutture che b43 usa per il legacy (vedi `firmware-rev22.md`);
-- se servono initvals aggiuntivi per la modalità MIMO oltre a
+## Things not verified that have to be clarified before M3
+
+- whether the available `ucode22_mimo` really exposes the 11n rates through the
+  same structures b43 uses for legacy (see `firmware-rev22.md`);
+- whether additional initvals are needed for MIMO mode beyond
   `n0initvals22`/`n0bsinitvals22`;
-- come il vendor sceglie fra CDD, STBC e SDM in funzione del rate e delle
-  catene attive. **SALAME**: mi aspetto SDM per gli MCS 8-15 e CDD per gli MCS
-  0-7 su due catene, che è quello che fa brcmsmac, ma non l'ho tracciato su
-  questo blob.
+- how the vendor chooses between CDD, STBC and SDM depending on the rate and the
+  active chains. **SALAME**: SDM for MCS 8-15 and CDD for MCS 0-7 on two chains
+  is what brcmsmac does, but it has not been traced on this blob.

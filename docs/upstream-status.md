@@ -1,13 +1,13 @@
-# Stato upstream
+# Upstream status
 
-Verificato sull'albero `torvalds/linux` @ `848acc8ffe1b` (3 ago 2026), non su
-changelog o wiki.
+Checked on the `torvalds/linux` tree @ `848acc8ffe1b` (3 Aug 2026), not on
+changelogs or wikis.
 
-## Merged (10 giugno 2026)
+## Merged (10 June 2026)
 
-Serie "b43: complete N-PHY rev 8 + radio 2057 rev 8 support", 7 patch:
+Series "b43: complete N-PHY rev 8 + radio 2057 rev 8 support", 7 patches:
 
-| sha | titolo | file toccati |
+| sha | title | files touched |
 |---|---|---|
 | `682edc28b91c` | b43: add firmware mappings for rev22 | `main.c` |
 | `ee81dc7636fb` | b43: add d11 core revision 0x16 to id table | `main.c` |
@@ -17,14 +17,14 @@ Serie "b43: complete N-PHY rev 8 + radio 2057 rev 8 support", 7 patch:
 | `631c004e5f45` | b43: add channel info table for N-PHY r8 + radio 2057 r8 | `radio_2057.c` |
 | `21352612198c` | b43: add RF power offset for N-PHY r8 + radio 2057 r8 | `tables_nphy.c` |
 
-Le tre tabelle (IPA tx gain, chan info, rf pwr offset) **non** pre-esistevano in
-b43: sono di questa serie.
+The three tables (IPA TX gain, chan info, RF power offset) did **not** exist
+in b43 before: they come from this series.
 
-**Nessuna delle sette tocca `phy_n.c`.** L'elenco dei file è `main.c`,
-`radio_2057.c`, `tables_nphy.c` e nient'altro; qui la riga di `2691a1ae6bcc`
-diceva anche `phy_n.c` e non è vero, quel commit cambia cinque righe di
-`b43_phy_versioning()` in `main.c`. Serve saperlo quando si trova un difetto in
-`phy_n.c`: non viene da questa serie. Verificato scaricando i sette commit:
+**None of the seven touches `phy_n.c`.** The list of files is `main.c`,
+`radio_2057.c`, `tables_nphy.c` and nothing else; `2691a1ae6bcc` changes five
+lines of `b43_phy_versioning()` in `main.c`. It matters when a defect is found
+in `phy_n.c`: it does not come from this series. Checked by downloading the
+seven commits:
 
 ```sh
 for s in 682edc28b91c ee81dc7636fb 2691a1ae6bcc 454518d95d07 \
@@ -34,39 +34,39 @@ for s in 682edc28b91c ee81dc7636fb 2691a1ae6bcc 454518d95d07 \
 done
 ```
 
-Verificabile anche con:
+Also checkable with:
 
 ```sh
 curl -s "https://github.com/torvalds/linux/commits/master/drivers/net/wireless/broadcom/b43/tables_nphy.c.atom"
 ```
 
-Nel target OpenWrt `bmips` del fork le stesse patch sono backportate come
-`package/kernel/mac80211/patches/brcm/840-01..07`, necessarie fino a che il
-target sta su kernel 6.12. Diventano ridondanti al primo bump a >= 6.16.
+In the fork's OpenWrt `bmips` target the same patches are backported as
+`package/kernel/mac80211/patches/brcm/840-01..07`, needed as long as the target
+is on kernel 6.12. They become redundant at the first bump to >= 6.16.
 
-## Non merged, funzionante fuori albero
+## Not merged, working out of tree
 
-`patches/0001..0003`: enumerazione del backplane. Vedi `soc-glue.md` per il
-contenuto e `upstreaming.md` per gli ostacoli.
+`patches/0001..0003`: the backplane enumeration. See `soc-glue.md` for the
+contents and `upstreaming.md` for the obstacles.
 
-## Non merged, scritte qui e mai girate su hardware
+## Not merged, written here and never run on hardware
 
-Sono trentasei, in `b43/` finche' si costruisce, con i messaggi in
-`patches/b43/MESSAGES.md`: l'elenco con lo stato per voce sta nella tabella del
-`README.md` e il dettaglio in `gap-inventory.md`. `b43/` contiene anche
-`patches/mainline/` e compila nell'harness, che lo verifica contro la
-cattura. Due meritano una riga a parte:
+There are thirty-six, in `b43/` while it is being built, with their messages in
+`patches/b43/MESSAGES.md`: the list with the state of each entry is in the table
+of `README.md` and the detail in `gap-inventory.md`. `b43/` also contains
+`patches/mainline/` and builds in the harness, which checks it against the
+capture. Two deserve a line of their own:
 
-| voce della serie | cosa fa | stato |
+| series entry | what it does | state |
 |---|---|---|
-| `MESSAGES.md#0001` | programma il gain control RX per radio 2057 rev 8 in 2.4 GHz bw20, sui valori della cattura | verificata op per op nell'harness (finestra `gain-control`, 87/87), **mai girata su hardware**; gate `docs/reports/30-rx-sensitivity.md` |
-| `MESSAGES.md#0002` | porta gli offset di potenza del rev 8 sui valori rev 7 del vendore | **chiusa dalla cattura**: i valori rev 7 predicono 128 celle su 128, quelli in tree 5 (`rf-pwr-offset-rev8.md`). Non è più codice morto, `0003` abilita il percorso che la legge |
+| `MESSAGES.md#0001` | programs the RX gain control for radio 2057 rev 8 at 2.4 GHz bw20, on the capture's values | checked op for op in the harness (`gain-control` window, 87/87), **never run on hardware**; gate `docs/reports/30-rx-sensitivity.md` |
+| `MESSAGES.md#0002` | brings the rev 8 power offsets to the vendor's rev 7 values | **closed by the capture**: the rev 7 values predict 128 cells of 128, the in-tree ones 5 (`rf-pwr-offset-rev8.md`). It is no longer dead code, `0003` enables the path that reads it |
 
-`0001` non va spedita prima della misura di sensibilità RX. Ha già cambiato forma
-una volta: era scritta su brcmsmac, la cattura ha mostrato valori diversi
-(`trace-init-2g.md`).
+`0001` is not to be sent before the RX sensitivity measurement. It has already
+changed shape once: it was written on brcmsmac, the capture showed different
+values (`trace-init-2g.md`).
 
-## Non esistente da nessuna parte
+## Not existing anywhere
 
-Il supporto HT in b43. Nessuna occorrenza di `ht_cap` o `IEEE80211_HT` nel
-driver; `b43_band_2GHz` espone solo `b43_g_ratetable`. Vedi `ht20-mimo-plan.md`.
+HT support in b43. No occurrence of `ht_cap` or `IEEE80211_HT` in the driver;
+`b43_band_2GHz` exposes only `b43_g_ratetable`. See `ht20-mimo-plan.md`.
