@@ -1,25 +1,26 @@
-# Indice della documentazione
+# Documentation index
 
-| file | cosa contiene |
+| file | contents |
 |---|---|
-| `../CLAUDE.md` | il minimo per non ripetere errori gia' fatti: setup, stato, regole, trappole |
-| `init-flow.md` | il flusso di init dei due lati affiancato, fase per fase, e perché b43 non arriva alla cal PAPD |
-| `upstream-status.md` | cosa è già merged, con sha e date verificati |
-| `soc-glue.md` | enumerazione bcma sul BCM6362: mappa registri, bring-up, DT, SPROM |
-| `gap-inventory.md` | buchi nel driver, con file:riga e riferimento brcmsmac |
-| `todo-nphy.md` | i buchi ancora aperti, uno per voce, con cosa serve per chiuderli |
-| `brcmsmac-xref.md` | quali funzioni brcmsmac guardare per ogni buco |
-| `ht20-mimo-plan.md` | il piano per HT20 2x2, in milestone con criteri di uscita |
-| `upstreaming.md` | cosa è proponibile così com'è e cosa no |
-| `../patches/b43/SERIES.md` | come dividere le trentasei della serie: otto serie per competenza, e i punti di conflitto |
-| `../patches/b43/SPLIT.md` | perché la serie resta un file solo, la regola un commit una patch, e cosa è già costato |
-| `firmware-rev22.md` | ucode/initvals rev22: cosa serve e cosa è da verificare |
-| `blob-inventory.md` | inventario dei simboli N-PHY/2057 nel blob OEM |
-| `trace-init-2g.md` | la cattura della DSL-3580L: cosa conferma, cosa corregge, cosa trova |
-| `rxiq-cal-map.md` | la cal RX IQ nella cattura: confini, iterazioni, funzioni brcmsmac |
-| `papd-cal-map.md` | la cal PAPD nella cattura: fasi, intervalli di record, funzioni brcmsmac |
-| `rf-pwr-offset-rev8.md` | la tabella RF power offset del rev 8: perché i valori in tree sono sbagliati |
-| `phy-g-only.md` | i punti dove b43 ha un ramo per la G e non per la N |
-| `ac-wip-xref.md` | cosa c'e' in b43-ac-wip per il core N: dati, base comune, punti d'incontro nel codice, strumenti |
-| `capture-protocol.md` | come si cattura una traccia utile, e cosa la rende inutile |
-| `reporting.md` | l'insieme dei report e i criteri di accettazione |
+| `../CLAUDE.md` | the minimum to avoid repeating mistakes already made: setup, state, rules, traps |
+| `init-flow.md` | the two init flows side by side, phase by phase, and why b43 does not reach the PAPD cal |
+| `upstream-status.md` | what is already merged, with shas and dates checked |
+| `soc-glue.md` | bcma enumeration on the BCM6362: register map, bring-up, DT, SPROM |
+| `gap-inventory.md` | holes in the driver, with file:line and the brcmsmac reference |
+| `todo-nphy.md` | the holes still open, one per entry, with what it takes to close them |
+| `brcmsmac-xref.md` | which brcmsmac functions to look at for each hole |
+| `ht20-mimo-plan.md` | the plan for HT20 2x2, in milestones with exit criteria |
+| `upstreaming.md` | what can be proposed as it is and what cannot |
+| `../patches/b43/SERIES.md` | how to split the thirty-six of the series: eight series by area, and the points of conflict |
+| `../patches/b43/SPLIT.md` | why the series stays unsplit, the one-commit-one-patch rule, and what it has already cost |
+| `../patches/b43/NOTES.md` | what the series leaves out, the ungated points, and the rationale not yet in `MESSAGES.md` |
+| `firmware-rev22.md` | ucode/initvals rev22: what is needed and what is to be checked |
+| `blob-inventory.md` | inventory of the N-PHY/2057 symbols in the OEM blob |
+| `trace-init-2g.md` | the DSL-3580L capture: what it confirms, what it corrects, what it finds |
+| `rxiq-cal-map.md` | the RX IQ cal in the capture: boundaries, iterations, brcmsmac functions |
+| `papd-cal-map.md` | the PAPD cal in the capture: phases, record ranges, brcmsmac functions |
+| `rf-pwr-offset-rev8.md` | the rev 8 RF power offset table: why the in-tree values are wrong |
+| `phy-g-only.md` | the places where b43 has a branch for G and not for N |
+| `ac-wip-xref.md` | what b43-ac-wip holds for the N core: data, common base, where the code meets, tools |
+| `capture-protocol.md` | how to take a useful trace, and what makes it useless |
+| `reporting.md` | the set of reports and their acceptance criteria |

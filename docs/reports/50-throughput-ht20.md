@@ -1,19 +1,19 @@
-# 50 — Throughput HT20 2x2
+# 50 — HT20 2x2 throughput
 
-Board: —      Data: —      Commit tree: —      Patch: —
-Controparte (AP o STA, chipset, firmware): —
-Setup RF (distanza, attenuazione, ambiente): —
+Board: —      Date: —      Tree commit: —      Patches: —
+Peer (AP or STA, chipset, firmware): —
+RF setup (distance, attenuation, environment): —
 
-| MCS | stream | throughput UDP | throughput TCP | retry % | note |
+| MCS | streams | UDP throughput | TCP throughput | retry % | notes |
 |---|---|---|---|---|---|
 | 0 | 1 | — | — | — | — |
 | 7 | 1 | — | — | — | — |
 | 8 | 2 | — | — | — | — |
 | 15 | 2 | — | — | — | — |
 
-## Criterio di accettazione
+## Acceptance criteria
 
-- [ ] MCS 8-15 negoziati e usati (non solo annunciati)
-- [ ] retry sotto la soglia dichiarata ai rate bassi
-- [ ] nessun rate stuck: la scala sale e scende con l'attenuazione
-- [ ] aggregazione dichiarata non supportata, non mezza-attiva
+- [ ] MCS 8-15 negotiated and used (not just announced)
+- [ ] retries below the declared threshold at the low rates
+- [ ] no stuck rate: the ladder goes up and down with the attenuation
+- [ ] aggregation declared unsupported, not half active

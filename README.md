@@ -1,83 +1,88 @@
 # b43-6362-wip
 
-Lavoro in corso per completare in **upstream** il supporto al radio 2.4 GHz
-integrato nel SoC **Broadcom BCM6362** (d11 core rev 22, N-PHY rev 8, radio
-2057 rev 8), con obiettivo finale **HT20 2x2 MIMO**.
+Work in progress to complete **upstream** support for the 2.4 GHz radio
+integrated in the **Broadcom BCM6362** SoC (d11 core rev 22, N-PHY rev 8, radio
+2057 rev 8), with **HT20 2x2 MIMO** as the end goal.
 
-HT40 è fuori scope per scelta: i client disponibili sono 2.4 GHz e su questa
-banda HT40 non porta nulla di utile. Anche il 5 GHz è fuori scope, con una
-conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
+HT40 is out of scope by choice: the available clients are 2.4 GHz, and on this
+band HT40 brings nothing useful. 5 GHz is out of scope too, with a consequence
+that has to be handled rather than ignored (see `docs/gap-inventory.md`, entry
 `dev_id 0x435f`).
 
-## Stato in una tabella
+## State in one table
 
-| pezzo | stato | dove |
+| piece | state | where |
 |---|---|---|
-| radio 2057 rev 8: init table, chantab, IPA tx gain, rf pwr offset | **merged upstream** (7 patch, 10 giu 2026) | `docs/upstream-status.md` |
-| firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; disponibilità blob da verificare | `docs/firmware-rev22.md` |
-| enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/`, `docs/soc-glue.md` |
-| SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
-| gain control N-PHY rev 7+ | stub vuoto in mainline, **in `b43/`, `patches/b43/MESSAGES.md#0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/unit/README.md` |
-| chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, la tabella 2 GHz di b43 non li aveva: **patch `0011`**, 31 cambi canale su 31 nella cattura | `docs/gap-inventory.md` |
-| chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
-| RF power offset rev 8 | valori sbagliati in mainline, **chiuso dalla cattura**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
-| compensazione PAPD rev 7+ | mai programmata per un early return, **patch `0003`**: 256 celle identiche alla cattura | `docs/gap-inventory.md` |
-| tabelle epsilon e scalare del PAPD | motore acceso su tabelle non inizializzate, **patch `0004`** | `docs/gap-inventory.md` |
-| bias IPA 2 GHz sul rev 8 | registro sbagliato e valori diversi fra i core, **patch `0005`** | `docs/gap-inventory.md` |
-| soglie di carrier sense | nessuno le scriveva, **patch `0008`** | `docs/todo-nphy.md` |
-| rumore di fondo su N-PHY | non misurato affatto, **patch `0006`** | `docs/phy-g-only.md` |
-| RSSI e decodifica RX su N-PHY | rami solo per G e LP in `xmit.c`, e coefficienti RSSI diversi dal vendore | `docs/todo-nphy.md` |
-| potenza target, TSSIG, RF ctl misc | scritti da entrambi con valori diversi | `docs/todo-nphy.md` |
-| offset epsilon del PAPD | scritto a zero da b43, **patch `0009`**: 24 dB di differenza | `docs/papd-cal-map.md` |
-| tabella dei campioni, cioè il tono di test | passo di fase troncato a zero in una `u16` e componente in fase persa per una precedenza: b43 non ha mai suonato un tono, su nessun N-PHY. **Patch `0010`**, 160 word su 160 identiche alla cattura | `docs/papd-cal-map.md` |
-| calibrazione PAPD, il resto | le due `wlc_phy_a3_nphy` guidate dalle letture; fasi mappate e attribuite | `docs/papd-cal-map.md` |
-| cal periodica: TX IQ/LO, RX IQ, seconda cal RSSI | in mainline il ramo che le chiama è un `;/* TODO */`, quindi non girano mai: **patch `0014`**. La seconda cal RSSI, misurata da sola, è a 956 op su 960 | `CLAUDE.md` |
-| ricerca del VCM nella cal RSSI | `Q * I` invece di `Q²` nella distanza, e il vincitore programmato col contatore del ciclo invece che col vincitore: **due patch mainline**, valgono da N-PHY rev 3 | `CLAUDE.md` |
-| HT (11n) in b43 | **assente del tutto** | `docs/ht20-mimo-plan.md` |
+| radio 2057 rev 8: init table, chantab, IPA TX gain, RF power offset | **merged upstream** (7 patches, 10 Jun 2026) | `docs/upstream-status.md` |
+| firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; availability of the blobs to be checked | `docs/firmware-rev22.md` |
+| bcma enumeration on the SoC backplane | works out of tree, **to be proposed** | `patches/`, `docs/soc-glue.md` |
+| SPROM fallback for the core on the SoC | works only with the OpenWrt extension, **not upstreamable as is** | `docs/upstreaming.md` |
+| N-PHY rev 7+ gain control | empty stub in mainline, **in `b43/`, `patches/b43/MESSAGES.md#0001`**: reproduces the capture op for op in the harness, never run on hardware | `test/unit/README.md` |
+| chantab rev 8, 5 GHz fields | the vendor zeroes them on every channel change, b43's 2 GHz table did not have them: **patch `0011`**, 31 channel changes out of 31 in the capture | `docs/gap-inventory.md` |
+| chantab rev 8, 2.4 GHz fields | **verified on silicon**: 31 channel changes out of 31, five channels | `docs/trace-init-2g.md` |
+| RF power offset rev 8 | wrong values in mainline, **closed by the capture**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
+| PAPD compensation rev 7+ | never programmed because of an early return, **patch `0003`**: 256 cells identical to the capture | `docs/gap-inventory.md` |
+| PAPD epsilon and scalar tables | engine started on uninitialised tables, **patch `0004`** | `docs/gap-inventory.md` |
+| 2 GHz IPA bias on rev 8 | wrong register and values that differ between the cores, **patch `0005`** | `docs/gap-inventory.md` |
+| carrier sense thresholds | nobody wrote them, **patch `0008`** | `docs/todo-nphy.md` |
+| noise floor on N-PHY | not measured at all, **patch `0006`** | `docs/phy-g-only.md` |
+| RSSI and RX decoding on N-PHY | branches only for G and LP in `xmit.c`, and RSSI coefficients different from the vendor's | `docs/todo-nphy.md` |
+| target power, TSSIG, RF ctl misc | written by both sides with different values | `docs/todo-nphy.md` |
+| PAPD epsilon offset | written as zero by b43, **patch `0009`**: 24 dB apart | `docs/papd-cal-map.md` |
+| sample table, i.e. the test tone | phase step truncated to zero in a `u16` and in-phase component lost to an operator precedence: b43 has never played a tone, on any N-PHY. **Patch `0010`**, 160 words out of 160 identical to the capture | `docs/papd-cal-map.md` |
+| PAPD calibration, the rest | the two `wlc_phy_a3_nphy` driven by the reads; phases mapped and attributed | `docs/papd-cal-map.md` |
+| periodic cal: TX IQ/LO, RX IQ, second RSSI cal | in mainline the branch that calls them is a `;/* TODO */`, so they never run: **patch `0014`**. The second RSSI cal, measured on its own, is at 956 ops out of 960 | `CLAUDE.md` |
+| VCM search in the RSSI cal | `Q * I` instead of `Q²` in the distance, and the winner programmed with the loop counter instead of the winner: **two mainline patches**, they apply from N-PHY rev 3 | `CLAUDE.md` |
+| HT (11n) in b43 | **entirely absent** | `docs/ht20-mimo-plan.md` |
 
-## Come è organizzato
+The patch numbers in the table are the entries of `patches/b43/MESSAGES.md`.
+
+## Repository layout
 
 ```
-b43/                 i file di b43 che il port cambia, interi, sull'albero
-                     pinnato con patches/mainline/ applicate
-bcma/                i file di bcma e la binding DT, ai loro percorsi nel kernel
-patches/             0001-0003 bcma generate da bcma/ (regen-base: l'albero
-                     pinnato), mainline/ (dodici patch separate), openwrt/,
-                     b43/ (messaggi, note e piano di divisione della serie)
-test/unit/           harness che compila i sorgenti N-PHY di b43/ in userspace e
-                     ne emette il trace, contro la cattura vendor
-docs/                stato, flusso di init affiancato, inventario dei buchi,
-                     piano HT20 2x2, upstreaming, protocollo di cattura
-docs/reports/        template dei report di bring-up su hardware
-reverse-tools/       pipeline di decodifica, estrattore/verificatore delle tabelle
-                     dal blob OEM, analisi di copertura sul tree kernel
-wl-diag/             tracer on-device per il driver wl (2-6-30/ e 3-4/), tarato su
-                     N-PHY, e il suo decoder
-router-data/         catture e dump statici per board
-scripts/             albero pinnato, rigenerazione patch, serie come diff
-bringup-log-*.txt    log di bring-up su hardware, per data (docs/reporting.md)
+b43/                 the b43 files the port changes, whole, on the pinned tree
+                     with patches/mainline/ applied
+bcma/                the bcma files and the DT binding, at their kernel paths
+patches/             0001-0003, the bcma series generated from bcma/ on the tree
+                     in regen-base; mainline/ (twelve separate patches);
+                     openwrt/; b43/ (messages, notes and split plan of the
+                     b43 series)
+test/unit/           harness that builds the N-PHY sources of b43/ in
+                     userspace and emits their trace, against the vendor capture
+docs/                state, the two init flows side by side, gap inventory,
+                     HT20 2x2 plan, upstreaming, capture protocol
+docs/reports/        templates of the on-hardware bring-up reports
+reverse-tools/       decoding pipeline, extractor/verifier of the tables in the
+                     OEM blob, coverage analysis on the kernel tree
+wl-diag/             on-device tracer for the wl driver (2-6-30/ and 3-4/),
+                     tuned on the N-PHY, and its decoder
+router-data/         captures and static dumps per board
+scripts/             pinned tree, patch regeneration, the series as a diff
+bringup-log-*.txt    on-hardware bring-up logs, by date (docs/reporting.md)
 ```
 
-Di catture ce ne sono due, in `router-data/dsl3580l/`: `opinit-ch1-ch6-bw20`
-(70796 record, due cicli down/up su canali operativi 1 e 6, zero perdite), che ha
-già corretto una patch (`docs/trace-init-2g.md`) e trovato quattro difetti di
-mainline (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`) piu' i due della
-ricerca del VCM, e `full-init-ch1-bw20` (81397 record, init a freddo, con un buco
-da 65285 record per overflow della fifo), la sola che contenga il download delle
-tabelle statiche.
+There are two captures, in `router-data/dsl3580l/`. `opinit-ch1-ch6-bw20`
+(70796 records, two down/up cycles on operating channels 1 and 6, no loss) has
+already corrected a patch (`docs/trace-init-2g.md`) and found four mainline
+defects (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`) plus the two
+in the VCM search. `full-init-ch1-bw20` (81397 records, cold init, with a hole
+of 65285 records from a FIFO overflow) is the only one with the download of
+the static tables. `router-data/tg789vac-v2/` and `router-data/d6220/` hold
+what `b43-ac-wip` has on the same core, see `docs/ac-wip-xref.md`.
 
-## Riproducibilità dello stato
+## Reproducing the state
 
-Tutto ciò che questo repo afferma sul kernel è verificato sull'albero, non sulla
-documentazione (che invecchia). Riferimento: `torvalds/linux` @ `848acc8ffe1b`,
-3 ago 2026, in `patches/regen-base`. Per rifare la verifica:
+Everything this repository says about the kernel is checked on the tree, not on
+the documentation, which ages. Reference: `torvalds/linux` @ `848acc8ffe1b`,
+3 Aug 2026, in `patches/regen-base`.
 
 ```sh
-./scripts/fetch-upstream-state.sh ~/src/pin             # albero pinnato
-./scripts/fetch-upstream-state.sh ~/src/linux master    # upstream, con i due report
+./scripts/fetch-upstream-state.sh ~/src/pin             # the pinned tree
+./scripts/fetch-upstream-state.sh ~/src/linux master    # upstream, with the two reports
+cd test/unit && make KDIR=~/src/pin && make KDIR=~/src/pin warncheck
 ```
 
-Per riverificare le tabelle merged contro il blob OEM:
+To check the merged tables against the OEM blob again:
 
 ```sh
 ./reverse-tools/blob_tables.py wlDSL-3580_EU.o_save \
@@ -85,10 +90,10 @@ Per riverificare le tabelle merged contro il blob OEM:
     --against ~/src/pin/drivers/net/wireless/broadcom/b43/radio_2057.c:r2057_rev8_init
 ```
 
-## Convenzioni
+## Conventions
 
-- **SALAME** in grassetto marca un'ipotesi non verificata su hardware o su
-  codice. Se leggi una conclusione senza SALAME, deve esserci un riferimento
-  file:riga, uno sha, o l'output di uno strumento di questo repo.
-- I commenti nel codice descrivono cosa fa il codice adesso, non com'era prima:
-  la storia sta nei messaggi di commit.
+- **SALAME** in bold marks a hypothesis not verified on hardware or in the
+  code. A conclusion without SALAME must come with a file:line reference, a
+  sha, or the output of a tool of this repository.
+- Code comments describe what the code does now, not what it used to do: the
+  history goes in the commit messages.

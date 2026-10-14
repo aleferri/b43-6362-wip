@@ -1,49 +1,56 @@
-# Provenienza dei dati
+# Provenance of the data
 
-## Blob OEM
+## OEM blob
 
-`wl 6.30.102.7.cpe4.12L07.0`, estratto dal firmware stock della D-Link
-DSL-3580L (`wlDSL-3580_EU.o`), ELF32 MIPS big-endian relocatable non strippato.
-Il blob **non sta in questo repo**: è materiale proprietario D-Link/Broadcom.
-Gli strumenti lo prendono come argomento su una copia locale.
+`wl 6.30.102.7.cpe4.12L07.0`, extracted from the stock firmware of the D-Link
+DSL-3580L (`wlDSL-3580_EU.o`), an unstripped ELF32 MIPS big-endian relocatable.
+The blob is **not in this repository**: it is proprietary D-Link/Broadcom
+material. The tools take it as an argument, on a local copy.
 
-Da esso vengono, e sono verificabili con `reverse-tools/blob_tables.py`:
+These come from it, and can be checked with `reverse-tools/blob_tables.py`:
 
-| tabella b43 | simbolo nel blob | esito |
+| b43 table | symbol in the blob | result |
 |---|---|---|
-| `r2057_rev8_init` (412 entry) | `regs_2057_rev8` (413 record, stride 6) | 412/412 identici |
-| `b43_ntab_tx_gain_ipa_2057_rev8_2g` (128 u32) | `nphy_tpc_txgain_ipa_2g_2057rev8` | 128/128 identici |
-| `b43_ntab_rf_pwr_offset_2057_rev8_2g` (32 s16) | `nphy_papd_padgain_dlt_2g_2057rev5` | 32/32 identici |
-| `b43_nphy_chantab_phy_rev8_radio_rev8` (14 entry) | `chan_info_nphyrev8_2057_rev8` (123 record, stride 44) | 336/336 campi identici (`chantab_from_blob.py`) |
+| `r2057_rev8_init` (412 entries) | `regs_2057_rev8` (413 records, stride 6) | 412/412 identical |
+| `b43_ntab_tx_gain_ipa_2057_rev8_2g` (128 u32) | `nphy_tpc_txgain_ipa_2g_2057rev8` | 128/128 identical |
+| `b43_ntab_rf_pwr_offset_2057_rev8_2g` (32 s16) | `nphy_papd_padgain_dlt_2g_2057rev5` | 32/32 identical |
+| `b43_nphy_chantab_phy_rev8_radio_rev8` (14 entries) | `chan_info_nphyrev8_2057_rev8` (123 records, stride 44) | 336/336 fields identical (`chantab_from_blob.py`) |
 
-## Codice di riferimento GPL
+## GPL reference code
 
-`brcmsmac` in-tree (`drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c`)
-è il riferimento legittimo per capire cosa il vendor programma su N-PHY rev 8 /
-radio 2057 rev 8. `reverse-tools/brcmsmac_xref.py` produce l'elenco delle
-funzioni interessate.
+The in-tree `brcmsmac` (`drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c`)
+is the legitimate reference for what the vendor programs on N-PHY rev 8 /
+radio 2057 rev 8. `reverse-tools/brcmsmac_xref.py` produces the list of the
+functions involved.
 
-## Cosa si guarda del blob
+## What is looked at in the blob
 
-Del blob servono due cose, e sono limitate: i simboli con le loro size (per
-estrarre le tabelle statiche, che è quello che fa `blob_tables.py`) e i prologhi
-e le uscite degli accessor da agganciare, quanto basta a sapere se il detour del
-tracer regge su quella funzione — se c'è un branch nelle prime quattro parole,
-il modulo la corrompe.
+Two things are taken from the blob, and they are limited: the symbols with
+their sizes (to extract the static tables, which is what `blob_tables.py`
+does), and the prologues and exits of the accessors to hook, as far as needed
+to know whether the tracer's detour holds on that function — if there is a
+branch in the first four words, the module corrupts it.
 
-Il criterio che tiene insieme le due voci e' **dove va il prodotto**. Localizzare
-i simboli e i siti di chiamata serve a costruire lo strumento di misura: il
-risultato e' `wl-diag`, che osserva l'hardware, e senza quei siti gli hook non si
-possono installare. Leggere il corpo di una funzione per sapere *cosa fa il
-driver* produce invece un'affermazione sul comportamento, e quella affermazione
-finirebbe nel port: quella strada non si prende, e per le stesse domande si guarda
-`brcmsmac`, che e' GPL e pubblicato dallo stesso vendore.
+What ties the two together is **where the product goes**. Locating the
+symbols and the call sites serves to build the measuring instrument: the
+result is `wl-diag`, which observes the hardware, and without those sites the
+hooks cannot be installed. Reading the body of a function to learn *what the
+driver does* produces instead a statement about behaviour, and that statement
+would end up in the port: that road is not taken, and for the same questions
+one looks at `brcmsmac`, which is GPL and published by the same vendor.
 
-Questo perimetro e' stato **superato una volta**, e conviene dire come: per
-attribuire un ciclo di misura visto in una cattura sono stati disassemblati corpi
-di funzione, elencati i chiamanti e cercata una costante su tutto `.text`. Le
-conclusioni erano giuste ma la fonte no, e sono state rifatte su `brcmsmac` — dove
-c'erano tutte, una perfino migliore: `wlc_phy_aci_scan_nphy` sta in
-`phy/phy_int.h:1097` come **prototipo senza corpo**, che dice piu' di qualunque
-disassemblato sul fatto che quella e' una politica sopra il PHY. La lezione: le
-domande sul comportamento si portano a `brcmsmac` **prima**, non dopo.
+This perimeter has been **crossed once**, and it is worth saying how: to
+attribute a measurement cycle seen in a capture, function bodies were
+disassembled, callers listed and a constant searched across all of `.text`.
+The conclusions were right but the source was not, and they were redone on
+`brcmsmac` — where they all were, one even better: `wlc_phy_aci_scan_nphy` is
+in `phy/phy_int.h:1097` as a **prototype without a body**, which says more than
+any disassembly that it is a policy above the PHY. The lesson: questions about
+behaviour go to `brcmsmac` **first**, not afterwards.
+
+## Data from b43-ac-wip
+
+`router-data/dsl3580l/wl0_revinfo.txt`, `router-data/tg789vac-v2/` and
+`router-data/d6220/` come from `aleferri/b43-ac-wip` at `01e1329`; each README
+says from which file. Those are captures and dumps taken by the same author on
+the same kind of setup, not third-party material.

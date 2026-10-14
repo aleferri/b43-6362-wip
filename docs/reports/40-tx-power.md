@@ -1,18 +1,18 @@
-# 40 — Potenza TX
+# 40 — TX power
 
-Board: —      Data: —      Commit tree: —      Patch: —
-Strumento e setup: —
+Board: —      Date: —      Tree commit: —      Patches: —
+Instrument and setup: —
 
-| rate | catena | target (dBm) | misurato tpc on | misurato tpc off | delta |
+| rate | chain | target (dBm) | measured, tpc on | measured, tpc off | delta |
 |---|---|---|---|---|---|
 | — | — | — | — | — | — |
 
-## Note obbligatorie
+## Mandatory notes
 
-- valori SPROM di riferimento usati (maxp, itssi, pa params per catena): —
-- regolatorio applicato durante la misura: —
+- reference SPROM values used (maxp, itssi, PA params per chain): —
+- regulatory domain applied during the measurement: —
 
-## Criterio di accettazione
+## Acceptance criteria
 
-- [ ] scostamento dal target entro la tolleranza dichiarata, per catena
-- [ ] nessuna catena che satura o resta muta ai rate alti
+- [ ] deviation from the target within the declared tolerance, per chain
+- [ ] no chain saturating or going silent at the high rates

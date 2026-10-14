@@ -1,27 +1,27 @@
-# 30 — Sensibilità RX
+# 30 — RX sensitivity
 
-Board: —      Data: —      Commit tree: —      Patch: —
-Strumento e setup (attenuatore, cavo, camera, distanza): —
+Board: —      Date: —      Tree commit: —      Patches: —
+Instrument and setup (attenuator, cable, chamber, distance): —
 
-## PER vs livello di ingresso
+## PER vs input level
 
-| rate | catena | -95 dBm | -90 | -85 | -80 | -70 | -60 |
+| rate | chain | -95 dBm | -90 | -85 | -80 | -70 | -60 |
 |---|---|---|---|---|---|---|---|
 | 1M CCK | 0 | — | — | — | — | — | — |
 | 6M OFDM | 0 | — | — | — | — | — | — |
 | 54M OFDM | 0 | — | — | — | — | — | — |
 
-Ripetere per catena 1 e, da M2, per MCS.
+Repeat for chain 1 and, from M2, per MCS.
 
-## Simmetria fra catene
+## Symmetry between chains
 
-| segnale noto | RSSI catena 0 | RSSI catena 1 | delta |
+| known signal | RSSI chain 0 | RSSI chain 1 | delta |
 |---|---|---|---|
 | — | — | — | — |
 
-## Criterio di accettazione
+## Acceptance criteria
 
-- [ ] delta fra catene entro pochi dB su segnale noto
-- [ ] nessuna catena morta
-- [ ] misura ripetuta prima e dopo il fix del gain control rev7, con entrambi i
-      valori riportati (è il gate di M0/M1)
+- [ ] delta between chains within a few dB on a known signal
+- [ ] no dead chain
+- [ ] measurement repeated before and after the rev7 gain control fix, with
+      both values reported (it is the M0/M1 gate)

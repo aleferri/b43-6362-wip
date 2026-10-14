@@ -1,28 +1,28 @@
-# 10 — Enumerazione del backplane
+# 10 — Backplane enumeration
 
-Board: —      Data: —      Commit tree: —      Patch: —
+Board: —      Date: —      Tree commit: —      Patches: —
 
-## Core enumerati
+## Cores enumerated
 
-| idx | core id | rev | indirizzo | wrapper | driver legato |
+| idx | core id | rev | address | wrapper | bound driver |
 |---|---|---|---|---|---|
 | — | — | — | — | — | — |
 
 ## Bring-up
 
-| passo | esito |
+| step | result |
 |---|---|
-| clock `wlan_ocp` abilitato | — |
-| reset `wlan` / `wlan-ubus` rilasciati | — |
-| `CcIdA` / `MacIdA` letti | — |
+| `wlan_ocp` clock enabled | — |
+| `wlan` / `wlan-ubus` resets released | — |
+| `CcIdA` / `MacIdA` read | — |
 | `bcma_bus_register()` | — |
-| IRQ assegnato e ricevuto | — |
+| IRQ assigned and received | — |
 
-## Criterio di accettazione
+## Acceptance criteria
 
-- [ ] tutti i core attesi enumerati con id e rev corretti
-- [ ] nessun `synth aread32 unhandled offset` nel log
-- [ ] nessun `synth awrite32 dropped` nel log
-- [ ] `rmmod` + `insmod` ripetuti senza degrado (teardown corretto)
+- [ ] every expected core enumerated with the right id and rev
+- [ ] no `synth aread32 unhandled offset` in the log
+- [ ] no `synth awrite32 dropped` in the log
+- [ ] repeated `rmmod` + `insmod` with no degradation (correct teardown)
 
-`dmesg` allegato (`bringup-log-*.txt`): —
+`dmesg` attached (`bringup-log-*.txt`): —

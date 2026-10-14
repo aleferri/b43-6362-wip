@@ -1,24 +1,24 @@
-# 60 — Regressione legacy 2.4 GHz
+# 60 — Legacy 2.4 GHz regression
 
-Da compilare **prima di ogni invio upstream**, con e senza la serie applicata.
+To be filled in **before every upstream submission**, with and without the
+series applied.
 
-Board: —      Data: —      Commit tree: —      Serie: —
+Board: —      Date: —      Tree commit: —      Series: —
 
-| canale | assoc | throughput TCP prima | dopo | PER prima | dopo |
+| channel | assoc | TCP throughput before | after | PER before | after |
 |---|---|---|---|---|---|
 | 1 | — | — | — | — | — |
 | 6 | — | — | — | — | — |
 | 11 | — | — | — | — | — |
 | 13 | — | — | — | — | — |
 
-## Altri device toccati dalla serie
+## Other devices touched by the series
 
-Le patch su `b43_radio_2057_setup` e sul gain control rev7 toccano anche radio
-rev 5 e 7 (43217/43227) e tutti i N-PHY rev 7+. Se non hai quell'hardware, va
-scritto qui esplicitamente che non è stato testato: è un'informazione che serve
-a chi rivede.
+The patches on `b43_radio_2057_setup` and on the rev7 gain control also touch
+radio revs 5 and 7 (43217/43227) and every N-PHY rev 7+. Without that
+hardware, write here explicitly that it was not tested: reviewers need to know.
 
-| device | testato | esito |
+| device | tested | result |
 |---|---|---|
-| BCM6362 integrato | — | — |
-| altri N-PHY rev 7+ | no | — |
+| integrated BCM6362 | — | — |
+| other N-PHY rev 7+ | no | — |

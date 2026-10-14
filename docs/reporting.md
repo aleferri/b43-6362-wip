@@ -1,32 +1,32 @@
-# Reportistica
+# Reporting
 
-I template stanno in `docs/reports/`. Regole: un report si compila con numeri
-misurati; le celle non misurate restano `—`, non si riempiono con stime. Un
-report con stime spacciate per misure fa più danno di un report vuoto, perché
-qualcuno ci costruirà sopra.
+The templates are in `docs/reports/`. Rules: a report is filled in with measured
+numbers; cells that were not measured stay `—`, they are not filled with
+estimates. A report with estimates passed off as measurements does more harm
+than an empty one, because someone will build on it.
 
-| report | quando | criterio di accettazione |
+| report | when | acceptance criterion |
 |---|---|---|
-| `00-hw-inventory.md` | una volta per board | chip id, corerev, phy rev, radio rev, sprom rev letti da `dmesg`/debugfs, non da datasheet |
-| `10-enumeration.md` | dopo ogni modifica al glue bcma | tutti i core enumerati con id e rev, IRQ assegnato, nessun `synth aread32 unhandled` nel log |
-| `20-init-coverage.md` | dopo ogni modifica al PHY | percentuale di op del flow vendor riprodotte dal port, per funzione |
-| `30-rx-sensitivity.md` | gate di M0 e M1 | PER vs livello di ingresso per rate, per catena |
-| `40-tx-power.md` | gate di M0 e M4 | potenza misurata vs target per rate, per catena, con e senza tpc |
-| `50-throughput-ht20.md` | gate di M4 | throughput e retry per MCS 0-15, HT20 |
-| `60-regression-legacy.md` | ogni serie prima dell'invio | legacy 2.4 GHz non peggiorato: associazione, throughput, PER su tutti i canali |
+| `00-hw-inventory.md` | once per board | chip id, corerev, PHY rev, radio rev, SPROM rev read from `dmesg`/debugfs, not from a datasheet |
+| `10-enumeration.md` | after every change to the bcma glue | every core enumerated with id and rev, IRQ assigned, no `synth aread32 unhandled` in the log |
+| `20-init-coverage.md` | after every change to the PHY | percentage of the vendor flow's ops reproduced by the port, per function |
+| `30-rx-sensitivity.md` | M0 and M1 gate | PER vs input level per rate, per chain |
+| `40-tx-power.md` | M0 and M4 gate | measured power vs target per rate, per chain, with and without TPC |
+| `50-throughput-ht20.md` | M4 gate | throughput and retries for MCS 0-15, HT20 |
+| `60-regression-legacy.md` | every series before submission | legacy 2.4 GHz not worse: association, throughput, PER on every channel |
 
-## Cosa va nel verbale di bring-up
+## What goes in the bring-up log
 
-I log grezzi stanno nella radice del repo, uno per sessione, nominati
+Raw logs go at the top of the repository, one per session, named
 
-    bringup-log-<data>-<board>-<cosa>.txt
+    bringup-log-<date>-<board>-<what>.txt
 
-e cominciano con quattro righe di intestazione:
+and start with four header lines:
 
-    kernel:  <versione>
-    tree:    <sha di questo repo>
-    patch:   <serie applicata>
-    atteso:  <cosa doveva succedere>
+    kernel:  <version>
+    tree:    <sha of this repository>
+    patch:   <series applied>
+    expect:  <what was supposed to happen>
 
-Poi il log. In coda, una riga su cosa è effettivamente successo se diverge. Un
-`dmesg` senza il commit a cui si riferisce non è riproducibile.
+Then the log. At the end, one line on what actually happened if it diverges. A
+`dmesg` without the commit it refers to cannot be reproduced.

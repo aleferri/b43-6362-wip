@@ -1,11 +1,11 @@
-# 00 — Inventario hardware
+# 00 — Hardware inventory
 
 Board: —
-Data: —
-Kernel: —          Commit tree: —
-Patch applicate: —
+Date: —
+Kernel: —          Tree commit: —
+Patches applied: —
 
-| campo | valore letto | dove l'ho letto |
+| field | value read | where it was read |
 |---|---|---|
 | chip id | — | `dmesg` bcma |
 | chip rev / package | — | |
@@ -13,9 +13,9 @@ Patch applicate: —
 | PHY type / rev | — | `b43-phyN` in dmesg |
 | radio id / rev / ver | — | |
 | SPROM rev | — | |
-| dev_id visto da b43 | — | |
-| bande annunciate | — | `iw phyN info` |
-| catene TX / RX | — | |
-| PA interno o esterno | — | sprom `extpagain2g` |
+| dev_id seen by b43 | — | |
+| bands announced | — | `iw phyN info` |
+| TX / RX chains | — | |
+| internal or external PA | — | sprom `extpagain2g` |
 
-Note: —
+Notes: —
