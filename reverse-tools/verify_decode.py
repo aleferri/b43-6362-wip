@@ -34,11 +34,20 @@ def load_ops(path='../wl-diag/decode-wl-diag.py'):
 
 
 RE_LINE = re.compile(r'^\s*([\d.]+)\s+#(\d+)\s+cpu(\d+)\s+(\S+)\s*(.*)$')
+# Il record OP_DROP non ha numero di sequenza: il decoder lo stampa senza `#`,
+# con il conteggio dei persi che nel record sta in aux.
+RE_DROP = re.compile(r'^\s*([\d.]+)\s+cpu(\d+)\s+\*\* DROP \*\*\s+(persi=\d+)$')
 
 
 def parse_text(path):
     out = []
     for line in open(path, encoding='utf-8', errors='replace'):
+        m = RE_DROP.match(line.rstrip('\n'))
+        if m:
+            out.append(dict(ts=m.group(1), seq=0, cpu=int(m.group(2)), op='DROP',
+                            kv=dict(re.findall(r'(\w+)=(\S+)', m.group(3))),
+                            raw=m.group(3)))
+            continue
         m = RE_LINE.match(line.rstrip('\n'))
         if not m:
             continue

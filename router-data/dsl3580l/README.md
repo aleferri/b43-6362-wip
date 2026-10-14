@@ -40,6 +40,13 @@ contiguous** and contain the whole init including the PAPD cal (scalar table at
 #18662), so that part can be compared positionally. Beyond the hole there is a
 second cycle, not contiguous with the first.
 
+The source binary was committed as `reverse-tools/full-init.txt` until it was
+checked and dropped: 2279116 bytes (81397 records of 28), sha256
+`92534097914b442afea2f1050604b3d7ead87aef9d9de8774ab2adc2aba4aad9`. The
+current `wl-diag/decode-wl-diag.py` turns it into this file byte for byte, and
+`reverse-tools/verify_decode.py` finds no field lost on all 81397 records,
+the `OP_DROP` one included. It is still in the history at `054601d`.
+
 To take it again without the hole: the reading pipe has to be running **and
 draining** before the `setmem`, not just started.
 
