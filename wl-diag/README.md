@@ -1,15 +1,22 @@
 # wl-diag — inline-detour tracer for the `wl` driver
 
 A kernel module that hooks the PHY/radio/PMU/MAC accessors of Broadcom's `wl`
-driver with no kprobes (a detour at function entry) and exposes the records.
+driver with no kprobes (a detour at function entry) and exposes the records on
+`/proc/wl_diag`.
 The header of `wl_diag.c` has the details of the mechanism and its limits
 (MIPS32R1, RWX module memory, reads with an UNDEFINED value).
 `decode-wl-diag.py` turns the 28-byte records into text.
 
-| variant | kernel | board | how the capture is read |
-|---|---|---|---|
-| `2-6-30/` | 2.6.30 | DSL-3580L, runs on the SoC itself: **the one for the integrated 6362 radio** | `/proc/wl_diag` |
-| `3-4/` | >= 2.6.33 (3.4-rt) | a host with kernel 3.4 | misc device `/dev/wl_diag` |
+| variant | kernel | board |
+|---|---|---|
+| `2-6-30/` | 2.6.30 | DSL-3580L, runs on the SoC itself: **the one for the integrated 6362 radio** |
+| `3-4/` | >= 2.6.33 (3.4-rt) | a host with kernel 3.4 |
+
+Both read out through `/proc/wl_diag`; neither registers a misc device. Only
+`3-4/` makes it writable, for the memory commands of
+`docs/capture-protocol.md` (`r`, `w8`, `w16`, `w32`), and only `3-4/` finds the
+interface through `__module_address` when `netdev_ops` does not resolve by
+name.
 
 `2-6-30/` uses a hand-made ring queue, `pr_warn` through a shim and no
 `raw_spinlock`; `3-4/` wants a typed kfifo and `DEFINE_RAW_SPINLOCK`, and on an
@@ -465,26 +472,16 @@ echo 1 > /sys/bus/pci/devices/0000:01:00.0/remove  # detach: wl.remove() runs
 
 ```sh
 insmod wl_diag.ko arm=1           # + delay=1 if the timing is needed
-dmesg | tail                      # "wl_diag: ARMATO (N hook) -> /dev/wl_diag"
+dmesg | tail                      # "wl_diag: ARMATO (N hook) -> /proc/wl_diag"
 ```
 
-### 4. mknod in /tmp (no udev on this userspace)
-
-The misc device has major 10 and a dynamic minor; the rootfs is often
-read-only, which is why the node goes in `/tmp` (tmpfs):
+### 4. Start the pipe to the host (BEFORE the rescan, not to lose records)
 
 ```sh
-minor=$(awk '$2=="wl_diag"{print $1}' /proc/misc) # or: cat /sys/class/misc/wl_diag/dev
-mknod /tmp/wl_diag c 10 "$minor"
+cat /proc/wl_diag | nc <HOST> 5555 &
 ```
 
-### 5. Start the pipe to the host (BEFORE the rescan, not to lose records)
-
-```sh
-cat /tmp/wl_diag | nc <HOST> 5555 &
-```
-
-### 6. PCI rescan: the re-probe runs the attach under the hooks
+### 5. PCI rescan: the re-probe runs the attach under the hooks
 
 ```sh
 echo 1 > /sys/bus/pci/rescan      # wl re-probes 0x43b3 -> wlc_attach/init/up
@@ -502,7 +499,7 @@ wl -i wl1 ssid <SSID> # set the SSID (without bringing it up)
 wl -i wl1 bss up      # THIS brings the BSS up (beacon/join)
 ```
 
-### 7. Close and decode
+### 6. Close and decode
 
 ```sh
 rmmod wl_diag                     # restores the prologues + synchronize_sched

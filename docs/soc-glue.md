@@ -1,85 +1,88 @@
-# Enumerazione del backplane WLAN sul BCM6362
+# Enumeration of the WLAN backplane on the BCM6362
 
-Il core 802.11 del 6362 non è su PCI: sta su un backplane AXI/OCP interno al
-SoC, enumerabile da bcma. Mainline non lo tocca (`arch/mips/bcm63xx` non ha
-nulla di wireless, e il target `bmips` di OpenWrt non ha nodo DT per la
-wireless integrata). Il glue vive quindi qui, in `patches/`.
+The 6362's 802.11 core is not on PCI: it sits on an AXI/OCP backplane inside the
+SoC, which bcma can enumerate. Mainline does not touch it (`arch/mips/bcm63xx`
+has nothing wireless, and OpenWrt's `bmips` target has no DT node for the
+integrated wireless). So the glue lives here: the files in `bcma/`, and the
+series generated from them in `patches/0001-0003`.
 
-## Perché il `bcma_host_soc` generico non basta
+## Why the generic `bcma_host_soc` is not enough
 
-Due differenze rispetto alla famiglia BCM47xx per cui `host_soc.c` è stato
-scritto, entrambe verificate sul silicio dal funzionamento del driver:
+Two differences from the BCM47xx family `host_soc.c` was written for, both
+verified on silicon by the driver working:
 
-1. i registri del backplane sono periferiche **big-endian** su CPU big-endian:
-   `readl()` restituisce word scambiate, serve `ioread32be()`;
-2. ChipCommon, il core 802.11 e il core SHIM **non pubblicano wrapper DMP**
-   (NMW=NSW=0 nell'EROM): `bcma_get_next_core()` li rifiuterebbe, e gli accessi
-   `BCMA_IOCTL`/`BCMA_RESET_CTL` vanno sintetizzati su una finestra di controllo
-   a livello SoC.
+1. the backplane registers are **big-endian** peripherals on a big-endian CPU:
+   `readl()` returns swapped words, `ioread32be()` is needed;
+2. ChipCommon, the 802.11 core and the SHIM core **publish no DMP wrapper**
+   (NMW=NSW=0 in the EROM): `bcma_get_next_core()` would reject them, and the
+   `BCMA_IOCTL`/`BCMA_RESET_CTL` accesses have to be synthesised on a SoC-level
+   control window.
 
-Da qui i due campi `big_endian` e `wrapperless` su `struct bcma_bus` (patch
-0001) e un host driver dedicato (patch 0002) invece di allargare quello
-generico.
+Hence the two fields `big_endian` and `wrapperless` on `struct bcma_bus` (patch
+0001) and a dedicated host driver (patch 0002) instead of widening the generic
+one.
 
-## Mappa, dai sorgenti mainline
+## Map, from the mainline sources
 
-Tutto quanto segue è già definito in mainline e non va inventato:
+Everything below is already defined in mainline and is not to be invented:
 
-| cosa | valore | dove |
+| what | value | where |
 |---|---|---|
-| ChipCommon WLAN | `0xb0004000` (fisico `0x10004000`) | `arch/mips/include/asm/mach-bcm63xx/bcm63xx_cpu.h` |
-| d11 WLAN | `0xb0005000` | idem |
-| SHIM WLAN | `0xb0007000` | idem |
-| IRQ | `IRQ_INTERNAL_BASE + 7` | idem |
+| WLAN ChipCommon | `0xb0004000` (physical `0x10004000`) | `arch/mips/include/asm/mach-bcm63xx/bcm63xx_cpu.h` |
+| WLAN d11 | `0xb0005000` | same |
+| WLAN SHIM | `0xb0007000` | same |
+| IRQ | `IRQ_INTERNAL_BASE + 7` | same |
 | clock gate | `CKCTL_6362_WLAN_OCP_EN` (bit 5) = `BCM6362_CLK_WLAN_OCP` | `bcm63xx_regs.h`, `dt-bindings/clock/bcm6362-clock.h` |
 | reset | `BCM6362_RST_WLAN_SHIM` (11), `BCM6362_RST_WLAN_UBUS` (14) | `dt-bindings/reset/bcm6362-reset.h` |
 | power domain | `BCM6362_POWER_DOMAIN_WLAN_PADS` (13) | `dt-bindings/soc/bcm6362-pm.h` |
-| core SHIM | `BCMA_CORE_SHIM` = `0x837` | `include/linux/bcma/bcma.h` (commento: "SHIM component in ubus/6362") |
+| SHIM core | `BCMA_CORE_SHIM` = `0x837` | `include/linux/bcma/bcma.h` (comment: "SHIM component in ubus/6362") |
 
-Il nodo DT usa due finestre: `ccb` = `0x10004000` (ChipCommon, da cui bcma
-scansiona l'EROM) e `wlan-ctrl` = `0x10007000` (finestra di controllo SoC).
+The DT node uses two windows: `ccb` = `0x10004000` (ChipCommon, from which bcma
+scans the EROM) and `wlan-ctrl` = `0x10007000` (the SoC control window).
 
-## Finestra di controllo
+## Control window
 
-Registri usati dall'host driver (offset dalla finestra `wlan-ctrl`):
+Registers used by the host driver (offsets from the `wlan-ctrl` window):
 
-| off | nome | bit noti |
+| off | name | known bits |
 |---|---|---|
 | 0x00 | MISC | `FORCE_CLK_ON` (2), `MACRO_DISABLE` (1), `MACRO_SOFT_RESET` (0) |
 | 0x04 | STATUS | — |
-| 0x08 | CC_CONTROL | IOCTL nei 16 bit bassi, RESET_CTL promosso a bit 16 |
+| 0x08 | CC_CONTROL | IOCTL in the low 16 bits, RESET_CTL promoted to bit 16 |
 | 0x0c | CC_STATUS | — |
-| 0x10 | MAC_CONTROL | `SICF_FGC` (1), `SICF_CLOCK_EN` (0), + IOCTL/RESET come sopra |
+| 0x10 | MAC_CONTROL | `SICF_FGC` (1), `SICF_CLOCK_EN` (0), + IOCTL/RESET as above |
 | 0x14 | MAC_STATUS | — |
-| 0x18 | CC_ID_A | id ChipCommon (diagnostica di bring-up) |
-| 0x24 | MAC_ID_A | id core 802.11 (diagnostica di bring-up) |
+| 0x18 | CC_ID_A | ChipCommon id (bring-up diagnostics) |
+| 0x24 | MAC_ID_A | 802.11 core id (bring-up diagnostics) |
 
-`BCMA_IOST` per il core 802.11 è sintetizzato (`2G_PHY=1`, `5G_PHY=0`,
-`DMA64`) perché MacStatus non è affidabile mentre il d11 è in reset. Nota che
-b43 usa quel valore solo come primo tentativo e poi lo sovrascrive dal
-`dev_id` della SPROM: vedi `gap-inventory.md`.
+`BCMA_IOST` for the 802.11 core is synthesised (`2G_PHY=1`, `5G_PHY=0`,
+`DMA64`) because MacStatus is not reliable while the d11 is in reset. Note that
+b43 uses that value only as a first attempt and then overrides it from the
+SPROM's `dev_id`: see `gap-inventory.md`.
 
-## Sequenza di bring-up
+## Bring-up sequence
 
-Il boot loader lascia la macro gated e in reset. L'ordine implementato:
+The boot loader leaves the macro gated and in reset. The order implemented:
 
-1. `clk_prepare_enable` (wlan_ocp), attesa 10 ms;
-2. assert `wlan-ubus` + `wlan`, 1 ms, deassert entrambi, 1 ms;
+1. `clk_prepare_enable` (wlan_ocp), wait 10 ms;
+2. assert `wlan-ubus` + `wlan`, 1 ms, deassert both, 1 ms;
 3. MISC = `FORCE_CLK_ON | MACRO_SOFT_RESET`, 1 ms;
 4. MAC_CONTROL = `SICF_FGC | SICF_CLOCK_EN`;
-5. MISC = `FORCE_CLK_ON` (rilascia il soft reset tenendo il clock forzato);
+5. MISC = `FORCE_CLK_ON` (releases the soft reset keeping the clock forced);
 6. MISC = 0, MAC_CONTROL = `SICF_CLOCK_EN`;
-7. log di `CcIdA`/`MacIdA`, poi `bcma_init_bus()` + `bcma_bus_register()`.
+7. log of `CcIdA`/`MacIdA`, then `bcma_init_bus()` + `bcma_bus_register()`.
 
-Lo teardown rimette la macro in `MACRO_DISABLE | MACRO_SOFT_RESET`, riasserta i
-reset e spegne il clock: senza questo un `rmmod`/`insmod` di bcma riparte da uno
-stato sporco.
+The teardown puts the macro back in `MACRO_DISABLE | MACRO_SOFT_RESET`,
+reasserts the resets and turns the clock off: without it an `rmmod`/`insmod` of
+bcma restarts from a dirty state.
 
 ## SPROM
 
-Il core su SoC non ha SPROM né OTP utile: i parametri arrivano da un blob di
-riferimento più fixup per board. Nel fork questo passa dal driver
-`brcm,bcma-sprom` di OpenWrt esteso al match per phandle (`bcma-bus = <&wlan>`),
-con `brcm/bcm6362-sprom.bin` + 38 fixup ricavati per diff da `wl srdump`.
-Mainline non ha nessun meccanismo DT equivalente: è il punto aperto principale,
-trattato in `upstreaming.md`.
+The core on the SoC has no SPROM and no useful OTP: the parameters come from a
+reference blob plus per-board fixups. In the fork this goes through OpenWrt's
+`brcm,bcma-sprom` driver extended to match by phandle (`bcma-bus = <&wlan>`),
+with `brcm/bcm6362-sprom.bin` + 38 fixups derived by diffing against
+`wl srdump`. Mainline has no equivalent DT mechanism: it is the main open
+point, dealt with in `upstreaming.md`. The stock `wl` on another board with this
+core builds the image from a map file, `bcm6362_map.bin`
+(`router-data/tg789vac-v2/README.md`).

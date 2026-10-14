@@ -1,116 +1,120 @@
-# Protocollo di cattura
+# Capture protocol
 
-Una cattura serve a due cose: sapere cosa il vendor scrive, e poter confrontare
-op-per-op il port con quella sequenza. Se una cattura non permette il confronto
-posizionale, è quasi inutile.
+A capture serves two purposes: knowing what the vendor writes, and being able
+to compare the port op by op with that sequence. If a capture does not allow the
+positional comparison, it is nearly useless.
 
-## Prima di premere insmod
+## Before pressing insmod
 
-1. `arm=0` (default): il modulo logga solo il piano di patch. Leggerlo. Se un
-   simbolo non è stato risolto, va risolto ora, non dopo. I nomi attesi sono
-   quelli in `docs/blob-inventory.md`: se manca `and_radio_reg` o `or_radio_reg`,
-   quel blob usa nomi diversi e il tracer ha un buco silenzioso.
-2. `insmod wl_diag.ko arm=1` basta: il modulo si cerca i simboli in
-   `/proc/kallsyms` da sé. `syms=` e `klookup=` restano come ripiego se un blob
-   usa nomi che la lista non prevede.
-3. La cattura si legge da **`/proc/wl_diag`**, che esiste appena il modulo è
-   caricato: `cat /proc/wl_diag | nc <host> 5555`. La pipe deve **drenare** prima
-   di far partire la sequenza, non essere solo lanciata: la fifo tiene 32768
-   record e un init a freddo ne emette più del doppio.
-4. Annotare versione del blob, board, canale, banda, e se il radio è l'integrato
-   (`0x14e4:0x435f` sul backplane) o una scheda PCIe.
+1. `arm=0` (default): the module only logs the patch plan. Read it. If a symbol
+   was not resolved, resolve it now, not later. The expected names are those in
+   `docs/blob-inventory.md`: if `and_radio_reg` or `or_radio_reg` is missing,
+   that blob uses different names and the tracer has a silent hole.
+2. `insmod wl_diag.ko arm=1` is enough: the module looks the symbols up in
+   `/proc/kallsyms` by itself. `syms=` and `klookup=` (`2-6-30/`) stay as a
+   fallback if a blob uses names the list does not expect.
+3. The capture is read from **`/proc/wl_diag`**, which exists as soon as the
+   module is loaded: `cat /proc/wl_diag | nc <host> 5555`. The pipe has to
+   **drain** before the sequence is started, not just be launched: the FIFO
+   holds 32768 records and a cold init emits more than twice that.
+4. Write down the blob version, board, channel, band, and whether the radio is
+   the integrated one (`0x14e4:0x435f` on the backplane) or a PCIe card.
 
-## Cosa catturare, in che ordine
+## What to capture, in which order
 
-Una sequenza per volta, con il device fermo fra una e l'altra:
+One sequence at a time, with the device stopped between one and the next:
 
-| flow | come si ottiene | a cosa serve |
+| flow | how to get it | what it is for |
 |---|---|---|
-| `attach` | reload di `wl` | init radio + initvals |
-| `op_init` | `wl up` da down | sequenza di init PHY completa |
-| `switch_channel` | `wl channel N` su tutti i canali 1-13 | chantab, spuravoid, loopfilter |
-| `rfkill` | `wl radio on/off` | percorsi di power up/down |
+| `attach` | reload of `wl` | radio init + initvals |
+| `op_init` | `wl up` from down | complete PHY init sequence |
+| `switch_channel` | `wl channel N` on all channels 1-13 | chantab, spuravoid, loopfilter |
+| `rfkill` | `wl radio on/off` | power up/down paths |
 | `cal` | `wl phy_forcecal 1` | rcal/rccal, tx iq/lo, papd |
 
-Per il 6362 integrato **non c'è rescan PCI**: il ciclo attach si riottiene con
-reload del modulo o `wl down; wl up`.
+For the integrated 6362 **there is no PCI rescan**: the attach cycle comes back
+by reloading the module or with `wl down; wl up`. No `attach` capture of this
+core exists here yet; `router-data/d6220/` has one of an N core under `wl` 7.14.
 
-## Cosa rende una cattura inutile
+## What makes a capture useless
 
-- record persi (`OP_DROP` > 0): la fifo è andata in overflow, la sequenza ha
-  buchi e il confronto posizionale salta. Ridurre il flow catturato, non
-  aumentare il filtro.
-- più flow nello stesso file senza marcatori: non si separano più a posteriori
-  con certezza.
-- filtro `skipphyrd` attivo senza averlo scritto nel verbale: si finisce a
-  cercare per mezz'ora una `PHY.RD` che era stata scartata a monte.
-- catture su canale diverso da quello dichiarato: metà delle differenze
-  diventano inspiegabili.
+- lost records (`OP_DROP` > 0): the FIFO overflowed, the sequence has holes and
+  the positional comparison breaks. Reduce the flow captured, do not raise the
+  filter.
+- several flows in the same file without markers: they can no longer be told
+  apart afterwards with certainty.
+- a `skipphyrd` filter on without writing it in the record: one ends up looking
+  for half an hour for a `PHY.RD` that was dropped upstream.
+- captures on a channel other than the one declared: half the differences
+  become unexplainable.
 
-## Dopo la cattura
+## After the capture
 
 ```sh
-decode-wl-diag.py < raw.bin > flow.decoded
-verify_decode.py raw.bin flow.decoded    # prima di buttare il binario
-merge_retvals.py flow.decoded > flow.rv
-fold_mod_reads.py flow.rv > flow.folded
+wl-diag/decode-wl-diag.py < raw.bin > flow.decoded
+reverse-tools/verify_decode.py raw.bin flow.decoded    # before throwing the binary away
+reverse-tools/merge_retvals.py flow.decoded > flow.rv
+reverse-tools/fold_mod_reads.py flow.rv > flow.folded
 ```
 
-Nel repo va il **decodificato**, non il binario: è leggibile, diffabile, e
-grepabile, ed è la forma che gli strumenti mangiano. Il binario si butta solo
-dopo che `verify_decode.py` dice che il testo copre tutti i campi non nulli; se
-segnala perdite, si sistema il decoder e si rifà, non si tiene il binario come
-scusa.
+What goes in the repository is the **decoded** text, not the binary: it is
+readable, diffable and greppable, and it is the form the tools consume. The
+binary is thrown away only after `verify_decode.py` says the text covers every
+non-zero field; if it reports losses, the decoder is fixed and the decoding
+redone, the binary is not kept as an excuse.
 
-Poi i controlli che non costano niente e trovano cose: `verify_chantab_trace.py`
-per confrontare la chantab di b43 con tutti i cambi canale della cattura, e
-`trace_tables.py` per tirare fuori i payload delle table-op.
+Then the checks that cost nothing and find things: `verify_chantab_trace.py` to
+compare b43's chantab with every channel change of the capture, and
+`trace_tables.py` to pull out the payloads of the table ops.
 
-Il confronto col port si fa sul trace **grezzo** (non collassato), con
-`test/unit/compare.py`. Il collassato serve per le analisi macro, non per il gate di
-regressione.
+The comparison with the port is done on the **raw** trace (not collapsed), with
+`test/unit/compare.py`. The collapsed one serves macro analyses, not the
+regression gate.
 
-Ogni cattura va in `router-data/<board>/` con il verbale accanto: senza il
-verbale, fra tre mesi il file è un blob di byte.
+Every capture goes in `router-data/<board>/` with its record next to it:
+without the record, in three months the file is a blob of bytes.
 
-## `wl down; wl up` NON basta per il download statico
+## `wl down; wl up` is NOT enough for the static download
 
-Il percorso di down del blob **non azzera `hw_up` in `pub`**, quindi quel ciclo rifa'
-solo un init parziale. Per l'init col download statico serve, fra il down e l'up, una
-**writemem** che azzeri quel flag: il successivo up passa da `hw_up()` ->
-`wlc_phy_por_inform()` e il PHY si reinizializza per intero, tabelle statiche e
-rcal/rccal comprese.
+The blob's down path **does not clear `hw_up` in `pub`**, so that cycle only
+redoes a partial init. For the init with the static download, a **writemem**
+that clears that flag is needed between the down and the up: the next up goes
+through `hw_up()` -> `wlc_phy_por_inform()` and the PHY reinitialises in full,
+static tables and rcal/rccal included.
 
-Misurato su una cattura vd630 presa col solo `down`/`up`: **zero occorrenze** di
-`PHY.WR addr=0x72 val=0x2800`, l'apertura della tabella 10. Il file si chiamava
-`fullinit.txt` e non conteneva il download statico — il nome non e' il criterio, il
-grep lo e'.
+Measured on a vd630 capture taken with just `down`/`up`: **zero occurrences** of
+`PHY.WR addr=0x72 val=0x2800`, the opening of table 10. The file was called
+`fullinit.txt` and did not contain the static download — the name is not the
+criterion, the grep is.
 
-Per arrivare al flag serve il base pointer dei dati privati, che `wl_diag` stampa in
-dmesg. Se le `netdev_ops` non si risolvono per nome, ora c'e' un ripiego che non usa
-simboli: riconosce l'interfaccia perche' le sue `netdev_ops` cadono **dentro il
-modulo wl** (`__module_address`). Gli offset per camminare da `priv` a `pub` sono
-per versione: quelli annotati in `wl_diag.c` sono del blob 6.30 e su 7.14 non valgono.
+Reaching the flag needs the base pointer of the private data, which `wl_diag`
+prints in dmesg. If the `netdev_ops` do not resolve by name, `3-4/` has a
+fallback that uses no symbols: it recognises the interface because its
+`netdev_ops` fall **inside the wl module** (`__module_address`). The offsets to
+walk from `priv` to `pub` are per version: those noted in `wl_diag.c` are the
+6.30 blob's and do not hold on 7.14.
 
-### Il poke a comando
+### The poke on command
 
-`poke=` come parametro spara a `insmod`, cioe' prima del `wl down`: per questa
-sequenza non serve. Da usare invece il write handler su `/proc/wl_diag`:
+`poke=` as a parameter fires at `insmod`, that is before the `wl down`: for this
+sequence it is no use. Use the write handler on `/proc/wl_diag` instead, which
+only `3-4/` has (on the DSL-3580L, `2-6-30/`, the board's own `dumpmem`/`setmem`
+do the same job, see `router-data/dsl3580l/README.md`):
 
 ```sh
 insmod wl_diag.ko arm=1              # priv= in dmesg
-cat /proc/wl_diag | nc host 5555 &   # drenare PRIMA
+cat /proc/wl_diag | nc host 5555 &   # drain FIRST
 wl down
-echo 'r   <priv> 64'  > /proc/wl_diag   # per trovare pub, dump in dmesg
-echo 'w8  <addr> 0'   > /proc/wl_diag   # azzera hw_up
+echo 'r   <priv> 64'  > /proc/wl_diag   # to find pub, dump in dmesg
+echo 'w8  <addr> 0'   > /proc/wl_diag   # clear hw_up
 wl up
 ```
 
-Larghezze: `w8`, `w16`, `w32`, piu' `r <addr> <n>` che dumpa in dmesg. Su MIPS un
-`w32` su indirizzo non allineato prende un address error, quindi l'handler lo
-rifiuta. Il risultato va in **dmesg** e non nella fifo, che resta la cattura.
+Widths: `w8`, `w16`, `w32`, plus `r <addr> <n>`, which dumps into dmesg. On MIPS
+a `w32` on an unaligned address takes an address error, so the handler refuses
+it. The result goes to **dmesg** and not into the FIFO, which stays the capture.
 
-E la scrittura va fatta da dentro il kernel e non con un writemem da userspace via
-`/dev/mem`: gli indirizzi di un modulo stanno in spazio **vmalloc** (`0xc1...`,
-`0xc2...` nei log), che non e' raggiungibile con l'offset fisso di KSEG0 — servirebbe
-camminare le page table.
+And the write has to be done from inside the kernel and not with a userspace
+writemem through `/dev/mem`: a module's addresses are in **vmalloc** space
+(`0xc1...`, `0xc2...` in the logs), which cannot be reached with KSEG0's fixed
+offset — the page tables would have to be walked.
