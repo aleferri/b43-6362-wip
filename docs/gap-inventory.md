@@ -1,16 +1,19 @@
-# Inventario dei buchi
+# Inventory of the holes
 
-Generato su `torvalds/linux` @ `848acc8ffe1b` con
-`reverse-tools/check_gaps.py --tree ~/src/linux --format md`. La colonna "rev
-citate" elenca i valori che la funzione discrimina; `assente` significa che la
-revisione target (radio 8 / phy 8) non compare, `stub` che il corpo è vuoto.
-Lo strumento dà indizi, non verdetti: sotto ci sono solo le voci che ho poi
-letto a mano. Il bilancio, dopo averle lette tutte: di sei voci iniziali **tre
-non erano buchi** (`b43_radio_2057_rccal`, `b43_radio_2057_setup`,
-`b43_radio_2057_rcal`) e una era accostata alla funzione sbagliata. Il motivo è
-sistematico: l'assenza di un `case` in questo driver di solito ricalca il fatto
-che il vendore, per quella revisione, non fa niente di speciale. Vale come
-avvertenza su come leggere la tabella qui sopra.
+Generated on `torvalds/linux` @ `848acc8ffe1b` with
+`reverse-tools/check_gaps.py --tree ~/src/pin --format md`; the table is the
+tool's output, unchanged, checked again on that tree. The "rev citate" column
+lists the values the function discriminates on; `assente` means the target
+revision (radio 8 / phy 8) does not appear, `stub` that the body is empty. The
+line numbers are the pinned tree's, not `b43/`'s.
+
+The tool gives hints, not verdicts: below are only the entries that were then
+read by hand. The balance, after reading them all: of six initial entries
+**three were not holes** (`b43_radio_2057_rccal`, `b43_radio_2057_setup`,
+`b43_radio_2057_rcal`) and one was paired with the wrong function. The reason is
+systematic: the absence of a `case` in this driver usually mirrors the fact that
+the vendor, for that revision, does nothing special. It stands as a warning on
+how to read the table.
 
 | file:riga | funzione | campo | rev citate | stato |
 |---|---|---|---|---|
@@ -37,85 +40,86 @@ avvertenza su come leggere la tabella qui sopra.
 | `tables_nphy.c:3825` | `b43_nphy_get_gain_ctl_workaround_ent` | `radio_rev` | 11 | assente |
 | `tables_nphy.c:3740` | `b43_nphy_get_tx_gain_table` | `rev` | 3, 4, 5, 6, <3 | assente |
 
-## Le voci che contano per il 6362
+## The entries that matter for the 6362
 
-### 1. `b43_nphy_gain_ctl_workarounds_rev7` — stub vuoto (phy_n.c:2481)
+### 1. `b43_nphy_gain_ctl_workarounds_rev7` — empty stub (phy_n.c:2481)
 
-È il buco grosso. Copre il gain control RX di **tutti** i N-PHY rev 7+, quindi
-anche il rev 8: soglie di clip, LNA gain, crsmin, RSSI gain. Corpo attuale: un
-solo commento `/* TODO */`.
+It is the big hole. It covers the RX gain control of **every** N-PHY rev 7+, so
+rev 8 too: clip thresholds, LNA gain, crsmin, RSSI gain. Current body: a single
+`/* TODO */` comment.
 
-Riferimento: `wlc_phy_workarounds_nphy_gainctrl` (brcmsmac `phy_n.c:15425`), che
-per radiorev 3 e 8 — il ramo comincia a `15593` — chiama
-`wlc_phy_workarounds_nphy_gainctrl_2057_rev6`
-(`15224`) e per il solo rev 8 aggiunge `mod_phy_reg(0x283, 0xff, 0x44)` e
-`mod_phy_reg(0x280, 0xff, 0x44)`.
+Reference: `wlc_phy_workarounds_nphy_gainctrl` (brcmsmac `phy_n.c:15425`), which
+for radiorev 3 and 8 — the branch starts at `15593` — calls
+`wlc_phy_workarounds_nphy_gainctrl_2057_rev6` (`15224`) and for rev 8 alone adds
+`mod_phy_reg(0x283, 0xff, 0x44)` and `mod_phy_reg(0x280, 0xff, 0x44)`.
 
-Impatto atteso: sensibilità RX e comportamento AGC. **SALAME**: che sia il
-primo collo di bottiglia sul 2x2 è la mia ipotesi di lettura, va misurato
-(vedi `docs/reports/30-rx-sensitivity.md`) prima di trattarlo come tale.
+Expected impact: RX sensitivity and AGC behaviour. **SALAME**: that it is the
+first bottleneck on 2x2 is a reading, to be measured
+(see `docs/reports/30-rx-sensitivity.md`) before treating it as such.
 
-Patch: `patches/b43/MESSAGES.md#0001`, scritta sui valori della cattura e non su brcmsmac,
-perché i due divergono: LNA1 `8, 13, 18, 25` invece di `9, 14, 19, 24`, W1 clip
-24 invece di 13, e in 2.4 GHz il device programma anche LNA2, TIA e i gain bits
-che il ramo 2 GHz di brcmsmac non tocca. Dettaglio in `docs/trace-init-2g.md`.
-Limitata a radio rev 8, 2.4 GHz, 20 MHz. Per le altre revisioni servirebbe una
-cattura da quell'hardware; per i 40 MHz serve un device che li accenda, perché il
-driver vendor non li usa in 2.4 GHz su questa board (31 chanspec su 31 sono bw20).
-Applica pulito su `848acc8ffe1b`, **non compilata e non provata su hardware**.
+Patch: `patches/b43/MESSAGES.md#0001`, written on the capture's values and not
+on brcmsmac's, because the two diverge: LNA1 `8, 13, 18, 25` instead of
+`9, 14, 19, 24`, W1 clip 24 instead of 13, and at 2.4 GHz the device also
+programs LNA2, TIA and the gain bits, which brcmsmac's 2 GHz branch does not
+touch. Details in `docs/trace-init-2g.md`. Limited to radio rev 8, 2.4 GHz,
+20 MHz. Other revisions would need a capture from that hardware; 40 MHz needs a
+device that turns it on, because the vendor driver does not use it at 2.4 GHz on
+this board (31 chanspecs out of 31 are bw20). It builds in the harness from
+`b43/`, **not tried on hardware**.
 
-### 2. `b43_radio_2057_setup` — nessun `case 8`, ma NON è un buco (phy_n.c:719)
+### 2. `b43_radio_2057_setup` — no `case 8`, but NOT a hole (phy_n.c:719)
 
-Correzione rispetto alla prima stesura di questo documento: il ramo mancante per
-radiorev 5/7/8 è un no-op sul 6362 in 2.4 GHz. La catena è questa:
+Correction to the first draft of this document: the missing branch for radiorev
+5/7/8 is a no-op on the 6362 at 2.4 GHz. The chain is this:
 
-1. `b43_radio_2057_setup()` chiama `b43_radio_2057_chantab_upload()` **prima**
-   dello switch su `radio_rev`;
-2. l'upload scrive `RFPLL_LOOPFILTER_R1`, `_C2`, `_C1` e `CP_KPD_IDAC` dai campi
-   della chantab entry;
-3. in `b43_nphy_chantab_phy_rev8_radio_rev8` tutte e 14 le entry portano
+1. `b43_radio_2057_setup()` calls `b43_radio_2057_chantab_upload()` **before**
+   the switch on `radio_rev`;
+2. the upload writes `RFPLL_LOOPFILTER_R1`, `_C2`, `_C1` and `CP_KPD_IDAC` from
+   the fields of the chantab entry;
+3. in `b43_nphy_chantab_phy_rev8_radio_rev8` all 14 entries carry
    `r1=0x1b, c2=0x0a, c1=0x0a, cp_kpd=0x30`;
-4. che sono esattamente i valori che brcmsmac scrive nell'override per radiorev
-   5/7/8 in 2.4 GHz (`phy_n.c:20960`);
-5. e sono gli stessi che la cattura mostra sul silicio, `025=1b 027=0a 028=0a
-   029=30` a ogni cambio canale (`docs/trace-init-2g.md`).
+4. which are exactly the values brcmsmac writes in the override for radiorev
+   5/7/8 at 2.4 GHz (`phy_n.c:20960`);
+5. and they are the same ones the capture shows on silicon, `025=1b 027=0a 028=0a
+   029=30` at every channel change (`docs/trace-init-2g.md`).
 
-Quindi i registri finiscono giusti per un'altra strada. Vale anche per radio rev
-5 (`chantab_phy_rev8_radio_rev5`, stessi quattro valori su tutte le 14 entry).
-Il meccanismo dell'override serve altrove: per radio rev 14 la chantab porta
-`r1=0x2b, cp_kpd=0x30` e il `case 14` li cambia in `0x1b`/`0x3f`.
+So the registers end up right by another road. It holds for radio rev 5 too
+(`chantab_phy_rev8_radio_rev5`, the same four values on all 14 entries). The
+override mechanism serves elsewhere: for radio rev 14 the chantab carries
+`r1=0x2b, cp_kpd=0x30` and `case 14` changes them to `0x1b`/`0x3f`.
 
-Resta invece una differenza reale nella stessa funzione: b43 implementa **solo**
-il ramo `b43_nphy_ipa()`, mentre brcmsmac ha anche l'`else` (non-IPA), che per
-radiorev != 5 scrive `pad2g_tune_pus = 0x3` e `txmix2g_tune_boost_pu = 0x61`.
-Rilevante solo su board con PA esterno: la DSL-3580L non è fra queste, quindi
-per questo progetto è una nota, non un lavoro.
+What remains is a real difference in the same function: b43 implements **only**
+the `b43_nphy_ipa()` branch, while brcmsmac also has the `else` (non-IPA), which
+for radiorev != 5 writes `pad2g_tune_pus = 0x3` and
+`txmix2g_tune_boost_pu = 0x61`. Relevant only on boards with an external PA: the
+DSL-3580L is not one of them, so for this project it is a note, not work.
 
-### 3. `b43_radio_2057_rcal` — nessun `case 8`, e va bene così (phy_n.c:811)
+### 3. `b43_radio_2057_rcal` — no `case 8`, and that is fine (phy_n.c:811)
 
-Seconda correzione: in `wlc_phy_radio205x_rcal` (brcmsmac `phy_n.c:19766`) i
-rami radiorev-specifici sono solo tre — radiorev 5 (pre e post, `0x342` e
-`IQTEST_SEL_PU`) e radiorev <= 4 o 6 (il trim di tempsense/bandgap alla fine).
-Per radiorev 8 il vendore esegue **solo** la sequenza comune di `RCAL_CONFIG`,
-che è esattamente ciò che b43 fa cadendo fuori dai suoi `case 5/9/14`.
-Verificato riga per riga: niente da aggiungere.
+Second correction: in `wlc_phy_radio205x_rcal` (brcmsmac `phy_n.c:19766`) the
+radiorev-specific branches are only three — radiorev 5 (pre and post, `0x342` and
+`IQTEST_SEL_PU`) and radiorev <= 4 or 6 (the tempsense/bandgap trim at the end).
+For radiorev 8 the vendor runs **only** the common `RCAL_CONFIG` sequence, which
+is exactly what b43 does by falling outside its `case 5/9/14`. Checked line by
+line: nothing to add.
 
-### 4. `b43_nphy_tx_cal_radio_setup_rev7` — non è quello che sembrava (phy_n.c:4725)
+### 4. `b43_nphy_tx_cal_radio_setup_rev7` — not what it looked like (phy_n.c:4725)
 
-Il `phy->radio_rev != 5` in questa funzione riguarda l'esistenza del registro
-`TSSIA`, non un ramo mancante per il rev 8. I tre siti radiorev 8 di
-`wlc_phy_a4` che lo strumento aveva accostato a questa funzione stanno altrove:
-sono la scelta della tabella PAPD pad-gain, cioè la questione di
-`rf-pwr-offset-rev8.md`. Voce chiusa, e sostituita da quella.
+The `phy->radio_rev != 5` in this function concerns the existence of the
+`TSSIA` register, not a missing branch for rev 8. The three radiorev 8 sites of
+`wlc_phy_a4` that the tool had paired with this function are elsewhere: they are
+the choice of the PAPD pad-gain table, i.e. the question of
+`rf-pwr-offset-rev8.md`. Entry closed, and replaced by that one.
 
-### 4a bis. `b43_nphy_rev3_cal_rx_iq()` e' uno stub — la cal RX IQ non esiste
+### 4a bis. `b43_nphy_rev3_cal_rx_iq()` is a stub — the RX IQ cal does not exist
 
-Non e' nella tabella qui sopra, e il motivo e' un limite dello strumento:
-`check_gaps.py` guarda le funzioni che discriminano su `rev` o `radio_rev`, e il
-corpo di questa e' **`return -1;`** senza nessun test di revisione, quindi non la
-vede. Un secondo posto dove guardare sono le funzioni chiamate e mai scritte.
+It is not in the table above, and the reason is a limit of the tool:
+`check_gaps.py` looks at the functions that discriminate on `rev` or
+`radio_rev`, and the body of this one is **`return -1;`** with no revision test,
+so it does not see it. A second place to look is the functions called and never
+written.
 
-Il corpo per intero:
+The whole body, in mainline:
 
     static int b43_nphy_rev3_cal_rx_iq(struct b43_wldev *dev,
                     struct nphy_txgains target, u8 type, bool debug)
@@ -123,454 +127,468 @@ Il corpo per intero:
             return -1;
     }
 
-Vale per **ogni N-PHY rev 3+**, non solo il rev 8. E il chiamante ci mette del
-suo: `b43_nphy_cal_rx_iq()` forza `type = 0` quando `phy->rev >= 7`, quindi il
-`type = 2` che il vendore usa all'init non arriva comunque a destinazione.
+It holds for **every N-PHY rev 3+**, not only rev 8. And the caller adds its
+own: `b43_nphy_cal_rx_iq()` forces `type = 0` when `phy->rev >= 7`, so the
+`type = 2` the vendor uses at init does not reach its destination anyway.
 
-Cosa c'e' dietro, misurato sulla cattura: **7510 op**, #14093-22246, un terzo
-della finestra di init. Che sia la cal RX IQ si riconosce da tre cose, tutte
-contabili: otto scritture della tabella dei campioni da 160 word (#15508, #16319,
-#17130, #17542, #18588, #19399, #20210, #20624), due azzeramenti da 84 celle
-sulle tabelle 26 e 27 a `off=0x40 len=84` per ogni tono, e diciassette coppie
-read/write su IQLOCAL una cella per volta.
+What is behind it, measured on the capture: **7510 ops**, #14093-22246, a third
+of the init window. That it is the RX IQ cal shows in three countable things:
+eight writes of the 160-word sample table (#15508, #16319, #17130, #17542,
+#18588, #19399, #20210, #20624), two 84-cell clearings on tables 26 and 27 at
+`off=0x40 len=84` for every tone, and seventeen read/write pairs on IQLOCAL one
+cell at a time.
 
-Quelle scritture da 84 celle **non sono un upload di gain**, come diceva questa
-voce: sono `wlc_phy_txpwrctrl_enable_nphy` che spegne il controllo di potenza
-dentro `wlc_phy_txpwr_index_nphy`, e b43 quel codice ce l'ha in
-`b43_nphy_tx_power_ctrl()`. Vedi `docs/rxiq-cal-map.md`.
+Those 84-cell writes **are not a gain upload**, as this entry used to say: they
+are `wlc_phy_txpwrctrl_enable_nphy` turning the power control off inside
+`wlc_phy_txpwr_index_nphy`, and b43 has that code in `b43_nphy_tx_power_ctrl()`.
+See `docs/rxiq-cal-map.md`.
 
-**CHIUSA.** `patches/b43/MESSAGES.md#0018` porta il guscio, l'indice di potenza per core e lo
-sweep di gain, e `up-ch1` passa da 5791 a **11552 op su 22951**; `0019` aggiunge il
-gain di pre-calibrazione (**12363**), `0020` rimette l'indice dopo la cal PAPD
-(**13134**), `0021` lo restituisce dopo la lettura dei gain (**13625**), e
-`0022`+`0023` chiudono con la **misura** — tono, coefficienti, e la funzione che
-torna 0: **14351, il 63%**.
+**CLOSED.** `patches/b43/MESSAGES.md#0018` brings the shell, the per-core power
+index and the gain sweep, and `up-ch1` goes from 5791 to **11552 ops of 22951**;
+`0019` adds the pre-calibration gain (**12363**), `0020` puts the index back
+after the PAPD cal (**13134**), `0021` hands it back after reading the gains
+(**13625**), and `0022`+`0023` close with the **measurement** — tone,
+coefficients, and the function returning 0: **14351, 63%**.
 
-Anche la ricaduta e' chiusa: la cal riesce, quindi `b43_nphy_save_cal()` viene
-chiamata, e per la prima volta su questo hardware una calibrazione viene salvata.
+The consequence is closed too: the cal succeeds, so `b43_nphy_save_cal()` is
+called, and for the first time on this hardware a calibration is saved. Before
+`0018` the stub returned -1, and in `b43_phy_initn` the `save_cal` sits behind
+`if (b43_nphy_cal_rx_iq(...) == 0)`, so **no calibration was ever saved** —
+either from the sequence of `0014` or from the `perical != 2` branch.
 
-E il degrado `type = 2 -> 0` che questa voce chiamava difetto **non era quello**:
-togliendolo il port peggiora di 476 op. Il difetto era a monte, nel modo del test
-DAC ristretto a `bool` (`patches/mainline/b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag`);
-sistemato quello, il tipo 2 e il tipo 0 danno le stesse op e il degrado si puo'
-togliere senza costo.
+And the `type = 2 -> 0` downgrade this entry called a defect **was not one**:
+removing it the port gets worse by 476 ops. The defect was upstream of it, in
+the DAC test mode narrowed to `bool`
+(`patches/mainline/b43-treat-the-n-phy-dac-test-as-a-mode-not-a-flag`); with that
+fixed, type 2 and type 0 give the same ops and the downgrade can be removed at
+no cost.
 
-Ricaduta oltre le op: lo stub torna -1, e in `b43_phy_initn` la `save_cal` sta
-dietro `if (b43_nphy_cal_rx_iq(...) == 0)`, quindi **non viene mai salvata una
-calibrazione** — vale per la sequenza di `0014` come per il ramo `perical != 2`.
-
-Non e' portabile a pezzi come le tabelle: e' un loop guidato dalle letture, come
-`a2`/`a3`. La mappa della fase c'e', fatta come quella della cal PAPD:
+It cannot be ported in pieces like the tables: it is a loop driven by the reads,
+like `a2`/`a3`. The map of the phase exists, made like the one of the PAPD cal:
 `docs/rxiq-cal-map.md`.
 
-### 4i. Tre regioni di object memory che il port non tocca
+### 4i. Three object memory regions the port does not touch
 
-Misurato sulle due catture, con `OBJ.RD`/`OBJ.WR` (gli accessor `*_objmem16`):
+Measured on the two captures, with `OBJ.RD`/`OBJ.WR` (the `*_objmem16`
+accessors):
 
-| offset | in b43 | in brcmsmac | letture | scritture viste |
+| offset | in b43 | in brcmsmac | reads | writes seen |
 |---|---|---|---|---|
 | `0x1c0`-`0x1df` | `B43_SHM_SH_OFDMDIRECT` | **`M_RT_DIRMAP_A`** = `(0xe0 * 2)` | 192 / 176 | **0** |
 | `0x300`-`0x31f` | `B43_SHM_SH_PWRIND_BLKS` (`0x308`) | power indication | 128 / 118 | 104 / 92 |
-| `0x6c0`-`0x6df` | **nessun nome** | — | 448 / 416 | **0** |
+| `0x6c0`-`0x6df` | **no name** | — | 448 / 416 | **0** |
 
-`M_RT_DIRMAP_A` e' una mappa di **puntatori**, non di valori: i numeri letti
-(`0x384, 0x38f, 0x39a, ...`, passo 11) puntano alle voci per rate, e
-`M_RT_OFDM_PCTL1_POS = 18` e' l'offset del word di controllo potenza dentro la
-voce. brcmsmac lo usa come `read_shm(entry_ptr + M_RT_OFDM_PCTL1_POS)` e la
-`write_shm` corrispondente (`main.c:1646` e `1653`). E' il percorso della potenza
-per rate, e sta nel **core**, non nel PHY.
+`M_RT_DIRMAP_A` is a map of **pointers**, not of values: the numbers read
+(`0x384, 0x38f, 0x39a, ...`, stride 11) point at the per-rate entries, and
+`M_RT_OFDM_PCTL1_POS = 18` is the offset of the power control word inside the
+entry. brcmsmac uses it as `read_shm(entry_ptr + M_RT_OFDM_PCTL1_POS)` and the
+corresponding `write_shm` (`main.c:1646` and `1653`). It is the per-rate power
+path, and it lives in the **core**, not in the PHY.
 
-**Le zero scritture non provano niente, e per due giri ho creduto il contrario.**
-Gli accessor agganciati da `wl-diag` erano `write_objmem16`/`read_objmem16`; la
-object memory si scrive anche con `write_objmem` (parola singola col selettore di
-spazio) e in blocco con `copyto_objmem`, che dentro chiama `write_objmem` e **non**
-la variante `*16`. Una scrittura in blocco quindi non compariva. E' la trappola 1
-nella sua forma generale: *prima di dire che qualcosa non viene scritto, guardare da
-che accessor passa la scrittura.* La deroga qui si dichiara **contro l'hook
-mancante**, non contro il conteggio.
+**Zero writes prove nothing, and for two rounds the opposite was believed.** The
+accessors hooked by `wl-diag` were `write_objmem16`/`read_objmem16`; object
+memory is also written with `write_objmem` (single word with the space selector)
+and in bulk with `copyto_objmem`, which internally calls `write_objmem` and
+**not** the `*16` variant. So a bulk write did not show up. It is trap 1 in its
+general form: *before saying something is not written, look at which accessor
+the write goes through.* The exception here is declared **against the missing
+hook**, not against the count.
 
-Aggiunti i quattro hook (`wlc_bmac_read_objmem`, `write_objmem`, `copyto_objmem`,
-`copyfrom_objmem`, dai simboli del blob: 236, 160, 160, 156 byte; i `wlapi_*`
-omonimi sono trampolini da 16 byte e non si agganciano).
+The four hooks were added (`wlc_bmac_read_objmem`, `write_objmem`,
+`copyto_objmem`, `copyfrom_objmem`, from the blob's symbols: 236, 160, 160, 156
+bytes; the homonymous `wlapi_*` are 16-byte trampolines and are not hooked).
 
-**E quali esistono dipende dalla build**, misurato su tre artefatti:
+**And which ones exist depends on the build**, measured on three artefacts:
 
-| simbolo | `wl.ko` vd630 | blob D6220 (7.14) | blob 3580L (6.30) |
+| symbol | `wl.ko` vd630 | D6220 blob (7.14) | 3580L blob (6.30) |
 |---|---|---|---|
-| `read_objmem` / `write_objmem` | **assenti** | assenti | presenti (236 / 160) |
-| `read_objmem16` / `write_objmem16` | **assenti** | presenti | assenti |
+| `read_objmem` / `write_objmem` | **absent** | absent | present (236 / 160) |
+| `read_objmem16` / `write_objmem16` | **absent** | present | absent |
 | `copyto_objmem` | **568 B** | 160 | 160 |
 | `copyfrom_objmem` | **612 B** | 156 | — |
-| `wl_netdev_ops` / `wl_dslcpe_netdev_ops` | **nessun simbolo** | 136 | 80 |
+| `wl_netdev_ops` / `wl_dslcpe_netdev_ops` | **no symbol** | 136 | 80 |
 
-Sulla vd630 gli accessor a parola singola sono **inlinati**, e la size lo dice:
-`copyto_objmem` e' 568 byte la' contro 160 nel blob, cioe' se l'e' mangiata. Quindi su
-quel device **l'unico accesso osservabile alla object memory e' il bulk**, e una
-cattura che non mostra scritture a parola singola non dice niente su quella classe.
-43 hook su 47 si risolvono; i 4 che mancano sono esattamente quelli.
+On the vd630 the single-word accessors are **inlined**, and the size says so:
+`copyto_objmem` is 568 bytes there against 160 in the blob, i.e. it ate them. So
+on that device **the only observable access to object memory is the bulk one**,
+and a capture showing no single-word writes says nothing about that class. 43
+hooks of 47 resolve; the 4 missing are exactly those.
 
-Le `netdev_ops` non hanno simbolo affatto in quella build, quindi il base pointer per
-nome non e' ottenibile: `wl_diag` ora lo trova col ripiego `__module_address`, che non
-usa simboli.
+The `netdev_ops` have no symbol at all in that build, so the base pointer cannot
+be obtained by name: `wl_diag` (`3-4/`) now finds it with the
+`__module_address` fallback, which uses no symbols.
 
-Un vicolo chiuso, per non rifarlo: `wlc_phy_txpower_update_shm` (748 byte nel blob,
-`phy_cmn.c:1615` in brcmsmac) sembrava il produttore dei valori per rate, e non lo
-e': la sua prima riga e' `if (ISNPHY(pi)) return;`. Su N-PHY non fa niente, e b43
-giustamente non ha un equivalente.
+A dead end, so as not to walk it again: `wlc_phy_txpower_update_shm` (748 bytes
+in the blob, `phy_cmn.c:1615` in brcmsmac) looked like the producer of the
+per-rate values, and it is not: its first line is `if (ISNPHY(pi)) return;`. On
+the N-PHY it does nothing, and b43 rightly has no equivalent.
 
-### 4j. I due tetti della tabella di potenza, e da dove vengono
+### 4j. The two caps of the power table, and where they come from
 
-`patches/b43/MESSAGES.md#0025` applica due tetti per numero di catene — 68 qdBm a una, 56 a
-due — e con quelli le 84 celle della tabella di potenza aggiustata escono **84 su
-84** sulla 3580L e **82 su 84** sulla vd630, che hanno offset SROM diversi di un
-fattore quattro. Le 2 che restano sono uno **sfasamento di un gruppo** nella colonna
-a una catena, non un valore sbagliato, e si vede solo sulla vd630 perche' l'altra ha
-le nibble tutte uguali.
+`patches/b43/MESSAGES.md#0025` applies two caps by number of chains — 68 qdBm
+for one, 56 for two — and with them the 84 cells of the adjusted power table
+come out **84 of 84** on the 3580L and **82 of 84** on the vd630, which have SROM
+offsets differing by a factor of four. The 2 left are a **one-group shift** in
+the one-chain column, not a wrong value, and it shows only on the vd630 because
+the other has all nibbles equal.
 
-**I 3 dB fra i due tetti sono aritmetica, non misura**: due catene che irradiano
-insieme fanno il doppio della potenza di una, quindi ognuna deve scendere di
-`10*log10(2)`. `68 - 56 = 12` qdBm e' quel fattore a due decimali. Serve il numero di
-catene, non una tabella.
+**The 3 dB between the two caps is arithmetic, not measurement**: two chains
+radiating together make twice the power of one, so each has to go down by
+`10*log10(2)`. `68 - 56 = 12` qdBm is that factor to two decimals. It needs the
+number of chains, not a table.
 
-**Il 68 invece e' dato regolatorio**, e va detto perche' cambia dove dovrebbe stare:
-il vendore porta dentro le sue tabelle per paese, `locales_2g_base` (5744 B) e
-`locales_2g_ht` (7782 B), e i byte sono limiti in qdBm — si leggono 76, 66, 60, 56,
-48, 45. Nella tabella MIMO il **56 compare 252 volte** ed e' fra i valori dominanti;
-quella legacy e' centrata piu' in alto. Quindi il tetto basso viene da la'.
+**The 68 on the other hand is regulatory data**, and it has to be said because it
+changes where it should live: the vendor carries per-country tables,
+`locales_2g_base` (5744 B) and `locales_2g_ht` (7782 B), and the bytes are limits
+in qdBm — 76, 66, 60, 56, 48, 45 can be read. In the MIMO table **56 appears 252
+times** and is among the dominant values; the legacy one is centred higher. So
+the low cap comes from there.
 
-E `maxpwr20[BRCMS_MAXPWR_MIMO_TBL_SIZE]` con `SIZE = 14` **non e' per gruppo di
-modulazione**: il commento di brcmsmac dice «index by channel for 2.4 GHz limits»,
-quindi sono i 14 canali, non quattordici gruppi di modulazione.
+And `maxpwr20[BRCMS_MAXPWR_MIMO_TBL_SIZE]` with `SIZE = 14` **is not per
+modulation group**: brcmsmac's comment says «index by channel for 2.4 GHz
+limits», so they are the 14 channels, not fourteen modulation groups.
 
-Cosa manca per derivarlo invece di misurarlo: l'EIRP di Linux (20 dBm) meno il
-guadagno d'antenna di questa board (`ag0 = 2`) fa 72 qdBm, non 68. I 4 qdBm che
-restano non sono spiegati — e il blocco `#if 0` di `b43_nphy_op_recalc_txpower`, che
-sottrarrebbe `hw_gain = 6 + antenna_gain`, darebbe 72 anche lui.
+What is missing to derive it instead of measuring it: Linux's EIRP (20 dBm) minus
+this board's antenna gain (`ag0 = 2`) makes 72 qdBm, not 68. The 4 qdBm left are
+not explained — and the `#if 0` block of `b43_nphy_op_recalc_txpower`, which would
+subtract `hw_gain = 6 + antenna_gain`, would give 72 too.
 
-### 4b. La tabella RF power offset del rev 8 usa i valori del rev 5 — CHIUSA
+### 4b. The rev 8 RF power offset table uses the rev 5 values — CLOSED
 
-Il vendore per radiorev 7 e 8 usa `nphy_papd_padgain_dlt_2g_2057rev7`, la
-tabella merged usa i valori del rev 5. **Deciso dalla cattura**: ricalcolando le
-128 celle PAPD che quella tabella alimenta, i valori rev 7 le predicono tutte, i
-valori in tree ne predicono 5. Correzione in `patches/b43/MESSAGES.md#0002`, dettaglio in
+For radiorev 7 and 8 the vendor uses `nphy_papd_padgain_dlt_2g_2057rev7`, the
+merged table uses the rev 5 values. **Decided by the capture**: recomputing the
+128 PAPD cells that table feeds, the rev 7 values predict all of them, the
+in-tree ones predict 5. Fix in `patches/b43/MESSAGES.md#0002`, details in
 `docs/rf-pwr-offset-rev8.md`.
 
-### 4c. Il percorso PAPD non viene mai eseguito sui rev 7+
+### 4c. The PAPD path is never run on rev 7+
 
-`b43_nphy_tx_gain_table_upload()` recupera la tabella degli offset e poi ritorna
-per `phy->rev >= 7` con un `/* TODO: Enable this once we have gains configured */`,
-quindi le tabelle 26 e 27 a offset 576 (128 celle per core, la compensazione
-PAPD) restano non programmate. Il loop che le calcola è già lì e nell'harness
-produce esattamente le 256 celle della cattura. `patches/b43/MESSAGES.md#0003` lo abilita per
-radio 2057 rev 8 e lascia gli altri rev 7+ come sono. Da mandare dopo `0002`:
-con i valori sbagliati scrive 246 celle su 256 diverse dal vendore.
+`b43_nphy_tx_gain_table_upload()` fetches the offset table and then returns for
+`phy->rev >= 7` with a `/* TODO: Enable this once we have gains configured */`,
+so tables 26 and 27 at offset 576 (128 cells per core, the PAPD compensation)
+stay unprogrammed. The loop that computes them is already there and in the
+harness produces exactly the capture's 256 cells. `patches/b43/MESSAGES.md#0003`
+enables it for radio 2057 rev 8 and leaves the other rev 7+ as they are. To be
+sent after `0002`: with the wrong values it writes 246 cells of 256 different
+from the vendor's.
 
-### 5. `b43_radio_2057_rccal` — non è un buco
+### 5. `b43_radio_2057_rccal` — not a hole
 
-Lo strumento lo segnala perché il ramo "special" cita solo 3/4/6, ma per il rev
-8 la strada giusta è proprio l'altra: in brcmsmac `wlc_phy_radio2057_rccal`
-(`19874`) il gruppo `chip43226_6362A0` è radiorev 3/4/6, e il rev 8 va sul ramo
-v7 con `MASTER 0x61/0x69/0x73`, `TRC0 0xe9/0xd5/0x99`, `X1 0x6e`. Le costanti
-combaciano con quelle in b43: **verificato, niente da fare**.
+The tool flags it because the "special" branch names only 3/4/6, but for rev 8
+the right road is the other one: in brcmsmac's `wlc_phy_radio2057_rccal`
+(`19874`) the `chip43226_6362A0` group is radiorev 3/4/6, and rev 8 goes on the
+v7 branch with `MASTER 0x61/0x69/0x73`, `TRC0 0xe9/0xd5/0x99`, `X1 0x6e`. The
+constants match those in b43: **checked, nothing to do**.
 
-### 5b. La chantab non scriveva i campi 5 GHz che il vendore azzera — CHIUSA
+### 5b. The chantab did not write the 5 GHz fields the vendor clears — CLOSED
 
-b43 ha due forme di tabella di canale rev 7+: quella intera e una **solo 2 GHz**
-che lascia fuori dieci campi per risparmiare spazio. Lasciando fuori i campi ha
-lasciato fuori anche le loro scritture, quindi un cambio canale su una board che
-usa la tabella 2 GHz lascia `LOGEN_MX5G_TUNE`, `LOGEN_INDBUF5G_TUNE`,
-`PGA_BOOST_TUNE` e i `TXMIX5G`/`PAD5G`/`LNA5G` dei due core col valore del canale
-precedente.
+b43 has two forms of the rev 7+ channel table: the full one and a **2 GHz only**
+one that leaves out ten fields to save space. Leaving out the fields it left out
+their writes too, so a channel change on a board that uses the 2 GHz table leaves
+`LOGEN_MX5G_TUNE`, `LOGEN_INDBUF5G_TUNE`, `PGA_BOOST_TUNE` and the
+`TXMIX5G`/`PAD5G`/`LNA5G` of both cores at the previous channel's value.
 
-Tre fonti indipendenti dicono che vanno scritti, e a zero:
+Three independent sources say they have to be written, and with zero:
 
-- la **cattura**: ognuno dei dieci viene scritto con valore 0, a **tutti e 31** i
-  cambi canale, su cinque canali e due cicli di interfaccia;
-- **brcmsmac**, che tiene una tabella sola per le due bande: in
-  `chan_info_nphyrev8_2057_rev8` ogni riga a 2.4 GHz ha zero in quelle dieci
-  colonne, quindi scrive dieci zeri a ogni cambio;
-- **b43 stessa**, nel ramo della tabella intera, li scrive in posizione.
+- the **capture**: each of the ten is written with value 0, at **all 31**
+  channel changes, on five channels and two interface cycles;
+- **brcmsmac**, which keeps a single table for the two bands: in
+  `chan_info_nphyrev8_2057_rev8` every 2.4 GHz row has zero in those ten
+  columns, so it writes ten zeros at every change;
+- **b43 itself**, in the full-table branch, writes them in position.
 
-E la posizione non è quella ovvia: i dieci sono **intercalati** con quelli a 2
-GHz, non in coda — `0x43` subito dopo `0x41`, `0x4a` dopo `0x47`, i tre del core 0
-fra `PAD2G` e `LNA2G`. È lo stesso ordine del ramo intero di b43.
+And the position is not the obvious one: the ten are **interleaved** with the
+2 GHz ones, not at the end — `0x43` right after `0x41`, `0x4a` after `0x47`, the
+three of core 0 between `PAD2G` and `LNA2G`. It is the same order as b43's full
+branch.
 
-`patches/b43/MESSAGES.md#0011` li scrive, gateata su radio 2057 rev 8, la sola combinazione
-che la cattura copre. Le altre due board che passano per la tabella 2 GHz (phy
-rev 8 con radio rev 5, phy rev 17 con radio rev 14) restano come sono: brcmsmac
-non ha righe a 2.4 GHz per quei radio, quindi non c'è niente contro cui
-confrontarle.
+`patches/b43/MESSAGES.md#0011` writes them, gated on radio 2057 rev 8, the only
+combination the capture covers. The other two boards that go through the 2 GHz
+table (phy rev 8 with radio rev 5, phy rev 17 with radio rev 14) stay as they
+are: brcmsmac has no 2.4 GHz rows for those radios, so there is nothing to
+compare them against.
 
-Dopo la patch la finestra `chanswitch-ch6` non ha **nessuna op mancante**: le
-prime 33 su 39 combaciano posizionalmente, e il resto sono le stesse op con gli
-stessi valori sfasate di tre, perché l'harness registra tre accessi MMIO che il
-tracer vendor non registra. Prima combaciavano 11 su 39 e mancavano dieci op.
+After the patch the `chanswitch-ch6` window has **no missing op**: the first 33
+of 39 match positionally, and the rest are the same ops with the same values
+three out of step, because the harness records three MMIO accesses the vendor
+tracer does not. Before, 11 of 39 matched and ten ops were missing.
 
-### 4d. Il motore PAPD gira su tabelle non inizializzate — CHIUSA
+### 4d. The PAPD engine runs on uninitialised tables — CLOSED
 
-`b43_phy_initn()` accende PAPD su ogni device con PA interno (`PAPD_EN0` e
-`PAPD_EN1`), ma non tocca le tabelle che quel motore legge: la scalare (32 e 34)
-e le epsilon (31 e 33). Restano con quello che c'era.
+`b43_phy_initn()` turns PAPD on for every device with an internal PA
+(`PAPD_EN0` and `PAPD_EN1`), but does not touch the tables that engine reads:
+the scalar one (32 and 34) and the epsilon ones (31 and 33). They stay with
+whatever was there.
 
-La cattura mostra il vendore scrivere la scalare con 64 valori per core — gli
-stessi che brcmsmac ha in `nphy_papd_scaltbl`, verificati identici — e azzerare le
-64 epsilon per core. `patches/b43/MESSAGES.md#0004` fa lo stesso per radio 2057 rev 8: nell'
-harness le 256 celle coincidono con la cattura, zero divergenti.
+The capture shows the vendor writing the scalar table with 64 values per core —
+the same brcmsmac has in `nphy_papd_scaltbl`, checked identical — and clearing
+the 64 epsilons per core. `patches/b43/MESSAGES.md#0004` does the same for radio
+2057 rev 8: in the harness the 256 cells coincide with the capture, zero
+divergent.
 
-Non aggiunge la calibrazione PAPD, che è quella che riempirebbe le epsilon con
-valori veri: dà al motore uno stato definito invece di quello che capita.
+It does not add the PAPD calibration, which is what would fill the epsilons with
+real values: it gives the engine a defined state instead of whatever happens to
+be there.
 
-### 4e. I registri di bias IPA 2 GHz sono sbagliati sul rev 8 — CHIUSA
+### 4e. The 2 GHz IPA bias registers are wrong on rev 8 — CLOSED
 
-Trovata dalla lista **al contrario** di `test/unit/coverage.py`, cioè i registri che il
-port scrive e il vendore no. Era una riga sola, `r05f`.
+Found by the **reverse** list of `test/unit/coverage.py`, i.e. the registers the
+port writes and the vendor does not. It was a single line, `r05f`.
 
-Il ramo rev 7/8 dei workaround IPA scrive `0x5F` e `0xE8`, che sono
-`IPA2G_GAIN_CORE0` e `IPA2G_IMAIN_CORE1`: un registro di ciascuna coppia, su core
-diversi. Lo scostamento fra i due core di questo radio è 0x85, quindi il gemello
-di `IPA2G_IMAIN_CORE1` è `IPA2G_IMAIN_CORE0` a `0x63`, non `0x5F`.
+The rev 7/8 branch of the IPA workarounds writes `0x5F` and `0xE8`, which are
+`IPA2G_GAIN_CORE0` and `IPA2G_IMAIN_CORE1`: one register of each pair, on
+different cores. The offset between the two cores of this radio is 0x85, so the
+twin of `IPA2G_IMAIN_CORE1` is `IPA2G_IMAIN_CORE0` at `0x63`, not `0x5F`.
 
-La cattura, nello stesso punto e in entrambi gli init, scrive `0x63 = 0x14` e
-`0xE8 = 0x14` — IMAIN su entrambi i core, stesso valore — e `0x5F` non lo tocca
-mai. b43 invece lascia IMAIN_CORE0 al suo valore, scrive il registro di gain del
-core 0 con un valore destinato al bias, e programma i due core in modo diverso.
+The capture, at the same point and in both inits, writes `0x63 = 0x14` and
+`0xE8 = 0x14` — IMAIN on both cores, same value — and never touches `0x5F`. b43
+instead leaves IMAIN_CORE0 at its value, writes core 0's gain register with a
+value meant for the bias, and programs the two cores differently.
 
-`patches/b43/MESSAGES.md#0005` dà al rev 8 un `case` suo e programma IMAIN su entrambi i core.
-Il rev 7 tiene il suo `case` e il suo comportamento: ha probabilmente lo stesso
-problema, ma non c'è una cattura da hardware con quel radio, e il ramo 40 MHz
-nemmeno. I due `case` sono separati di proposito, con 20 e 40 MHz divisi dentro
-ciascuno: chi arriva con una cattura da un 2057 rev 7 tocca il suo ramo e non deve
-farsi carico del nostro. Il prezzo è la duplicazione delle due righe del 40 MHz, e
-si paga volentieri.
+`patches/b43/MESSAGES.md#0005` gives rev 8 a `case` of its own and programs
+IMAIN on both cores. Rev 7 keeps its `case` and its behaviour: it probably has
+the same problem, but there is no hardware capture with that radio, nor of the
+40 MHz branch. The two `case`s are separate on purpose, with 20 and 40 MHz split
+inside each: whoever comes with a capture from a 2057 rev 7 touches their own
+branch and does not have to carry ours. The price is duplicating the two 40 MHz
+lines, and it is paid gladly.
 
-### 4f. Nessuna misura del rumore di fondo su N-PHY — CHIUSA
+### 4f. No noise floor measurement on N-PHY — CLOSED
 
-`b43_calculate_link_quality()` e `handle_irq_noise()` ritornano subito se la PHY
-non è una G, quindi su N-PHY `dev->stats.link_noise` resta al valore iniziale e
-mac80211 riceve una costante come rumore di fondo.
+`b43_calculate_link_quality()` and `handle_irq_noise()` return at once if the
+PHY is not a G, so on N-PHY `dev->stats.link_noise` stays at its initial value
+and mac80211 receives a constant as the noise floor.
 
-Il meccanismo per N c'è in brcmsmac: la ucode lascia una potenza complessa per
-core nel blocco di power indication in SHM (`M_PWRIND_BLKS = 0x308`), il driver
-azzera le quattro parole, alza `MCMD_BG_NOISE`, e alla risposta compone
-`(hi << 16) | lo` per core, divide per 512, converte in dB e somma −103. Il rumore
-riportato è il massimo fra i core.
+The mechanism for N is in brcmsmac: the ucode leaves a complex power per core in
+the power indication block in SHM (`M_PWRIND_BLKS = 0x308`), the driver clears
+the four words, raises `MCMD_BG_NOISE`, and on the answer builds
+`(hi << 16) | lo` per core, divides by 512, converts to dB and adds −103. The
+noise reported is the maximum over the cores.
 
-La cattura legge esattamente quelle quattro parole, 96 volte, e passando i suoi
-valori per la conversione escono **−82, −86, −88 dBm** per core: plausibili e
-coerenti fra i due core. `patches/b43/MESSAGES.md#0006` la cabla.
+The capture reads exactly those four words, 96 times, and putting its values
+through the conversion gives **−82, −86, −88 dBm** per core: plausible and
+consistent between the two cores. `patches/b43/MESSAGES.md#0006` wires it in.
 
-Attenzione al recinto: non è gateata sulla revisione ma sul **tipo** di PHY,
-quindi tocca tutte le N-PHY. L'argomento per accettarla è che oggi quelle
-riportano un numero che non è mai stato misurato. L'altra patch che esce dal
-recinto è `0010`, vedi 4g.
+Mind the fence: it is not gated on the revision but on the PHY **type**, so it
+touches every N-PHY. The argument for accepting it is that today those report a
+number that was never measured. The other patch that leaves the fence is
+`0010`, see 4g. `b43-ac-wip` reaches the same place with a PHY op,
+`noise_sample_done`, which the N noise sample could use too
+(`docs/ac-wip-xref.md`).
 
-Il resto dei punti dove b43 tratta la G e non la N sta in `docs/phy-g-only.md`:
-venti costrutti, di cui i due del rumore e quattro in `xmit.c` sul RSSI e sulla
-decodifica RX sono buchi veri, gli altri legittimi.
+The rest of the places where b43 handles G and not N are in
+`docs/phy-g-only.md`: twenty constructs, of which the two of the noise and four
+in `xmit.c` on RSSI and RX decoding are real holes, the others legitimate.
 
-### 4g. La tabella dei campioni non contiene un tono — CHIUSA
+### 4g. The sample table does not contain a tone — CLOSED
 
-Trovata dalle finestre `sampleplay-*` di `test/unit/phase_compare.py`, confrontando le
-160 word della tabella 17 op per op con la cattura.
+Found by the `sampleplay-*` windows of `test/unit/phase_compare.py`, comparing
+the 160 words of table 17 op by op with the capture.
 
-La tabella SAMPLEPLAY è lo stimolo di ogni calibrazione che suona campioni: cal
-TX IQ/LO, misura dell'idle TSSI, cal RX IQ del rev 2, e la cal PAPD quando ci
-sarà. Due refusi in mainline la rendono inutilizzabile, e vanno insieme perché
-nessuno dei due si vede senza l'altro corretto.
+The SAMPLEPLAY table is the stimulus of every calibration that plays samples:
+the TX IQ/LO cal, the idle TSSI measurement, the rev 2 RX IQ cal, and the PAPD
+cal. Two typos in mainline make it unusable, and they go together because
+neither shows without the other fixed.
 
-**Il passo di fase.** `b43_nphy_gen_load_samples()` (phy_n.c:1530) tiene `rot` e
-`angle` in `u16` e calcola `rot = (((freq * 36) / bw) << 16) / 100`, poi passa
-`CORDIC_FIXED(angle)`. Il riferimento è `wlc_phy_gen_load_samples_nphy`
-(`brcmsmac/phy/phy_n.c:23030`), dove `rot` e `theta` sono `s32` e
-`rot = ((f_kHz * 36) / phy_bw) / 100`, cioè gradi interi, perché
-`cordic_calc_iq()` scala il suo argomento da sé. Il `<< 16` di b43 è quindi di
-troppo, e in più rende il risultato un multiplo esatto di 65536 ogni volta che
-`(freq * 36) / bw` è multiplo di 100 — che vale per **tutte** le frequenze che il
-driver chiede: 2500 e 5000 dalla cal TX IQ/LO (phy_n.c:5389), 4000 dall'idle TSSI
-(phy_n.c:3950) e dalla cal RX IQ rev 2 (phy_n.c:5718). Nella `u16` il passo
-diventa 0: l'angolo non avanza e i campioni sono tutti uguali. Al posto del tono
-c'è un livello continuo.
+**The phase step.** `b43_nphy_gen_load_samples()` (phy_n.c:1530) keeps `rot` and
+`angle` in `u16` and computes `rot = (((freq * 36) / bw) << 16) / 100`, then
+passes `CORDIC_FIXED(angle)`. The reference is `wlc_phy_gen_load_samples_nphy`
+(`brcmsmac/phy/phy_n.c:23030`), where `rot` and `theta` are `s32` and
+`rot = ((f_kHz * 36) / phy_bw) / 100`, i.e. integer degrees, because
+`cordic_calc_iq()` scales its argument by itself. b43's `<< 16` is therefore one
+too many, and on top of that makes the result an exact multiple of 65536 whenever
+`(freq * 36) / bw` is a multiple of 100 — which holds for **every** frequency the
+driver asks for: 2500 and 5000 from the TX IQ/LO cal (phy_n.c:5389), 4000 from
+the idle TSSI (phy_n.c:3950) and from the rev 2 RX IQ cal (phy_n.c:5718). In the
+`u16` the step becomes 0: the angle does not advance and the samples are all
+equal. Instead of the tone there is a constant level.
 
-**L'impacchettamento.** `b43_nphy_load_samples()` (phy_n.c:1518) scrive
-`data[i] = (samples[i].i & 0x3FF << 10)`, e `<<` lega più forte di `&`: maschera
-con `0x3FF << 10` invece di spostare il valore mascherato. Per le ampiezze in uso
-la componente in fase sta nei dieci bit bassi e viene azzerata; sui valori
-negativi resta l'estensione del segno.
+**The packing.** `b43_nphy_load_samples()` (phy_n.c:1518) writes
+`data[i] = (samples[i].i & 0x3FF << 10)`, and `<<` binds tighter than `&`: it
+masks with `0x3FF << 10` instead of shifting the masked value. For the
+amplitudes in use the in-phase component sits in the low ten bits and gets
+cleared; on negative values the sign extension remains.
 
-La cattura dà il formato senza ambiguità — `((i & 0x3ff) << 10) | (q & 0x3ff)`,
-come in `wlc_phy_loadsampletable_nphy` — e tre toni da confrontare: ampiezza 0 a
-#1288 (idle TSSI), ampiezza 250 a 2500 kHz a #8638 (cal TX IQ/LO, periodo 8
-campioni), ampiezza 181 a 4000 kHz a #11838 (cal PAPD, periodo 5).
+The capture gives the format without ambiguity — `((i & 0x3ff) << 10) | (q & 0x3ff)`,
+as in `wlc_phy_loadsampletable_nphy` — and three tones to compare: amplitude 0 at
+#1288 (idle TSSI), amplitude 250 at 2500 kHz at #8638 (TX IQ/LO cal, period 8
+samples), amplitude 181 at 4000 kHz at #11838 (PAPD cal, period 5).
 
-`patches/b43/MESSAGES.md#0010` sistema entrambi. Sul tono di #8638, parole sbagliate su 160:
-160 in mainline (tutte zero), 140 con la sola maschera corretta, 120 col solo
-passo corretto, **0** con la patch.
+`patches/b43/MESSAGES.md#0010` fixes both, and is the mainline patch
+`b43-fix-two-defects-in-the-n-phy-sample-table-logic`. On the #8638 tone, wrong
+words of 160: 160 in mainline (all zero), 140 with only the mask fixed, 120 with
+only the step fixed, **0** with the patch.
 
-Anche questa esce dal recinto del nostro radio: non è gateata su niente, tocca
-ogni N-PHY. L'argomento per accettarla è che oggi quelle calibrazioni girano su
-uno stimolo che non è il segnale che credono di suonare.
+This one too leaves our radio's fence: it is gated on nothing, it touches every
+N-PHY. The argument for accepting it is that today those calibrations run on a
+stimulus that is not the signal they believe they are playing.
 
-### 4h. L'init del radio scriveva 412 registri dove il blob ne segna 39 — CHIUSA
+### 4h. The radio init wrote 412 registers where the blob flags 39 — CLOSED
 
-Nella fase dell'init del radio, fino al primo `CHANSPEC` (#132), il vendore scrive
-43 registri radio e b43 ne scriveva 412. Il dump del blob spiega tutto.
+In the radio init phase, up to the first `CHANSPEC` (#132), the vendor writes 43
+radio registers and b43 wrote 412. The dump of the blob explains everything.
 
-Il record di `regs_2057_rev8` e' **sei byte**, non quattro:
+The record of `regs_2057_rev8` is **six bytes**, not four:
 
-    { u16 address; u16 init; u8 do_init; u8 pad; }      /* 413 record, 2478 byte */
+    { u16 address; u16 init; u8 do_init; u8 pad; }      /* 413 records, 2478 bytes */
 
-e **39 record hanno `do_init` a uno**. Il terzo `u16` vale solo `0x0000` (374 volte)
-o `0x0100` (39), cioe' `do_init = 1, pad = 0` in big-endian.
+and **39 records have `do_init` set**. The third `u16` is only `0x0000` (374
+times) or `0x0100` (39), i.e. `do_init = 1, pad = 0` in big-endian.
 
-`r2057_rev8_init` di b43 ha ereditato indirizzo e valore — **412 valori su 412
-identici alla colonna `init` del blob**, trascrizione perfetta — e ha perso la
-colonna che dice *quali* scrivere. brcmsmac quel campo lo tiene (`u8 do_init` in
-`struct radio_20xx_regs`) e lo rispetta (`phy_cmn.c:897`).
+b43's `r2057_rev8_init` inherited address and value — **412 values of 412
+identical to the blob's `init` column**, a perfect transcription — and lost the
+column that says *which* to write. brcmsmac keeps that field (`u8 do_init` in
+`struct radio_20xx_regs`) and honours it (`phy_cmn.c:897`).
 
-La cattura combacia col flag **esattamente**: nella fase di init il vendore scrive
-tutti e 39 i registri segnati, con il valore segnato, **zero eccezioni**, e nessun
-altro di quella tabella. I quattro registri radio in piu' che tocca lì — `0x11`,
-`0x2e`, `0xce`, `0x164` — li scrive con valori che questa tabella non contiene,
-quindi vengono da altro codice.
+The capture matches the flag **exactly**: in the init phase the vendor writes all
+39 flagged registers, with the flagged value, **zero exceptions**, and no other of
+that table. The four extra radio registers it touches there — `0x11`, `0x2e`,
+`0xce`, `0x164` — it writes with values this table does not contain, so they come
+from other code.
 
-E si chiude anche la domanda del commit merged, che diceva di non aver trovato
-l'origine dello stub da 54 voci che **impianta il radio** con "Microcode not
-responding": e' il set `do_init` di **brcmsmac**, che non e' quello del blob — 21
-registri che brcmsmac segna e il blob no, 6 che il blob segna e brcmsmac no. I flag
-di brcmsmac sono piu' vecchi di questo radio, ed e' per questo che lo stub non
-tornava con nessuno dei due.
+And this also closes the question of the merged commit, which said it had not
+found the origin of the 54-entry stub that **hangs the radio** with "Microcode
+not responding": it is **brcmsmac**'s `do_init` set, which is not the blob's — 21
+registers brcmsmac flags and the blob does not, 6 the blob flags and brcmsmac
+does not. brcmsmac's flags are older than this radio, and that is why the stub
+matched neither.
 
-### Dove finiscono le 373 voci senza il flag
+### Where the 373 entries without the flag end up
 
 | | |
 |---|---|
-| mai scritte in 70796 record, da nessuno | **322** |
-| scritte, prima o poi col valore della tabella | 15 |
-| scritte, solo con altri valori | 36 |
+| never written in 70796 records, by anyone | **322** |
+| written, sooner or later with the table's value | 15 |
+| written, only with other values | 36 |
 
-Le 51 che qualcuno tocca sono **per-canale**, e si riconoscono dal conteggio: 31
-scritture ciascuna, che sono i 31 cambi canale della cattura, gli stessi che
-scrivono `R2057_LOGEN_MX2G_TUNE`. Sono i registri della chantab e del PLL —
-`VCOCAL_COUNTVAL0/1`, `RFPLL_REFMASTER_SPAREXTALSIZE`, `RFPLL_LOOPFILTER_R1/C1/C2`,
-`CP_KPD_IDAC`, `RFPLL_MMD0/1`, `VCOBUF_TUNE`, i `LOGEN_*_TUNE` — piu' due che
-ballano piu' spesso, `RFPLL_MISC_CAL_RESETN` 70 volte e `RFPLL_MISC_EN` 66, perche'
-li tocca anche il vcocal.
+The 51 someone touches are **per channel**, and they are recognised by the
+count: 31 writes each, which are the capture's 31 channel changes, the same ones
+that write `R2057_LOGEN_MX2G_TUNE`. They are the chantab and PLL registers —
+`VCOCAL_COUNTVAL0/1`, `RFPLL_REFMASTER_SPAREXTALSIZE`,
+`RFPLL_LOOPFILTER_R1/C1/C2`, `CP_KPD_IDAC`, `RFPLL_MMD0/1`, `VCOBUF_TUNE`, the
+`LOGEN_*_TUNE` — plus two that move more often, `RFPLL_MISC_CAL_RESETN` 70
+times and `RFPLL_MISC_EN` 66, because the vcocal touches them too.
 
-Il che spiega il flag e conferma la patch: quei 51 li riprogramma il cambio canale
-con i valori della chantab, non con quelli della tabella di init, e il primo cambio
-canale arriva subito dopo (`CHANSPEC` #132). Scriverli all'init voleva dire, nel
-migliore dei casi, buttare via 51 scritture; nel peggiore, tenere il PLL su valori
-sbagliati fino al primo cambio canale. ### La linea fra le 412
+Which explains the flag and confirms the patch: those 51 are reprogrammed by the
+channel change with the chantab's values, not the init table's, and the first
+channel change comes right after (`CHANSPEC` #132). Writing them at init meant,
+at best, throwing away 51 writes; at worst, keeping the PLL on wrong values until
+the first channel change.
 
-Le quattro classi partizionano la tabella senza sovrapporsi:
+### The line across the 412
 
-| classe | n | cosa sono |
+The four classes partition the table without overlapping:
+
+| class | n | what they are |
 |---|---|---|
-| `init` | **39** | il flag del blob: scritte all'init del radio, sono quelle che `0013` porta in b43 |
-| `chan` | **51** | le riprogramma il cambio canale o una cal, dalla chantab e non da qui — vcocal, RFPLL loopfilter, MMD, i `LOGEN_*_TUNE`; 31 scritture ciascuna, una per cambio canale |
-| `altrarev` | **42** | hanno il flag in `regs_2057_rev4`/`rev5`/`rev5v1`/`rev7` di brcmsmac ma non nel rev8: **la tabella e' un superset condiviso fra revisioni** e il flag seleziona |
-| `ignota` | **280** | nessuna revisione le segna e nessuno le scrive, mai, in 70796 record |
+| `init` | **39** | the blob's flag: written at radio init, they are what `0013` brings into b43 |
+| `chan` | **51** | reprogrammed by the channel change or a cal, from the chantab and not from here — vcocal, RFPLL loopfilter, MMD, the `LOGEN_*_TUNE`; 31 writes each, one per channel change |
+| `altrarev` | **42** | flagged in brcmsmac's `regs_2057_rev4`/`rev5`/`rev5v1`/`rev7` but not in rev8: **the table is a superset shared among revisions** and the flag selects |
+| `ignota` | **280** | no revision flags them and nobody writes them, ever, in 70796 records |
 
-Quindi 132 delle 412 hanno uno scopo identificato, e 280 no. La distribuzione per
-banco delle 280 e' da **ricalcolare**: i numeri che c'erano qui (190 SYN, 91 core0,
-50 core1) sommano 331, non 280, e il `radio_2057.h` di b43 non basta per rifarla —
-i suoi nomi `*_CORE0`/`*_CORE1` non partizionano lo spazio degli indirizzi in
-intervalli contigui, quindi serve la mappa dei banchi del blob.
+So 132 of the 412 have an identified purpose, and 280 do not. The per-bank
+distribution of the 280 is **to be recomputed**: the numbers that were here (190
+SYN, 91 core0, 50 core1) add up to 331, not 280, and b43's `radio_2057.h` is not
+enough to redo it — its `*_CORE0`/`*_CORE1` names do not partition the address
+space into contiguous ranges, so the blob's bank map is needed.
 
-E un dettaglio che chiude il cerchio sullo stub: i **21** registri che il rev8 di
-brcmsmac segna e il blob no cadono **tutti e 21 in `altrarev`**. Lo stub scriveva
-all'init del BCM6362 l'init di un altro radio, e questo e' il motivo per cui impianta
-il chip con "Microcode not responding". Zero di quei 21 sono per-canale.
+And a detail that closes the circle on the stub: the **21** registers brcmsmac's
+rev8 flags and the blob does not fall **all 21 in `altrarev`**. The stub wrote
+another radio's init at the BCM6362's init, and that is why it hangs the chip
+with "Microcode not responding". Zero of those 21 are per channel.
 
-### L'unica asimmetria fra i due core, e perche' non e' un bug
+### The only asymmetry between the two cores, and why it is not a bug
 
-`regs_2057_rev8` e' simmetrica fra i core: 112 registri consecutivi, `0x04f-0x0cc`,
-ricopiati identici a `0x0d4-0x151` con offset `0x85`. Su 129 coppie che portano lo
-stesso valore, **una sola** ha il flag asimmetrico:
+`regs_2057_rev8` is symmetric between the cores: 112 consecutive registers,
+`0x04f-0x0cc`, copied identically to `0x0d4-0x151` with offset `0x85`. Of 129
+pairs carrying the same value, **only one** has an asymmetric flag:
 
     0x062  R2057_IPA2G_TUNEV_CASCV_PTAT_CORE0   val 0x33  do_init=1
     0x0e7  R2057_IPA2G_TUNEV_CASCV_PTAT_CORE1   val 0x33  do_init=0
 
-wl scrive il core 0 e il core 1 mai, in 70796 record. Non e' un copia-incolla mancato
-nel blob, ed e' verificabile.
+wl writes core 0 and never core 1, in 70796 records. It is not a missed
+copy-paste in the blob, and that can be checked.
 
-Il blob del Netgear D6220, `wl 7.14.89.14` — molto piu' recente del 6.30.102.7 —
-porta lo stesso simbolo `regs_2057_rev8`, e non e' "leggermente diverso": e'
-**identico**, 412 indirizzi su 412, 412 valori su 412, 39 flag su 39, zero
-differenze. E ha quattordici tabelle `regs_2057_*` invece di cinque, quindi il test
-si puo' fare per revisione:
+The Netgear D6220's blob, `wl 7.14.89.14` — much more recent than 6.30.102.7 —
+carries the same `regs_2057_rev8` symbol, and it is not "slightly different": it
+is **identical**, 412 addresses of 412, 412 values of 412, 39 flags of 39, zero
+differences. And it has fourteen `regs_2057_*` tables instead of five, so the
+test can be done per revision:
 
-| tabella | `0x062` | `0x0e7` |
+| table | `0x062` | `0x0e7` |
 |---|---|---|
 | rev4, rev5, rev7, rev7v1, rev8, rev12 | `flag=1` | **`flag=0`** |
 | rev5v1, rev9, rev11, rev13, rev14, rev14v1 | `flag=0` | `flag=0` |
 
-Il valore e' `0x33` in tutte e dodici. **Non esiste una revisione, in nessuno dei
-due blob, che segni `0x0e7`**: dove il core 0 e' segnato il core 1 non lo e' mai, e
-dove il core 0 non lo e' nemmeno il core 1. Un refuso non sopravvive a quattordici
-tabelle e a due generazioni di blob distanti anni.
+The value is `0x33` in all twelve. **There is no revision, in either blob, that
+flags `0x0e7`**: where core 0 is flagged core 1 never is, and where core 0 is not,
+core 1 is not either. A typo does not survive fourteen tables and two
+generations of blobs years apart.
 
-**SALAME** su cosa lo giustifichi: che il riferimento PTAT sia condiviso fra i due
-core, e quindi che `0x0e7` sia un alias morto, e' l'unica lettura che mi viene, ma
-dalle tabelle non e' falsificabile e non l'ho verificata. Quello che conta per noi e'
-che `patches/b43/MESSAGES.md#0013` fa la cosa giusta a non scriverlo: nessuna versione del
-driver proprietario lo scrive.
+**SALAME** on what justifies it: that the PTAT reference is shared between the
+two cores, and so that `0x0e7` is a dead alias, is the only reading at hand, but
+it cannot be falsified from the tables and has not been verified. What matters
+here is that `patches/b43/MESSAGES.md#0013` does the right thing by not writing
+it: no version of the proprietary driver writes it.
 
-La tabella intera, con la colonna `do_init` e la classe, sta in
-`router-data/blob-tables/regs_2057_rev8.txt`: `0013` in b43 ne porta solo 39, ma i
-373 valori restanti sono dati estratti dal blob e alcuni serviranno — i 51
-per-canale per confrontare la chantab, e i 322 se qualcuno capira' a cosa servono.
+The whole table, with the `do_init` column and the class, is in
+`router-data/blob-tables/regs_2057_rev8.txt`: `0013` brings only 39 into b43,
+but the remaining 373 values are data extracted from the blob and some will be
+needed — the 51 per-channel ones to compare the chantab, and the 322 if someone
+works out what they are for.
 
-Gli altri **322 non li programma nessuno, mai**: il blob porta il valore e
-nient'altro lo usa.
+The other **322 nobody programs, ever**: the blob carries the value and nothing
+else uses it.
 
-Perche', non lo so, e l'unica spiegazione plausibile non regge: non sono "i registri
-5 GHz". Il chip **ha** la banda 5 GHz — lo dice la voce 6 di questo stesso documento, e
-il blob ha
-`nphy_tpc_txgain_ipa_5g_2057rev8` e 109 canali 5 GHz nella chantab; e' questa board
-che non ha le antenne 5 GHz collegate alla wlan integrata. E i numeri non tornano
-comunque: fra i 322 mai scritti, 50 hanno `5G` nel nome e 40 hanno `2G`, cioe' lo
-stesso rapporto della tabella intera (70 e 63). L'unica parte spiegata e' che 50 dei
-70 registri con `5G` nel nome non vengano scritti in una cattura che sta solo sul 2.4
-GHz. I restanti **272 restano senza spiegazione**.
+Why is not known, and the only plausible explanation does not hold: they are not
+"the 5 GHz registers". The chip **has** the 5 GHz band — entry 6 of this same
+document says so, and the blob has `nphy_tpc_txgain_ipa_5g_2057rev8` and 109
+5 GHz channels in the chantab; it is this board that has no 5 GHz antennas wired
+to the integrated wlan. And the numbers do not add up anyway: among the 322 never
+written, 50 have `5G` in the name and 40 have `2G`, i.e. the same ratio as the
+whole table (70 and 63). The only part explained is that 50 of the 70 registers
+with `5G` in the name are not written in a capture that stays on 2.4 GHz. The
+remaining **272 stay unexplained**.
 
-`patches/b43/MESSAGES.md#0013` filtra la tabella alle 39 voci. **Nessun valore cambia**: delle
-39 che restano, tutte tengono indirizzo e valore che avevano, e non ne compare
-nessuna nuova — 373 cancellate, 0 aggiunte, 0 modificate. Il diff sembra una
-riscrittura solo perche' le voci stanno quattro per riga, quindi togliendone 373 su
-412 si riflowa ogni riga e `git diff` puo' solo dire "104 righe fuori, 11 dentro".
-La patch porta il comando per verificarlo senza leggere la tabella.
+`patches/b43/MESSAGES.md#0013` filters the table to the 39 entries. **No value
+changes**: of the 39 that remain, all keep the address and value they had, and no
+new one appears — 373 deleted, 0 added, 0 modified. The diff looks like a rewrite
+only because the entries sit four per line, so removing 373 of 412 reflows every
+line and `git diff` can only say "104 lines out, 11 in". The patch carries the
+command to check it without reading the table.
 
-Filtrare invece di aggiungere una terza colonna e' quello che le altre sei
-tabelle `r2057_rev*_init` di questo file **sono gia'**: rev4 42 contro le 42 che
-brcmsmac segna, rev5 44 contro 44, rev7 54 contro 54. Solo la rev 8 se ne era
-discostata.
+Filtering instead of adding a third column is what the other six
+`r2057_rev*_init` tables of this file **already are**: rev4 42 against the 42
+brcmsmac flags, rev5 44 against 44, rev7 54 against 54. Only rev 8 had departed
+from it.
 
-Il conteggio delle op in comune sull'init **non si muove**, 4434 prima e dopo: quelle
-373 scritture non combaciavano con niente comunque. Il valore della patch e' la
-correttezza, non la metrica.
+The count of ops in common on the init **does not move**, 4434 before and after:
+those 373 writes matched nothing anyway. The value of the patch is correctness,
+not the metric.
 
-**Non provata su hardware**, e sbagliare qui impianta il radio all'init, quindi vuole
-un boot su BCM6362 prima di andare da qualche parte.
+**Not tried on hardware**, and getting this wrong hangs the radio at init, so it
+wants a boot on a BCM6362 before going anywhere.
 
-### 6. `dev_id 0x435f` e la banda 5 GHz
+### 6. `dev_id 0x435f` and the 5 GHz band
 
-Non è un buco di dispatch ma un problema di rivendicazione. In
-`b43_wireless_core_attach()` (main.c:5410) le bande vengono prima indovinate da
-`BCMA_IOST` — e il nostro host driver sintetizza `2G_PHY=1, 5G_PHY=0` — ma
-subito dopo `b43_supported_bands()` (main.c:5313) le **sovrascrive** partendo dal
-`dev_id`, e `0x435f` sta nella lista dual band. Il fixup SPROM della DSL-3580L
-imposta proprio `0x435f` (serve a b43 per riconoscere il chip), quindi b43
-registra anche una banda 5 GHz.
+It is not a dispatch hole but a claiming problem. In
+`b43_wireless_core_attach()` (main.c:5410) the bands are first guessed from
+`BCMA_IOST` — and our host driver synthesises `2G_PHY=1, 5G_PHY=0` — but right
+after `b43_supported_bands()` (main.c:5313) **overrides** them starting from the
+`dev_id`, and `0x435f` is in the dual-band list. The DSL-3580L's SPROM fixup sets
+exactly `0x435f` (b43 needs it to recognise the chip), so b43 registers a 5 GHz
+band too.
 
-Il silicio non c'entra: nel blob esistono `nphy_tpc_5GHz_txgain_epa_2057rev8`,
-`nphy_tpc_txgain_ipa_5g_2057rev8` e la `chan_info_nphyrev8_2057_rev8` contiene
-**109 canali 5 GHz** (4920..5900 MHz) oltre ai 14 di 2.4 GHz — verificato con
-`reverse-tools/chantab_from_blob.py --list`. La combinazione PHY rev 8 / radio
-2057 rev 8 è dual band per il vendor.
+The silicon is not the issue: the blob has `nphy_tpc_5GHz_txgain_epa_2057rev8`,
+`nphy_tpc_txgain_ipa_5g_2057rev8`, and `chan_info_nphyrev8_2057_rev8` contains
+**109 5 GHz channels** (4920..5900 MHz) besides the 14 at 2.4 GHz — checked with
+`reverse-tools/chantab_from_blob.py --list`. The PHY rev 8 / radio 2057 rev 8
+combination is dual band for the vendor.
 
-Il punto è che **b43 non ha** quelle tabelle: `r2057_get_chantabent_rev7()` per
-`case 8` ritorna solo le 14 entry 2.4 GHz (delle 123 del vendor), quindi un
-canale 5 GHz finisce in errore. Da decidere, e da misurare prima: se un `iw list` mostra la banda 5 GHz
-e uno scan lì dentro produce errori, la patch upstream è far dipendere la banda
-dall'IOST (o da un caso dedicato) invece che dal solo `dev_id`.
+The point is that **b43 does not have** those tables:
+`r2057_get_chantabent_rev7()` for `case 8` returns only the 14 2.4 GHz entries
+(of the vendor's 123), so a 5 GHz channel ends in an error. To be decided, and to
+be measured first: if `iw list` shows the 5 GHz band and a scan in it produces
+errors, the upstream patch is to make the band depend on the IOST (or on a
+dedicated case) instead of on the `dev_id` alone.
+
