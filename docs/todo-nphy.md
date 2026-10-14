@@ -1,354 +1,380 @@
-# I posti dove b43 non fa quello che il vendore fa
+# The places where b43 does not do what the vendor does
 
-Elenco di lavoro, non di lamentele: ogni voce ha come è stata trovata, cosa
-manca, e cosa serve per chiuderla. Le voci già chiuse stanno in
-`gap-inventory.md`; qui c'è quello che resta aperto dopo le sei patch.
+A working list, not a list of complaints: every entry has how it was found,
+what is missing, and what it takes to close it. The entries already closed are
+in `gap-inventory.md`; here is what remains open after the first six patches.
 
-Misure con `test/unit/coverage.py` contro il primo init della cattura, flow `init` sul
-**canale 1**, cioè lo stesso del vendore. Il canale conta: con il port su un
-canale diverso nove registri della chantab risultano "diversi" e non lo sono.
+Measurements with `test/unit/coverage.py` against the capture's first init,
+`init` flow on **channel 1**, i.e. the vendor's. The channel matters: with the
+port on a different channel nine chantab registers come out "different" and
+they are not.
 
-## 1. I 32 registri PHY che il vendore scrive e il port no
+## 1. The 32 PHY registers the vendor writes and the port does not
 
-Raggruppati per il punto della cattura in cui compaiono, che è quello che li
-attribuisce.
+Grouped by the point of the capture where they appear, which is what
+attributes them.
 
-| registri | dove nella cattura | attribuzione |
+| registers | where in the capture | attribution |
 |---|---|---|
-| `0x1df, 0x1e1` = 0x1591 | #203-204, init radio iniziale | fase prima dell'init PHY, da guardare |
-| ~~`0x1d7, 0x1d9, 0x1db, 0x1dd`~~ | #680-683 | **chiusi**: soglie di carrier sense, `patches/b43/MESSAGES.md#0008` |
-| `0x020, 0x021, 0x2a7, 0x2a8, 0x2e6, 0xc33` | #5614-5625 | fase non identificata |
-| `0x07b, 0x07e` (12 volte ciascuno) | #11769, #12819 | regione della calibrazione |
-| `0x29f, 0x2a0-0x2a4, 0x2be, 0x2e5, 0x348, 0x349, 0x358` | #12194-12324 | regione della calibrazione |
-| `0x09a-0x09d` (8 volte) | #15095-15098 | regione della calibrazione |
-| `0x129, 0x12a, 0x12b` (8-16 volte) | #15863-15865 | regione della calibrazione |
+| `0x1df, 0x1e1` = 0x1591 | #203-204, initial radio init | phase before the PHY init, to be looked at |
+| ~~`0x1d7, 0x1d9, 0x1db, 0x1dd`~~ | #680-683 | **closed**: carrier sense thresholds, `patches/b43/MESSAGES.md#0008` |
+| `0x020, 0x021, 0x2a7, 0x2a8, 0x2e6, 0xc33` | #5614-5625 | phase not identified |
+| `0x07b, 0x07e` (12 times each) | #11769, #12819 | calibration region |
+| `0x29f, 0x2a0-0x2a4, 0x2be, 0x2e5, 0x348, 0x349, 0x358` | #12194-12324 | calibration region |
+| `0x09a-0x09d` (8 times) | #15095-15098 | calibration region |
+| `0x129, 0x12a, 0x12b` (8-16 times) | #15863-15865 | calibration region |
 
-Restano 28 registri su 32, di cui 22 fra #11700 e #15900, che è
-dove il vendore fa la calibrazione PAPD e la TX IQ/LO. b43 la PAPD non l'ha
-affatto e la IQ/LO all'init la salta (`perical = 2`, "like wl"). Quindi non sono
-32 buchi indipendenti: sono due funzioni mancanti e sei registri da attribuire.
+28 registers of 32 remain, 22 of them between #11700 and #15900, which is where
+the vendor does the PAPD and the TX IQ/LO calibrations. b43 does not have PAPD
+at all and skips IQ/LO at init (`perical = 2`, "like wl"). So they are not 32
+independent holes: they are two missing functions and six registers to
+attribute.
 
-## 2. I 14 registri radio
+## 2. The 14 radio registers
 
-| registri | attribuzione |
+| registers | attribution |
 |---|---|
-| `0x43, 0x4a, 0x70, 0x73, 0x74, 0xa0, 0xf5, 0xf8, 0xf9, 0x125`, tutti a 0 a #145-161 | i campi 5 GHz della entry chantab dual band che il vendore azzera: è la voce 5b di `gap-inventory.md` |
-| `0x17d, 0x17e, 0x19d, 0x19e` | il blocco TSSI, ma **solo durante la cal**: read-modify-write a #11828-11837 con valori che cambiano fra le sei occorrenze. Sono della calibrazione, non del setup |
+| `0x43, 0x4a, 0x70, 0x73, 0x74, 0xa0, 0xf5, 0xf8, 0xf9, 0x125`, all to 0 at #145-161 | the 5 GHz fields of the dual-band chantab entry the vendor clears: it is entry 5b of `gap-inventory.md` |
+| `0x17d, 0x17e, 0x19d, 0x19e` | the TSSI block, but **only during the cal**: read-modify-write at #11828-11837 with values that change across the six occurrences. They belong to the calibration, not to the setup |
 
-## 3. Registri scritti da entrambi con valore diverso
+## 3. Registers written by both with a different value
 
-`coverage.py --values` confronta il primo valore scritto su ogni registro toccato
-da entrambi i lati. Serve perché la sola presenza non vede questa classe di
-differenza — ed è così che è venuto fuori il TSSI. Sedici voci, in tre gruppi.
+`coverage.py --values` compares the first value written to every register both
+sides touch. It is needed because presence alone does not see this class of
+difference — and that is how the TSSI came out. Sixteen entries, in three
+groups.
 
-### 3a. Coefficienti di moltiplicazione RSSI: `0x1a4-0x1b8` (11 registri)
+### 3a. RSSI multiplication coefficients: `0x1a4-0x1b8` (11 registers)
 
-    vendore  0x1a4 = 0x3e   0x1a6 = 0x02   0x1ac = 0x01   0x1b8 = 0x3f
+    vendor   0x1a4 = 0x3e   0x1a6 = 0x02   0x1ac = 0x01   0x1b8 = 0x3f
     port     0x1a4 = 0x3f   0x1a6 = 0x00   0x1ac = 0x3e   0x1b8 = 0x3f
 
-Sono i `B43_NPHY_RSSIMC_*`, cioè la calibrazione RSSI. Entrambi i lati li
-scrivono più volte, il vendore in sequenza `0x3e, 0, 0x3e`. I valori del port
-divergono su almeno quattro registri.
+They are the `B43_NPHY_RSSIMC_*`, i.e. the RSSI calibration. Both sides write
+them several times, the vendor in the sequence `0x3e, 0, 0x3e`. The port's
+values diverge on at least four registers.
 
-Va letto insieme alla voce di `docs/phy-g-only.md` su `b43_rssi_postprocess`, che
-ha rami per G e LP e non per N: la catena RSSI ha due problemi indipendenti, i
-coefficienti programmati e la conversione di quello che si legge. È il numero che
-finisce in `ieee80211_rx_status.signal`.
+To be read together with the entry of `docs/phy-g-only.md` on
+`b43_rssi_postprocess`, which has branches for G and LP and not for N: the RSSI
+chain has two independent problems, the coefficients programmed and the
+conversion of what is read. It is the number that ends up in
+`ieee80211_rx_status.signal`.
 
-**Aggiornamento dal confronto posizionale** (finestra `rssi-cal`), che dice più
-della misura per insiemi e corregge la descrizione qui sopra:
+**Update from the positional comparison** (`rssi-cal` window), which says more
+than the set measurement and corrects the description above:
 
-- i registri sono **gli stessi**: il port ne scrive 24 op in tutto il run, il
-  vendore 12 nella sua finestra, e l'insieme coincide;
-- l'**ordine** no. Il vendore li scrive in un blocco contiguo — `0x1b8`, poi
-  `0x1a4, 0x1aa, 0x1b0, 0x1b6` (la X sulle quattro rail), poi `0x1a5, 0x1ab, …`
-  (la Y) — mentre il port ne scrive due e poi va a leggere `0xa6, 0xa7, 0xf9`,
-  cioè intercala letture e scritture per rail;
-- i **valori non sono confrontabili** nell'harness: vengono da
-  `b43_nphy_restore_rssi_cal()`, che rimette la cache prodotta dalla
-  calibrazione RSSI, e la cal senza hardware da misurare produce zeri. Lo stesso
-  vale per `R2057_NB_MASTER_CORE0/1` (radio `0x0b4`/`0x139`): il port ci scrive
-  quello che ha in cache.
+- the registers are **the same**: the port writes 24 ops of them in the whole
+  run, the vendor 12 in its window, and the set coincides;
+- the **order** is not. The vendor writes them in a contiguous block — `0x1b8`,
+  then `0x1a4, 0x1aa, 0x1b0, 0x1b6` (the X on the four rails), then
+  `0x1a5, 0x1ab, …` (the Y) — while the port writes two and then goes to read
+  `0xa6, 0xa7, 0xf9`, i.e. interleaves reads and writes per rail;
+- the **values are not comparable** in the harness: they come from
+  `b43_nphy_restore_rssi_cal()`, which puts back the cache produced by the RSSI
+  calibration, and the cal with no hardware to measure produces zeros. The same
+  holds for `R2057_NB_MASTER_CORE0/1` (radio `0x0b4`/`0x139`): the port writes
+  there what it has in cache.
 
-Quindi la voce resta aperta ma cambia forma: non "coefficienti sbagliati", ma
-ordine diverso e valori non verificabili da qui. Per chiuderla serve o una
-cattura con la cal RSSI del vendore isolata, o l'hardware.
+So the entry stays open but changes shape: not "wrong coefficients", but a
+different order and values not verifiable from here. Closing it needs either a
+capture with the vendor's RSSI cal isolated, or the hardware. (`4bis` and
+`test/unit/README.md` say how far the read plans got since.)
 
-### 3b. Potenza target: `0x1ea` = `B43_NPHY_TXPCTL_TPWR`
+### 3b. Target power: `0x1ea` = `B43_NPHY_TXPCTL_TPWR`
 
-    vendore  0x3e3e   (62 in Q5.2 = 15.5 dBm)
+    vendor   0x3e3e   (62 in Q5.2 = 15.5 dBm)
     port     0x4a4a   (74 in Q5.2 = 18.5 dBm)
 
-Il port programma il `maxpwr_2g` della SROM così com'è; il vendore mette 3 dB in
-meno. Tre dB tondi hanno l'aria di un limite — regolatorio per il canale, o il
-guadagno d'antenna, o uno degli offset per-rate della SROM — che b43 nel percorso
-ppr non sottrae, oppure che l'harness non conosce perché non ho il contesto
-regolatorio della board. Da chiudere leggendo quale dei due, non tirando a
-indovinare: è potenza in uscita.
+The port programs the SROM's `maxpwr_2g` as it is; the vendor puts 3 dB less.
+A round three dB looks like a limit — regulatory for the channel, or the
+antenna gain, or one of the SROM's per-rate offsets — that b43 does not
+subtract in the ppr path, or that the harness does not know because it lacks
+the board's regulatory context. To be closed by reading which of the two, not
+by guessing: it is output power.
 
-Nota di metodo: prima di decodificare `core_pwr_info` dalla SROM il port scriveva
-0x0000 qui, e sembrava un buco del driver. Era la mia SPROM incompleta.
+A note on method: before `core_pwr_info` was decoded from the SROM the port
+wrote 0x0000 here, and it looked like a driver hole. It was the harness's
+incomplete SPROM.
 
 ### 3c. `0x340, 0x341` = `B43_NPHY_REV7_RF_CTL_MISC_REG3/4`
 
-    vendore  0x400, 0x400, 0x400, 0x0002, 0x4000
+    vendor   0x400, 0x400, 0x400, 0x0002, 0x4000
     port     0x000, 0x000, 0x000, 0x0000, 0x0004
 
-Sequenze diverse su entrambi. Non attribuito.
+Different sequences on both. Not attributed.
 
 ### 3d. TSSIG: `0x17b, 0x19b` = `R2057_TX0_TSSIG` / `R2057_TX1_TSSIG`
 
-Questo è il TSSI, ed è la voce più chiara del gruppo.
-`b43_nphy_ipa_internal_tssi_setup()` per i rev 7+ fa, per core:
+This is the TSSI, and it is the clearest entry of the group.
+`b43_nphy_ipa_internal_tssi_setup()` for revs 7+ does, per core:
 
     if (phy->rev != 5) write(r + 0xA, 0);
     if (phy->rev != 7) write(r + 0xB, 1); else write(r + 0xB, 0x31);
 
-Nella cattura, nella fase corrispondente (#1259-1265) il vendore scrive
-`0x175, 0x176, 0x177, 0x178, 0x179, 0x17a, 0x17c` con gli stessi valori del port,
-e **`0x17b` non lo tocca affatto**. Lo scrive più tardi, a #8537, con `0x31`, in
-una fase diversa: preceduto dalle letture degli stessi registri e con altri
-valori (`0x175 = 0x06`, `0x176 = 0x43`, `0x177 = 0x55`), cioè un
-salva-riconfigura tipico della calibrazione TX.
+In the capture, in the corresponding phase (#1259-1265) the vendor writes
+`0x175, 0x176, 0x177, 0x178, 0x179, 0x17a, 0x17c` with the same values as the
+port, and **does not touch `0x17b` at all**. It writes it later, at #8537, with
+`0x31`, in a different phase: preceded by reads of the same registers and with
+other values (`0x175 = 0x06`, `0x176 = 0x43`, `0x177 = 0x55`), i.e. the
+save-reconfigure typical of the TX calibration.
 
-Quindi il ramo `phy->rev != 7 ? 1 : 0x31` sembra mescolare le due fasi: mette il
-valore della cal nel setup per il rev 7, e per gli altri rev scrive 1 dove il
-vendore lascia stare.
+So the `phy->rev != 7 ? 1 : 0x31` branch seems to mix the two phases: it puts
+the cal's value into the setup for rev 7, and for the other revs it writes 1
+where the vendor leaves things alone.
 
-**Il valore si sa senza hardware.** La cattura contiene la scrittura della tabella di init del
-radio, `#104: 0x17b = 0x02` e `#105: 0x19b = 0x02`, un core per riga; e le quattro
-letture di `0x17b` nei due init (#1256, #8528, #23907, #35958) tornano **tutte
-`0x02`**. Quindi il valore che il vendore ha su quel registro durante il setup è
-`0x02`, ci arriva dalla tabella di init, e non dipende dal valore di reset del
-chip. `0x31` è il valore della cal TX: scritto a #8537, rimesso a `0x02` a #10743.
+**The value is known without hardware.** The capture contains the write of the
+radio init table, `#104: 0x17b = 0x02` and `#105: 0x19b = 0x02`, one core per
+line; and the four reads of `0x17b` in the two inits (#1256, #8528, #23907,
+#35958) all return **`0x02`**. So the value the vendor has on that register
+during the setup is `0x02`, it gets there from the init table, and does not
+depend on the chip's reset value. `0x31` is the TX cal's value: written at
+#8537, put back to `0x02` at #10743.
 
-E `r2057_rev8_init` di b43 ha già `0x17b = 0x02` e `0x19b = 0x02`, identici. Il
-setup TSSI quindi **sovrascrive** con 1 un valore che b43 stessa aveva appena
-programmato bene.
+And b43's `r2057_rev8_init` already has `0x17b = 0x02` and `0x19b = 0x02`,
+identical. So the TSSI setup **overwrites** with 1 a value b43 itself had just
+programmed right.
 
-I due driver del vendore non sono d'accordo fra loro: `0x02` il blob
-6.30.102.7 catturato, `0x01` brcmsmac a `brcmsmac/phy/phy_n.c:17077`, che scrive
-`TSSIG = 0x1` per ogni phy rev diverso dal 7 e quindi anche per il nostro. **Fra i
-due vale il blob**: `wl 6.30` è molto più avanti di brcmsmac, che è fermo a
-5.100.x, e per questo radio è il driver che gira sull'hardware da cui viene la
-cattura. Il valore giusto è `0x02`, cioè quello che la tabella di init già mette:
-il difetto è la scrittura di `1` nel setup, che va tolta per il rev 8.
+The vendor's two drivers disagree with each other: `0x02` in the captured
+6.30.102.7 blob, `0x01` in brcmsmac at `brcmsmac/phy/phy_n.c:17077`, which
+writes `TSSIG = 0x1` for every phy rev other than 7 and so for ours too.
+**Between the two the blob wins**: `wl 6.30` is far ahead of brcmsmac, which is
+stuck at 5.100.x, and for this radio it is the driver that runs on the hardware
+the capture comes from. The right value is `0x02`, i.e. what the init table
+already sets: the defect is writing `1` in the setup, which has to go for rev 8.
 
-Non è ancora una patch perché su quel registro passa la misura di potenza e la
-patch va accompagnata dalla misura corrispondente (`docs/reports/40-tx-power.md`), come
-`0001` e `0002`. Ma il valore non è più in discussione.
+It is not a patch yet because the power measurement goes through that register,
+and the patch has to come with the corresponding measurement
+(`docs/reports/40-tx-power.md`), like `0001` and `0002`. But the value is no
+longer in question.
 
-### 3d bis. E un refuso di trascrizione, nella riga accanto
+### 3d bis. And a transcription typo, on the next line
 
-Guardando quel ramo è venuto fuori altro. brcmsmac gatea i due registri su cose
-diverse:
+Looking at that branch something else came out. brcmsmac gates the two
+registers on different things:
 
     if (pi->pubpi.radiorev != 5)      -> TSSIA
     if (!NREV_IS(pi->pubpi.phy_rev,7)) -> TSSIG
 
-b43 ha trascritto **entrambi** come `phy->rev`:
+b43 transcribed **both** as `phy->rev`:
 
     if (phy->rev != 5)  b43_radio_write(dev, r + 0xA, 0);   /* radiorev in brcmsmac */
-    if (phy->rev != 7)  b43_radio_write(dev, r + 0xB, 1);   /* questo combacia */
+    if (phy->rev != 7)  b43_radio_write(dev, r + 0xB, 1);   /* this one matches */
 
-Il radio 2057 esiste dal phy rev 7 in su, quindi `phy->rev != 5` è **sempre vero**
-in quel ramo e b43 scrive sempre TSSIA, dove brcmsmac lo salta sui radio rev 5 —
-e una tabella di canale per radio rev 5 in questo albero c'è
-(`b43_nphy_chantab_phy_rev8_radio_rev5`). Sul nostro rev 8 le due forme del gate
-danno lo stesso risultato, quindi non spiega nessuna divergenza della cattura e
-non è patchabile con quello che abbiamo. Resta scritto qui perché è un difetto
-vero e chi arriva con un 2057 rev 5 parte da qui.
+Radio 2057 exists from phy rev 7 up, so `phy->rev != 5` is **always true** in
+that branch and b43 always writes TSSIA, where brcmsmac skips it on radio rev 5
+— and a channel table for radio rev 5 does exist in this tree
+(`b43_nphy_chantab_phy_rev8_radio_rev5`). On our rev 8 the two forms of the gate
+give the same result, so it explains no divergence of the capture and cannot be
+patched with what we have here. It stays written here because it is a real
+defect and whoever comes with a 2057 rev 5 starts from here. It is now the
+mainline patch `b43-test-the-radio-rev-for-the-n-phy-tssia-setup`.
 
-**Non viene dalla serie merged**, verificato e non sperato: nessuna delle sette
-patch di `docs/upstream-status.md` tocca `phy_n.c` — i file sono `main.c`,
-`radio_2057.c` e `tables_nphy.c`. Il refuso è più vecchio, del codice rev 7+
-scritto per i 43217/43227/43228.
+**It does not come from the merged series**, checked and not hoped: none of the
+seven patches of `docs/upstream-status.md` touches `phy_n.c` — the files are
+`main.c`, `radio_2057.c` and `tables_nphy.c`. The typo is older, from the rev 7+
+code written for the 43217/43227/43228.
 
-## 3f. `0x7b` e `0x7e`: marcati e basta
+## 3f. `0x7b` and `0x7e`: just marked
 
-`B43_NPHY_RFCTL_RXG1` e `RXG2`. La tabella degli override RF rev7 ha già la voce
-per il campo `0x0800` che li pilota, ma nessun percorso del driver passa quel
-campo; il vendore li scrive 12 volte ciascuno durante la calibrazione. Non c'è
-niente da aggiungere senza sapere in che fase e con che valori, quindi
-`patches/b43/MESSAGES.md#0007` mette una riga di TODO accanto alla voce morta e si va avanti.
+`B43_NPHY_RFCTL_RXG1` and `RXG2`. The rev7 RF override table already has the
+entry for the `0x0800` field that drives them, but no driver path passes that
+field; the vendor writes them 12 times each during the calibration. There is
+nothing to add without knowing in which phase and with which values, so
+`patches/b43/MESSAGES.md#0007` puts a TODO line next to the dead entry and moves
+on.
 
-## 3g. Il vcocal non mancava
+## 3g. The vcocal was not missing
 
-Nella finestra del cambio canale il confronto posizionale segnalava otto op
-mancanti su `0x2b` e `0x2e`, cioè `RFPLL_MISC_EN` e `RFPLL_MISC_CAL_RESETN`: la
-VCO calibration alla fine di `b43_radio_2057_setup()`. b43 la fa, e la fa uguale.
+In the channel change window the positional comparison reported eight missing
+ops on `0x2b` and `0x2e`, i.e. `RFPLL_MISC_EN` and `RFPLL_MISC_CAL_RESETN`: the
+VCO calibration at the end of `b43_radio_2057_setup()`. b43 does it, and does it
+the same way.
 
-La differenza era nella resa: il tracer del vendore aggancia sia `mod_radio_reg`
-sia la read e la write che quella chiama, quindi una sola RMW compare come tre
-op, mentre b43 con `b43_radio_mask`/`b43_radio_set` ne produce una. Scartate le
-due ombre — solo quando seguono immediatamente una `MOD` sullo stesso indirizzo
-— le quattro op del vcocal combaciano e i mancanti di quella finestra scendono a
-**esattamente 10**, i campi 5 GHz della voce 5b.
+The difference was in the rendering: the vendor's tracer hooks both
+`mod_radio_reg` and the read and the write it calls, so a single RMW shows up as
+three ops, while b43 with `b43_radio_mask`/`b43_radio_set` produces one. Dropping
+the two shadows — only when they immediately follow a `MOD` on the same address
+— the four vcocal ops match and the missing ones of that window go down to
+**exactly 10**, the 5 GHz fields of entry 5b.
 
-Vale la pena notare cosa sarebbe successo senza: otto op attribuite a un buco
-inesistente, e la voce 5b gonfiata da 10 a 18.
+It is worth noting what would have happened without: eight ops attributed to a
+nonexistent hole, and entry 5b inflated from 10 to 18.
 
-## 3e. Nota di metodo: il confronto posizionale viene prima
+## 3e. A note on method: the positional comparison comes first
 
-Le voci 3a-3d sono uscite da `coverage.py --values`, che confronta insiemi e
-primi valori. È la misura debole. Quella forte è `test/unit/phase_compare.py`, che
-diffa op per op dentro una finestra allineata.
+Entries 3a-3d came out of `coverage.py --values`, which compares sets and first
+values. It is the weak measure. The strong one is `test/unit/phase_compare.py`,
+which diffs op by op inside an aligned window.
 
-Applicata al TSSI dice una cosa precisa: non è "un valore diverso su `0x17b`", è
-**un'op in più**. Il port scrive `0x17b = 1` fra `0x17a` e `0x176`,
-dove il vendore in quella fase passa direttamente a `0x176`, e da lì in poi le
-due sequenze sono sfasate di uno. Allo stesso modo il cambio canale combacia per
-11 op e poi il vendore scrive i campi 5 GHz **intercalati**, non in coda: se si
-chiude la voce 5b, vanno messi in quelle posizioni. È quello che fa `0011`.
+Applied to the TSSI it says something precise: it is not "a different value on
+`0x17b`", it is **one op too many**. The port writes `0x17b = 1` between `0x17a`
+and `0x176`, where the vendor in that phase goes straight to `0x176`, and from
+there on the two sequences are one out of step. In the same way the channel
+change matches for 11 ops and then the vendor writes the 5 GHz fields
+**interleaved**, not at the end: if entry 5b is closed, they go in those
+positions. That is what `0011` does.
 
-## 5. Le formule: cosa manca davvero per il rev 8
+## 5. The formulas: what is really missing for rev 8
 
-Ho contato i `TODO` in `phy_n.c` e sono 25, ma è un conteggio che inganna: la
-grande maggioranza sono rami `phy->rev >= 19`, cioè PHY che non ci riguardano.
-Per il rev 8 la situazione è questa.
+Mainline's `phy_n.c` has 48 `/* TODO` at `848acc8ffe1b` (this file used to say
+25; recounted with `grep -c '/\* TODO'`), but that count misleads: most of them
+are in `phy->rev >= 19` branches, i.e. PHYs that do not concern us. **SALAME**:
+the "most" is the old count's reading, not redone on the 48. For
+rev 8 this is the situation.
 
-**Presenti e funzionanti**: la calibrazione RSSI (`b43_nphy_rev3_rssi_cal`, che
-il rev 8 usa perché il dispatch è `rev >= 3`), la TX IQ/LO
-(`b43_nphy_cal_tx_iq_lo` con il ramo rev 7 e i registri `R2057_TX*_LOFT_*`), il
-save/restore delle calibrazioni. Non sono stub: girano.
+**Present and working**: the RSSI calibration (`b43_nphy_rev3_rssi_cal`, which
+rev 8 uses because the dispatch is `rev >= 3`), TX IQ/LO
+(`b43_nphy_cal_tx_iq_lo` with the rev 7 branch and the `R2057_TX*_LOFT_*`
+registers), the save/restore of the calibrations. They are not stubs: they run.
 
-**Mancante per intero**: la **calibrazione PAPD**. b43 non ha nessuna funzione
-che la faccia — accende il motore (`PAPD_EN0`/`EN1`), ora gli inizializza le
-tabelle (`patches/b43/MESSAGES.md#0004`) e calcola l'offset epsilon (`0009`), ma non calcola
-mai gli epsilon. In brcmsmac il blocco è:
+**Missing entirely in mainline**: the **PAPD calibration**. Mainline b43 has no
+function that does it — it turns the engine on (`PAPD_EN0`/`EN1`); the series
+initialises its tables (`patches/b43/MESSAGES.md#0004`) and computes the
+epsilon offset (`0009`), but never computes the epsilons. In brcmsmac the block
+is:
 
-| funzione | righe | cosa fa |
+| function | lines | what it does |
 |---|---|---|
-| `wlc_phy_a2_nphy` | 279 | calcola e **scrive** la tabella epsilon, per passo di gain |
-| `wlc_phy_a4` | 276 | il livello alto: setup, per core a3 e a2, ripristino |
-| `wlc_phy_papd_cal_setup_nphy` | 250 | override RF, AFE, TXRXCOUPLE, tono |
-| `wlc_phy_a3_nphy` | 147 | la ricerca dell'indice di gain: **legge** la tabella epsilon |
-| `wlc_phy_papd_cal_cleanup_nphy` | 124 | il ripristino di quel setup |
-| `wlc_phy_ipa_restore_tx_digi_filts_nphy` | 41 | il filtro digitale della cal |
-| `wlc_phy_txpwr_papd_cal_nphy` | 13 | il gate "il gain è derivato di 4" |
-| `wlc_phy_ipa_set_bbmult_nphy` | 6 | scrive il bbmult |
+| `wlc_phy_a2_nphy` | 279 | computes and **writes** the epsilon table, per gain step |
+| `wlc_phy_a4` | 276 | the top level: setup, a3 and a2 per core, restore |
+| `wlc_phy_papd_cal_setup_nphy` | 250 | RF overrides, AFE, TXRXCOUPLE, tone |
+| `wlc_phy_a3_nphy` | 147 | the gain index search: **reads** the epsilon table |
+| `wlc_phy_papd_cal_cleanup_nphy` | 124 | the restore of that setup |
+| `wlc_phy_ipa_restore_tx_digi_filts_nphy` | 41 | the cal's digital filter |
+| `wlc_phy_txpwr_papd_cal_nphy` | 13 | the "gain has drifted by 4" gate |
+| `wlc_phy_ipa_set_bbmult_nphy` | 6 | writes the bbmult |
 
-Circa **1150 righe**. Attenzione a `wlc_phy_ipa_set_bbmult_nphy`: ne ha sei, non
-722 — quel numero viene da `cfuncs.py` prima che riconoscesse le firme mandate a capo
-dallo stile kernel, e vale per qualunque conteggio fatto con quella versione.
+About **1150 lines**. Careful with `wlc_phy_ipa_set_bbmult_nphy`: it has six,
+not 722 — that number came from `cfuncs.py` before it recognised the signatures
+kernel style wraps, and the same holds for any count made with that version.
 
-È anche la spiegazione dei 22 registri PHY non attribuiti fra #11700 e #15900:
-non sono 22 buchi indipendenti, sono quel blocco che non esiste. Portarlo è il
-pezzo grosso che resta, e non è roba da mezz'ora.
+It is also the explanation of the 22 unattributed PHY registers between #11700
+and #15900: they are not 22 independent holes, they are that missing block.
+`papd-cal-map.md` says how much of it the series has ported since.
 
-## 4bis. La cal RSSI: i piani funzionano, il campionamento no
+## 4bis. The RSSI cal: the plans work, the sampling does not
 
-Aggiornamento su 3a, misurato e non più ipotizzato.
+Update on 3a, measured and no longer hypothesised.
 
-I piani di lettura **vengono consumati**: 22 valori su 27 per ciascuno di
-`0xa6`, `0xa7`, `0xf9`, `0xfb`, che sono i registri che `b43_nphy_poll_rssi()`
-legge. (Il giro precedente in cui "non spostavano niente" era un binario stale:
-lezione a parte, `make` prima di misurare.)
+The read plans **are consumed**: 22 values of 27 for each of `0xa6`, `0xa7`,
+`0xf9`, `0xfb`, which are the registers `b43_nphy_poll_rssi()` reads. (The
+earlier round where they "moved nothing" was a stale binary: a lesson of its
+own, `make` before measuring.)
 
-Con i piani attivi i coefficienti che il port scrive sono `0x3f` dove il vendore
-mette `0x3e`: **un LSB**. La formula quindi è giusta; quello che differisce è il
-campionamento. Il conto preciso: il port fa **22** letture per registro dove il
-vendore ne fa **27** per init. Il piano è una FIFO per indirizzo, quindi con 5
-poll in meno il port consuma i valori dei round sbagliati e la media esce di uno.
+With the plans on, the coefficients the port writes are `0x3f` where the vendor
+puts `0x3e`: **one LSB**. So the formula is right; what differs is the sampling.
+The exact count: the port does **22** reads per register where the vendor does
+**27** per init. The plan is a FIFO per address, so with 5 polls fewer the port
+consumes the values of the wrong rounds and the average comes out one off.
 
-Cosa NON è la causa: il numero di livelli VCM. b43 cicla `vcm < 8` e brcmsmac ha
-`vcm_level_max = 8`, identici.
+What is NOT the cause: the number of VCM levels. b43 loops `vcm < 8` and
+brcmsmac has `vcm_level_max = 8`, identical.
 
-### 4ter. Dove sono le cinque letture in più, e perché saperlo non basta
+### 4ter. Where the five extra reads are, and why knowing it is not enough
 
-Contate. Nel primo init il vendore legge `0xa6` **27 volte**, e non sono 27 poll:
-sono 21 dentro la cal RSSI più sei sparse, ognuna di una fase diversa.
+Counted. In the first init the vendor reads `0xa6` **27 times**, and they are not
+27 polls: 21 inside the RSSI cal plus six scattered ones, each from a different
+phase.
 
-| record | fase |
+| record | phase |
 |---|---|
-| #1668 | il poll dell'idle TSSI (`poll_rssi` con un campione) |
-| #8563 | la cal TX IQ/LO |
-| #11812 | `papd_cal_setup` core 0, il salvataggio dell'AFE |
+| #1668 | the idle TSSI poll (`poll_rssi` with one sample) |
+| #8563 | the TX IQ/LO cal |
+| #11812 | `papd_cal_setup` core 0, the save of the AFE |
 | #12930 | `papd_cal_setup` core 1 |
-| #14991 | la regione non attribuita #14093-15920 |
-| #22255 | il salvataggio dei ~20 registri in testa alla cal RSSI (#22247-22289) |
-| #22381-#23761 | i 20 poll del loop vcm, uno ogni 72 record |
-| #24319 | una dopo la cal |
+| #14991 | the unattributed region #14093-15920 |
+| #22255 | the save of the ~20 registers at the head of the RSSI cal (#22247-22289) |
+| #22381-#23761 | the 20 polls of the vcm loop, one every 72 records |
+| #24319 | one after the cal |
 
-Il piano di lettura è una **FIFO per indirizzo su tutta la cattura**. Il port fa
-22 letture di `0xa6`, quindi consuma le prime 22 voci — e fra quelle ci sono
-`#11812`, `#12930` e `#14991`, cioè tre fasi che il port **non esegue**. Tre dei
-suoi poll leggono valori che appartengono alla cal PAPD e alla regione non
-attribuita.
+The read plan is a **FIFO per address over the whole capture**. The port does 22
+reads of `0xa6`, so it consumes the first 22 entries — and among those are
+`#11812`, `#12930` and `#14991`, i.e. three phases the port **does not run**.
+Three of its polls read values that belong to the PAPD cal and to the
+unattributed region.
 
-Sembrava la causa. Non è, o non è tutta: ho aggiunto un `--skip` a
-`gen_readplans.py` per escludere dal piano gli intervalli delle fasi che il port
-non fa, e provato due volte — escludendo #10962-15920, poi anche la cal TX IQ/LO
-a #8500-8600 per far combaciare il conto delle letture prima della cal. In
-entrambi i casi il coefficiente **peggiora**: da `0x3f` a `0x0000`, dove il
-vendore scrive `0x3f` su `0x1b8` e `0x3e` sugli altri otto. Allineare la FIFO non
-basta.
+It looked like the cause. It is not, or not all of it: a `--skip` was added to
+`gen_readplans.py` to exclude from the plan the intervals of the phases the port
+does not do, and tried twice — excluding #10962-15920, then the TX IQ/LO cal at
+#8500-8600 too, to make the count of reads before the cal match. In both cases
+the coefficient **gets worse**: from `0x3f` to `0x0000`, where the vendor writes
+`0x3f` on `0x1b8` and `0x3e` on the other eight. Aligning the FIFO is not enough.
 
-Il motivo per cui non basta è visibile nel trace del port: dentro un poll il port
-legge `0xa6 0xa7 0xf9 0xfb 0x8f 0xa5 0xe5 0xe6`, il vendore in testa alla cal
-legge `0x91 0x92 0x8f 0xa5 0xa6 0xa7 0xe7 ...`. Non è solo il **quante** che
-differisce, è il **quali e in che ordine**: una FIFO per indirizzo non si allinea
-spostando gli estremi di un intervallo, e per chiudere questa voce serve appaiare
-i poll, non le letture.
+Why it is not enough is visible in the port's trace: inside a poll the port
+reads `0xa6 0xa7 0xf9 0xfb 0x8f 0xa5 0xe5 0xe6`, the vendor at the head of the
+cal reads `0x91 0x92 0x8f 0xa5 0xa6 0xa7 0xe7 ...`. It is not only the **how
+many** that differs, it is the **which and in what order**: a FIFO per address
+does not align by moving the ends of an interval, and closing this entry needs
+pairing the polls, not the reads.
 
-`--skip` resta nello strumento perché è corretto e serve comunque (il piano deve
-corrispondere al flow: `init` non fa la cal TX IQ/LO, `initcal` sì), ma
-`readplans_init.h` non è stato rigenerato: con lo skip il flow `init` sta peggio,
-e un piano che peggiora il risultato non va committato solo perché è più
-"giusto" in teoria.
+`--skip` stays in the tool because it is correct and useful anyway (the plan has
+to match the flow: `init` does not do the TX IQ/LO cal, `initcal` does), but
+`readplans_init.h` was not regenerated: with the skip the `init` flow is worse,
+and a plan that worsens the result is not committed just because it is more
+"right" in theory.
 
-## 4. Come rifare le misure
+(Since then the plans carry their record and the cursor is per address, and
+the last LSB turned out to be a mainline rounding defect:
+`test/unit/README.md`, "Positional plans".)
+
+## 4. How to redo the measurements
 
 ```sh
-cd test
-./nphy_trace init dsl3580l 1 > /tmp/port.out          # canale 1, come il vendore
-./coverage.py ../router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded \
+cd test/unit
+./nphy_trace init dsl3580l 1 > /tmp/port.out          # channel 1, like the vendor
+./coverage.py ../../router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded \
     /tmp/port.out --range 132 26100 --values
 ```
 
-Due trappole in cui sono cascato, per non ricascarci:
+Two traps fallen into, so as not to fall into them again:
 
-- **canale diverso** fra port e cattura: nove registri della chantab escono come
-  differenze e non lo sono;
-- **SPROM incompleta** nell'harness: i campi che non decodifico diventano zeri, e
-  gli zeri sembrano buchi del driver. Se una differenza riguarda la potenza,
-  guardare prima `main.c` che il driver.
+- **a different channel** between port and capture: nine chantab registers come
+  out as differences and are not;
+- **incomplete SPROM** in the harness: the fields not decoded become zeros, and
+  the zeros look like driver holes. If a difference concerns power, look at
+  `main.c` before the driver.
 
-## 6. Le prime 84 op: non c'e' spur avoidance, e non ci sono misure
+## 6. The first 84 ops: no spur avoidance, and no measurements
 
-`PMU.SPUR` compare **zero** volte in entrambe le catture, quella a caldo e quella a
-freddo. Lo spur avoidance non e' qui e non e' altrove in quello che abbiamo:
-`si_pmu_spuravoid` e' fra i simboli agganciati, quindi se il vendore lo chiamasse lo
-vedremmo. L'assenza e' un dato.
+`PMU.SPUR` appears **zero** times in both captures, the hot one and the cold
+one. Spur avoidance is not here and not elsewhere in what we have:
+`si_pmu_spuravoid` is among the hooked symbols, so if the vendor called it we
+would see it. The absence is data.
 
-E non sono misure, benche' ci siano letture. Due pattern, nessuno dei due interroga
-l'hardware:
+And they are not measurements, although there are reads. Two patterns, neither
+of which queries the hardware:
 
-**Le `SI.COREREG` sono la meta' di lettura di un read-modify-write.** Il valore che
-tornano e' quello appena scritto — `#10` legge `0x64` e torna `0x400`, che e' quello
-che `#9` ha scritto con `GPIO.OUT`; `#14` legge `0x68` e torna `0x407`, scritto da
-`#13` con `GPIO.OE`. `si_gpioout` e `si_gpioouten` sono helper mask/set, e il tracer
-vede la lettura perche' aggancia l'accessor.
+**The `SI.COREREG`s are the read half of a read-modify-write.** The value they
+return is the one just written — `#10` reads `0x64` and returns `0x400`, which is
+what `#9` wrote with `GPIO.OUT`; `#14` reads `0x68` and returns `0x407`, written
+by `#13` with `GPIO.OE`. `si_gpioout` and `si_gpioouten` are mask/set helpers,
+and the tracer sees the read because it hooks the accessor.
 
-**Le `OBJ` sono un write-then-verify della SHM.** `#46-#49` scrivono quattro word
-(`0x98`, `0x9a`, `0x9c`, `0x9e`), `#50-#57` rileggono le stesse quattro e tornano
-valori identici. Coerente col rapporto 17 scritture contro 5 letture: se fossero
-misure sarebbe rovesciato.
+**The `OBJ`s are a write-then-verify of the SHM.** `#46-#49` write four words
+(`0x98`, `0x9a`, `0x9c`, `0x9e`), `#50-#57` read the same four back and get
+identical values. Consistent with the ratio of 17 writes to 5 reads: if they
+were measurements it would be the other way round.
 
-Le misure vere nella cattura stanno tutte piu' tardi, e si riconoscono perche' il
-valore letto **non e' prevedibile** da quello scritto: il poll dell'idle TSSI, i 20
-poll del loop vcm della cal RSSI, le 40 riletture per passo di gain della cal PAPD,
-`rcal`/`rccal`. E' la stessa distinzione su cui si regge l'harness — dove il valore e'
-prevedibile lo specchio basta, dove non lo e' servono i piani di lettura.
+The real measurements in the capture all come later, and they are recognised
+because the value read **is not predictable** from the one written: the idle
+TSSI poll, the 20 polls of the RSSI cal's vcm loop, the 40 rereads per gain step
+of the PAPD cal, `rcal`/`rccal`. It is the same distinction the harness rests
+on — where the value is predictable the mirror is enough, where it is not the
+read plans are needed.
 
-### Da verificare: la sequenza AFE e' doppia
+### To be checked: the AFE sequence is doubled
 
-`PHY.ARRW` piu' le quattro scritture AFE (`0xa6 0x8f 0xa7 0xa5`) compaiono due volte,
-a **#20-#24** e a **#27-#31**, con gli stessi valori. In mezzo ci sono solo
-`MAC.MHF 0x0000` e `MAC.MCTRL`.
+`PHY.ARRW` plus the four AFE writes (`0xa6 0x8f 0xa7 0xa5`) appear twice, at
+**#20-#24** and at **#27-#31**, with the same values. In between there are only
+`MAC.MHF 0x0000` and `MAC.MCTRL`.
 
-b43 chiama `switch_analog(true)` una volta sola da `b43_phy_init()`, e l'harness ne
-emette una. Se il vendore la fa due volte c'e' un passaggio che non abbiamo — il
-sospetto e' un `radio_on` che va e torna, o un secondo giro del percorso di rfkill —
-ma non e' verificato. Non sono misure in nessun caso: sono le stesse quattro
-scritture, quindi la domanda e' cosa succede **fra** le due, non cosa leggono.
+b43 calls `switch_analog(true)` once from `b43_phy_init()`, and the harness emits
+one. If the vendor does it twice there is a step we do not have — the suspicion
+is a `radio_on` that goes and comes back, or a second round of the rfkill path —
+but it is not verified. They are not measurements in any case: they are the
+same four writes, so the question is what happens **between** the two, not what
+they read.
+
+The D6220's `wl0` attach under 7.14 has the same pattern: two blocks of AFE
+overrides on `0x0a6`/`0x08f`/`0x0a7`/`0x0a5`, each after clearing bit 10 of
+`0x078`, with host flags in between (`router-data/d6220/README.md`). There the
+two blocks write different values (`0x000d`/`0x0000`, then `0x00fd`/`0x07ff`).
