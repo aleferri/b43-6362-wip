@@ -1,112 +1,113 @@
-# Cosa è proponibile e cosa no
+# What can be proposed and what cannot
 
-## Proponibile quasi così
+## Proposable almost as is
 
-`patches/0001` e `0002`. Sono contenute, non toccano il comportamento
-degli host esistenti (i due nuovi campi sono `false` per tutti gli altri) e la
-motivazione tecnica è verificabile sul silicio. Da fare prima dell'invio:
+`patches/0001` and `0002`. They are self-contained, do not touch the behaviour
+of existing hosts (the two new fields are `false` for everyone else) and the
+technical motivation can be verified on silicon. To do before sending:
 
-- passare `0003` (binding) sotto `dt_binding_check`, che io non ho eseguito;
-- decidere se tenere il riferimento al BCM63268 nella descrizione: il chip ha
-  un blocco analogo ma se non è testato è meglio non citarlo come supportato;
-- verificare che il teardown sia corretto su `rmmod bcma` con il d11 ancora
-  legato, non solo sul percorso felice.
+- run `0003` (the binding) through `dt_binding_check`, which has not been done;
+- decide whether to keep the reference to the BCM63268 in the description: the
+  chip has a similar block, but if it is not tested it is better not to name it
+  as supported;
+- check that the teardown is right on `rmmod bcma` with the d11 still bound,
+  not only on the happy path.
 
-## Non proponibile così: la SPROM
+## Not proposable as is: the SPROM
 
-Questo è l'ostacolo vero. Nel fork la SPROM del core su SoC arriva da
-`brcm,bcma-sprom` con `bcma-bus = <&wlan>`, che è un driver **solo OpenWrt**
-(`target/linux/generic/files/drivers/bcma/fallback-sprom.c`): mainline non ha
-nessun meccanismo per servire una SPROM da device tree. L'unico gancio upstream
-è `bcma_arch_register_fallback_sprom()`, usato da bcm47xx da codice
-arch-specifico.
+This is the real obstacle. In the fork the SPROM of the core on the SoC comes
+from `brcm,bcma-sprom` with `bcma-bus = <&wlan>`, which is an **OpenWrt-only**
+driver (`target/linux/generic/files/drivers/bcma/fallback-sprom.c`): mainline
+has no mechanism to serve a SPROM from the device tree. The only upstream hook
+is `bcma_arch_register_fallback_sprom()`, used by bcm47xx from arch-specific
+code.
 
-Tre strade, in ordine di costo crescente per chi le deve far accettare:
+Three roads, in order of increasing cost for whoever has to get them accepted:
 
-1. **fallback arch-specifico per bmips**, sul modello di
-   `arch/mips/bcm47xx/sprom.c`: legge i parametri dalla NVRAM CFE e li
-   trasforma in `struct ssb_sprom`. Segue un precedente accettato, ma su bmips
-   che è DT-only aggiunge codice arch che il target ha evitato finora.
-2. **binding DT nuovo** per una SPROM fornita da nvmem/firmware: la strada
-   pulita, e la più lunga, perché va discussa con i maintainer del DT e non solo
-   con quelli di bcma/b43.
-3. **niente SPROM**: derivare tutto da default per chip. Non regge: i 38 fixup
-   della DSL-3580L includono calibrazioni PA per catena, cioè roba per board.
-   Un secondo esemplare dello stesso core, wl0 della TG789vac v2, ha una SROM
-   che differisce da quella della DSL-3580L in 38 parole su 220, tutte di
-   potenza: antenna gain, maxpower e PA per catena, offset per rate 2.4 GHz. Le
-   altre 182, `boardtype` e `boardflags` compresi, coincidono
+1. **an arch-specific fallback for bmips**, on the model of
+   `arch/mips/bcm47xx/sprom.c`: it reads the parameters from the CFE NVRAM and
+   turns them into a `struct ssb_sprom`. It follows an accepted precedent, but
+   on bmips, which is DT-only, it adds arch code the target has avoided so far.
+2. **a new DT binding** for a SPROM provided by nvmem/firmware: the clean road,
+   and the longest, because it has to be discussed with the DT maintainers and
+   not only with the bcma/b43 ones.
+3. **no SPROM**: derive everything from per-chip defaults. It does not hold: the
+   DSL-3580L's 38 fixups include per-chain PA calibrations, i.e. per-board data.
+   A second instance of the same core, wl0 of the TG789vac v2, has a SROM that
+   differs from the DSL-3580L's in 38 words of 220, all power data: antenna
+   gain, maxpower and PA per chain, 2.4 GHz per-rate offsets. The other 182,
+   `boardtype` and `boardflags` included, are the same
    (`router-data/tg789vac-v2/README.md`).
 
-Da decidere prima di scrivere codice, perché cambia dove vive il parsing.
+To be decided before writing code, because it changes where the parsing lives.
 
-## Le routine condivise vanno iffate, o è un nack
+## Shared routines have to be gated, or it is a nack
 
-Nel PHY di b43 quasi tutto è condiviso fra tutte le N-PHY: le stesse funzioni
-girano su rev 1 come su rev 17. Una modifica non gateata cambia il comportamento
-di hardware che non abbiamo, non possiamo provare, e di cui non abbiamo catture —
-e questo è un nack immediato, a ragione.
+Nearly everything in b43's PHY is shared among all N-PHYs: the same functions
+run on rev 1 as on rev 17. An ungated change alters the behaviour of hardware
+we do not have, cannot test, and have no captures of — and that is an immediate
+nack, rightly.
 
-Le due patch scritte finora sono a posto: `0001` sta in
-`b43_nphy_gain_ctl_workarounds_rev7()`, che è già rev-specifica per nome, e ha in
-testa un `if (phy->radio_rev != 8 || 40 MHz || 5 GHz) return`; `0002` è un cambio
-di soli dati in un array che `b43_nphy_get_rf_pwr_offset_table()` ritorna solo per
-`phy->rev == 8 && phy->radio_rev == 8`.
+The first two patches written are fine: `0001` sits in
+`b43_nphy_gain_ctl_workarounds_rev7()`, which is already rev-specific by name,
+and has at its head an `if (phy->radio_rev != 8 || 40 MHz || 5 GHz) return`;
+`0002` is a data-only change in an array that `b43_nphy_get_rf_pwr_offset_table()`
+returns only for `phy->rev == 8 && phy->radio_rev == 8`.
 
-Il rischio sta nel lavoro che viene dopo. Queste sono le funzioni che le voci
-aperte dell'inventario portano a toccare, tutte condivise, con il gate che
-servirebbe:
+The risk is in the work that comes after. These are the functions the open
+entries of the inventory lead to touch, all shared, with the gate each would
+need:
 
-| funzione | chi la usa | gate necessario |
+| function | who uses it | gate needed |
 |---|---|---|
-| `b43_nphy_op_prepare_structs` | **ogni** N-PHY | è dove sta `perical = 2`: non si tocca. Il knob per girare con la cal accesa vive nell'harness (`test/unit/main.c`), non nel driver |
-| `b43_radio_2057_chantab_upload` | radio rev 5, 8, 9, 14 | i dieci registri 5 GHz azzerati (voce 5b) sono dietro `radio_rev == 8` in `0011`, per non cambiare il cambio canale di 43217, 43227 e dei rev 9/14 |
-| `b43_nphy_tx_pwr_ctl_init` | tutti i rev 7+ | togliere l'early return vale per rev 8 con radio rev 8, non per l'intero rev 7+: 16/17 con radio 9/14 non li abbiamo |
-| `b43_nphy_workarounds_rev7plus`, `b43_nphy_gain_ctl_workarounds` | dispatcher rev 7+ | qualsiasi aggiunta va in un ramo per revisione, non nel corpo comune |
-| `b43_supported_bands` | ogni device b43 | il caso `dev_id 0x435f` (voce 6) non deve cambiare le bande annunciate dagli altri dual band |
+| `b43_nphy_op_prepare_structs` | **every** N-PHY | it is where `perical = 2` lives: not to be touched. The knob to run with the cal on lives in the harness (`test/unit/main.c`), not in the driver |
+| `b43_radio_2057_chantab_upload` | radio rev 5, 8, 9, 14 | the ten 5 GHz registers cleared (entry 5b) are behind `radio_rev == 8` in `0011`, so as not to change the channel change of 43217, 43227 and revs 9/14 |
+| `b43_nphy_tx_pwr_ctl_init` | every rev 7+ | removing the early return holds for rev 8 with radio rev 8, not for all of rev 7+: we do not have 16/17 with radio 9/14 |
+| `b43_nphy_workarounds_rev7plus`, `b43_nphy_gain_ctl_workarounds` | rev 7+ dispatchers | any addition goes in a per-revision branch, not in the common body |
+| `b43_supported_bands` | every b43 device | the `dev_id 0x435f` case (entry 6) must not change the bands announced by the other dual-band devices |
 
-`reverse-tools/check_patch_gating.py` lo controlla meccanicamente: per ogni riga
-aggiunta trova la funzione che la contiene nel file dopo la patch e cerca un gate
-che la domini — nome rev-specifico, early return su rev, oppure un `if`/`case`
-sulla revisione. È un'euristica su brace depth e non un parser C, quindi un
-`NON GATEATA` va guardato e non ubbidito alla cieca; ma su una modifica di prova
-dentro `b43_nphy_op_prepare_structs` la becca.
+`reverse-tools/check_patch_gating.py` checks it mechanically: for every added
+line it finds the function that contains it in the file after the patch and
+looks for a gate that dominates it — a rev-specific name, an early return on
+rev, or an `if`/`case` on the revision. It is a heuristic on brace depth and
+not a C parser, so a `NON GATEATA` has to be looked at and not obeyed blindly;
+but it catches a test change inside `b43_nphy_op_prepare_structs`.
 
 ```sh
 ./scripts/series-diff.sh ~/src/pin /tmp/base > /tmp/serie.diff
 ./reverse-tools/check_patch_gating.py --tree /tmp/base /tmp/serie.diff
 ```
 
-Finche' la serie non e' divisa il verdetto e' **uno per tutta la serie**, e si
-prende sopra le mainline, non sull'albero pulito — sull'albero pulito lo strumento
-lo liquida con `(patch non applicabile)`, che il contatore finale non conta:
-`series-diff.sh` scrive in `/tmp/base` proprio quell'albero di partenza.
+Until the series is split the verdict is **one for the whole series**, and it is
+taken over the mainline patches, not on the clean tree — on the clean tree the
+tool dismisses it with `(patch non applicabile)`, which the final counter does
+not count: `series-diff.sh` writes exactly that starting tree into `/tmp/base`.
 
-Da' **sei** punti non gateati, tutti dichiarati in `patches/b43/NOTES.md`. Il verdetto
-per patch torna con la ri-divisione; la catena di dipendenze che serve a rifarlo
-(`0002 -> 0004 -> 0009`, e `0012` dietro `0009`) sta in `CLAUDE.md`.
+It gives **six** ungated points, all declared in `patches/b43/NOTES.md`. The
+per-patch verdict comes back with the split; the dependency chain needed to
+redo it (`0002 -> 0004 -> 0009`, and `0012` behind `0009`) is in `CLAUDE.md`.
 
-## Non proponibile ora: HT
+## Not proposable now: HT
 
-Vedi `ht20-mimo-plan.md`. Prima M0-M2, e con i report in mano.
+See `ht20-mimo-plan.md`. M0-M2 first, and with the reports in hand.
 
-## Una nota sullo strumento
+## A note on the tool
 
-`reverse-tools/check_patch_gating.py` si fidava dei numeri di riga negli `@@`
-della patch. `patch(1)` pero' rilocalizza gli hunk quando l'albero non e'
-esattamente quello su cui la patch e' stata fatta, e lo fa in silenzio perche' lo
-invochiamo con `--silent`: su una patch multi-hunk l'errore si accumula e le righe
-aggiunte finiscono attribuite alla funzione sbagliata. Che e' il modo peggiore di
-sbagliare per uno strumento come questo, perche' il nome che stampa esiste.
+`reverse-tools/check_patch_gating.py` used to trust the line numbers in the
+patch's `@@`. `patch(1)` however relocates hunks when the tree is not exactly
+the one the patch was made on, and does so silently because it is invoked with
+`--silent`: on a multi-hunk patch the error accumulates and the added lines end
+up attributed to the wrong function. Which is the worst way for a tool like
+this to be wrong, because the name it prints exists.
 
-Ora i numeri vengono dal diff fra il contenuto prima e dopo. Tre verdetti della
-serie sono cambiati, e sono tutti e tre correzioni:
+Now the numbers come from the diff between the content before and after. Three
+verdicts of the series changed then, and all three were corrections:
 
-| patch | prima | ora |
+| patch | before | after |
 |---|---|---|
-| `0004` | solo `b43_phy_initn`, riga 6031 | `b43_nphy_papd_tables_init` funzione nuova **piu'** `b43_phy_initn` alla riga 6101 |
-| `0005` | `b43_nphy_workarounds_rev3plus` (3138-3344) | `b43_nphy_workarounds_rev7plus` (2693-3135), che e' dove le righe stanno |
-| `0012` | `b43_chantab_phy_upload` NON GATEATA | `b43_nphy_papd_cal` funzione nuova, `b43_phy_initn` gateata |
+| `0004` | only `b43_phy_initn`, line 6031 | `b43_nphy_papd_tables_init` new function **plus** `b43_phy_initn` at line 6101 |
+| `0005` | `b43_nphy_workarounds_rev3plus` (3138-3344) | `b43_nphy_workarounds_rev7plus` (2693-3135), which is where the lines are |
+| `0012` | `b43_chantab_phy_upload` NON GATEATA | `b43_nphy_papd_cal` new function, `b43_phy_initn` gated |
 
-Restano due `NON GATEATA`, entrambe di `0010`, e sono giuste: quella patch e' un
-fix di mainline per ogni N-PHY e non deve essere gateata.
+The two `NON GATEATA` left at that point were both from `0010`, and they were
+right: that patch is a mainline fix for every N-PHY and must not be gated.
