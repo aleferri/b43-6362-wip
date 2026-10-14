@@ -1,293 +1,303 @@
 # CLAUDE.md
 
-Cosa serve sapere prima di toccare qualcosa. Corto di proposito: il dettaglio sta
-in `docs/INDEX.md`, qui c'è solo ciò che serve per non ripetere errori già fatti.
+What has to be known before touching anything. Short on purpose: the detail is
+in `docs/INDEX.md`, here there is only what is needed not to repeat mistakes
+already made.
 
-**Questo file dice lo stato, non come ci si è arrivati.** I numeri qui sono quelli
-che gli strumenti danno oggi; le tappe intermedie stanno nei messaggi di commit e
-in `patches/b43/MESSAGES.md`. Se un numero qui non torna, l'errore è qui: rifare la
-misura e correggere la riga.
+**This file states the state, not how it was reached.** The numbers here are
+the ones the tools give today; the intermediate steps are in the commit
+messages and in `patches/b43/MESSAGES.md`. If a number here does not add up, the
+mistake is here: redo the measurement and fix the line.
 
-## Il progetto
+## The project
 
-Portare in b43 il supporto **BCM6362 / N-PHY rev 8 / radio 2057 rev 8**, guidati
-da una cattura MMIO del driver proprietario `wl 6.30.102.7`. Sette patch già
-merged in mainline (`docs/upstream-status.md`), dodici candidate in
-`patches/mainline/`, trentasei nella serie che sta in `b43/`. **Niente ha
-mai girato su hardware**: tutto è verificato riproducendo la cattura in un harness
-che compila il vero `phy_n.c`.
+Bring to b43 the support for **BCM6362 / N-PHY rev 8 / radio 2057 rev 8**,
+guided by an MMIO capture of the proprietary driver `wl 6.30.102.7`. Seven
+patches already merged in mainline (`docs/upstream-status.md`), twelve
+candidates in `patches/mainline/`, thirty-six in the series that lives in
+`b43/`. **Nothing has ever run on hardware**: everything is verified by
+reproducing the capture in a harness that builds the real `phy_n.c`.
 
-## Setup, ogni volta
+## Setup, every time
 
 ```sh
-sh scripts/fetch-upstream-state.sh ~/src/pin        # albero pinnato, dal tarball
+sh scripts/fetch-upstream-state.sh ~/src/pin        # pinned tree, from the tarball
 cd test/unit && make KDIR=~/src/pin && make KDIR=~/src/pin warncheck
 ./phase_compare.py --vendor ../../router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded
 ```
 
-I file che il port cambia stanno **interi** in `b43/` (e quelli di bcma in
-`bcma/`, ai loro percorsi nel kernel), sull'albero `848acc8ffe1b` che
-`patches/regen-base` dichiara. L'harness prende quelli da `b43/` e il resto
-(header non toccati, `cordic.c`) da `KDIR`, che quindi resta **pulito**: non ci si
-applica niente. Lo script senza secondo argomento prende proprio quell'albero;
-con un ref (`master`) prende upstream, e su quello i numeri sotto non hanno
-nessun motivo di tornare, e i riferimenti `file:riga` sicuramente no.
+The files the port changes live **whole** in `b43/` (and the bcma ones in
+`bcma/`, at their kernel paths), on the tree `848acc8ffe1b` that
+`patches/regen-base` declares. The harness takes those from `b43/` and the rest
+(untouched headers, `cordic.c`) from `KDIR`, which therefore stays **clean**:
+nothing is applied to it. The script without a second argument fetches exactly
+that tree; with a ref (`master`) it fetches upstream, and on that the numbers
+below have no reason to add up, and the `file:line` references certainly do not.
 
-`b43/` contiene anche le dodici di `patches/mainline/`: fanno parte del baseline
-delle misure, e senza i numeri sotto non tornano. Per la stessa ragione
-`scripts/series-diff.sh ~/src/pin` stampa la serie b43 come diff **dall'albero
-pinnato con le mainline applicate**: non contiene `0010` e `0022`, che erano
-duplicati di due delle mainline. `check_patch_gating.py` su quel diff da' un
-verdetto unico per tutta la serie; le dichiarazioni sui punti non gateati sono in
-`patches/b43/NOTES.md`.
+`b43/` also contains the twelve of `patches/mainline/`: they are part of the
+measurement baseline, and without them the numbers below do not add up. For the
+same reason `scripts/series-diff.sh ~/src/pin` prints the b43 series as a diff
+**from the pinned tree with the mainline patches applied**: it does not contain
+`0010` and `0022`, which were duplicates of two of the mainline patches.
+`check_patch_gating.py` on that diff gives one verdict for the whole series; the
+declarations on the ungated points are in `patches/b43/NOTES.md`.
 
-La serie si ridivide prima di mandare qualunque cosa, e i messaggi delle
-trentasei patch stanno in `patches/b43/MESSAGES.md`. Le citazioni per numero nei
-documenti e in `phase_compare.py` risolvono contro quel file.
+The series is split again before sending anything, and the messages of the
+thirty-six patches are in `patches/b43/MESSAGES.md`. The citations by number in
+the documents and in `phase_compare.py` resolve against that file.
 
-**Come ridividerla sta in `patches/b43/SERIES.md`**: otto serie per competenza, non
-un thread da trentasei. L'ordine di `MESSAGES.md` e' quello di scoperta e non serve a
-chi le deve rivedere. Li' stanno anche i sei punti dove due serie si contendono la
-stessa funzione, misurati, e il peggiore e' `b43_nphy_txpwr_index` con quattro.
+**How to split it is in `patches/b43/SERIES.md`**: eight series by area, not one
+thread of thirty-six. The order of `MESSAGES.md` is the order of discovery and is
+no use to reviewers. The six points where two series contend for the same
+function are there too, measured, and the worst is `b43_nphy_txpwr_index` with
+four.
 
-**La regola che rende quella divisione possibile e' una sola: un commit per patch, con
-la sua voce di `MESSAGES.md` nello stesso commit.** Il confine per patch sta nella
-storia, non in una directory di file che si desincronizzano — i ventisei file che
-c'erano fino a `394c9e2` sono 718 righe dietro la serie, ed e' peggio del non
-averli. `scripts/patch-from-commit.sh` estrae la patch di un commit quando serve
-(commit su `b43/`, o sul vecchio `rollup.diff` per la storia di prima), e
-`patches/b43/SPLIT.md` ha i numeri.
+**The rule that makes that split possible is one: one commit per patch, with its
+`MESSAGES.md` entry in the same commit.** The per-patch boundary lives in the
+history, not in a directory of files that drift — the twenty-six files that
+existed until `394c9e2` are 718 lines behind the series, which is worse than not
+having them. `scripts/patch-from-commit.sh` extracts the patch of a commit when
+needed (a commit on `b43/`, or on the old `rollup.diff` for the history before),
+and `patches/b43/SPLIT.md` has the numbers — and what the published history
+actually holds, which is less than it says: `0027`-`0036` arrive together in
+`a608a33`.
 
-La catena di dipendenze dentro la serie serve alla **ri-divisione**, non al build:
-misurata con `git apply` sull'albero pinnato pulito, 0004 dipende da **0002** (contesto in
-`tables_nphy.c`), 0009 da 0004, 0012 da **0009**. 0003 non serve a nessuna delle
-tre.
+The dependency chain inside the series serves the **split**, not the build:
+measured with `git apply` on the clean pinned tree, 0004 depends on **0002**
+(context in `tables_nphy.c`), 0009 on 0004, 0012 on **0009**. 0003 is needed by
+none of the three.
 
-## Strumenti
+## Tools
 
-| cosa | dove |
+| what | where |
 |---|---|
-| harness, flow `init initpor initcal full chanset rfkill txpower` | `test/unit/nphy_trace` |
-| confronto per fase, 18 finestre | `test/unit/phase_compare.py` |
-| confronto globale + per regione | `test/unit/phase_compare.py --global-run DA A --flow F` |
-| copertura per insiemi di celle | `test/unit/coverage.py` |
-| storia di una cella di tabella | `reverse-tools/trace_tables.py --cell ID:OFF` |
-| segmentazione su un marcatore | `reverse-tools/segment_marker.py` |
-| normalizzazione, `Op` con `.ep` | `test/unit/compare.py` |
-| **seed**: lo stato che `op_init` e `rfkill` lasciano | `reverse-tools/gen_seed.py` → `test/unit/seed_up.h` |
-| accessi SHM, clock PHY, macfreq, confini MAC (catture nuove) | hook `wlc_bmac_*` in `wl-diag/wl_diag.c` |
-| buchi di dispatch, xref brcmsmac, gating delle patch | `reverse-tools/*.py` |
+| harness, flows `init initpor initcal full chanset rfkill txpower` | `test/unit/nphy_trace` |
+| per-phase comparison, 18 windows | `test/unit/phase_compare.py` |
+| global + per-region comparison | `test/unit/phase_compare.py --global-run FROM TO --flow F` |
+| set coverage of cells | `test/unit/coverage.py` |
+| history of a table cell | `reverse-tools/trace_tables.py --cell ID:OFF` |
+| segmentation on a marker | `reverse-tools/segment_marker.py` |
+| normalisation, `Op` with `.ep` | `test/unit/compare.py` |
+| **seed**: the state `op_init` and `rfkill` leave | `reverse-tools/gen_seed.py` → `test/unit/seed_up.h` |
+| SHM accesses, PHY clock, macfreq, MAC boundaries (new captures) | `wlc_bmac_*` hooks in `wl-diag/3-4/wl_diag.c` (not in `2-6-30/`) |
+| dispatch holes, brcmsmac xref, patch gating | `reverse-tools/*.py` |
+| the series as one diff, the bcma patches from `bcma/` | `scripts/series-diff.sh`, `scripts/regen-patches.sh` |
 
-## Stato
+## State
 
-`18 finestre: 0 da guardare, 7 divergenze note`. Nessuna finestra e' aperta.
+Measured on `b43/` at the reorganisation, `phase_compare.py` with no options and
+`--global-run 132 26100 --flow txpower --channel 1`; the harness's traces are
+byte for byte those of `054601d`, so these are also the numbers of that commit.
 
-**Il verdetto e' la tabella per fase di `phase_compare.py`: 8895 op su 18923, il
-47%.** Non il totale in blocchi contigui, che dice 21316 su 23060 (92%) e che **non
-e' una misura**: su `up-ch1` la gran parte dei blocchi sta sotto le 16 op. Sommare
-frammenti da due op e chiamarla copertura e' contare il sommerso nel PIL.
+`18 finestre: 0 da guardare, 5 divergenze note, 1 fasi non ancora portate`. No
+window is open.
 
-Un blocco conta se corrisponde a una **fase**: una voce di `phy_ops` dove esiste,
-oppure — eccezione dichiarata finche' il port non le espone — una macro operazione
-delimitata da un marcatore citato. Il numero per fase e' **uno**, la run contigua
-piu' lunga dentro la fase, quindi nessun frammento lo muove.
+**The verdict is `phase_compare.py`'s per-phase table: 9069 ops of 18923, 48%.**
+Not the total in contiguous blocks, which says 21529 of 23060 (93%) and **is not
+a measure**: on `up-ch1` most blocks are under 16 ops. Adding up two-op fragments
+and calling it coverage is counting the black economy in the GDP.
 
-| fase | op | run | blocchi |
+A block counts if it corresponds to a **phase**: a `phy_ops` entry where one
+exists, or — a declared exception as long as the port does not expose them — a
+macro operation delimited by a quoted marker. The per-phase number is **one**,
+the longest contiguous run inside the phase, so no fragment moves it.
+
+| phase | ops | run | blocks |
 |---|---|---|---|
+| `idle-tssi` | 661 | **660 100%** | `660` |
+| `pwr-setup` | 432 | **432 100%** | `432` |
 | `gain-table` | 1540 | **1540 100%** | `1540` |
 | `coeff-setup` | 1037 | **1037 100%** | `1037` |
-| `coeff-setup-2` | 1074 | **1062 99%** | `1062` |
-| `recalc-txpower` (**phy_ops vera**) | 716 | **604 84%** | `604` |
-| `pwr-setup` | 432 | **432 100%** | `432` |
-| `idle-tssi` | 661 | 432 65% | `432 210` |
-| `coda-idle-tssi` | 1140 | 432 38% | `432 334 161 88` |
-| `cal-papd` | 2662 | 847 32% | `847 2x361 316 274` |
-| `cal-tx-iqlo` | 1570 | 443 28% | `443 349 267 2x110` |
+| `recalc-txpower` (**a real phy_ops**) | 716 | **605 84%** | `605` +1 small |
+| `perical-ingresso` | 1403 | 575 41% | `575 409 401` +1 small |
+| `cal-tx-iqlo` | 1570 | 443 28% | `443 349 267 2x110` +4 small |
+| `cal-papd` | 2662 | 792 30% | `792 518 2x381 371` +7 small |
+| `cal-rx-iq` | 5728 | 531 9% | `4x531 530 528 434` +4 small |
+| `coeff-setup-2` | 1074 | **1062 99%** | `1062` +3 small |
 | `cal-rssi-2` | 960 | **960 100%** | `960` |
-| `perical-ingresso` | 1403 | 575 41% | `575 409 401` |
-| `cal-rx-iq` | 5728 | 531 9% | `531 528 2x527 2x524` |
+| `coda-idle-tssi` | 1140 | 432 38% | `432 352 161 88` +1 small |
 
-**La run sbaglia in un verso, e la colonna blocchi c'e' per questo**: prende il
-massimo, quindi una fase che ripete N volte la stessa sequenza non puo' superare
-~1/N per costruzione, quanto bene la riproduca. E sono tutte le cal. `cal-rx-iq` e'
-il caso limite: la run dice **9%** e la forma dice **`2x510 4x507`**, cioe' le sei
-iterazioni dello sweep appaiate una per una; misurata da sola con il pavimento dei
-piani al suo ingresso (`--global-run 14951 21136`) fa **5595 su 5728, il 98%**, e la
-sotto-regione dello sweep (`15921 22246`) **5243 su 5917, l'89%**. Quella fase non e'
-un buco.
+**The run is wrong in one direction, and that is why the blocks column is
+there**: it takes the maximum, so a phase that repeats the same sequence N times
+cannot exceed ~1/N by construction, however well it reproduces it. And that is
+every cal. `cal-rx-iq` is the limit case: the run says **9%** and the shape says
+**`4x531 530 528`**, i.e. the iterations of the sweep paired one by one; measured
+on its own with the plans' floor at its entry (`--global-run 14951 21136`) it does
+**5702 of 5728, 100%**, and the sweep sub-region (`15921 22246`) **5889 of 5917,
+100%**. That phase is not a hole.
 
-Attenzione: una regione misurata da sola non e' un'altra vista dello stesso run, e'
-un run **diverso** — `--global-run` riposiziona il pavimento dei piani al suo
-ingresso. `cal-rx-iq` da sola fa 98% contro il 9% della run; `coeff-setup-2` da sola
-fa **331 (31%)** contro 1062 (99%) nel run globale. Nessuno dei due e' sbagliato e
-non sono confrontabili.
+Careful: a region measured on its own is not another view of the same run, it is
+a **different** run — `--global-run` repositions the plans' floor at its entry.
+`cal-rx-iq` alone does 100% against the run's 9%; when this was first written,
+`coeff-setup-2` alone did 331 (31%) against 1062 (99%) in the global run. Neither
+is wrong and they are not comparable.
 
-Il totale della global run **non si guarda**: l'assegnazione dei blocchi e'
-esclusiva e golosa, quindi un blocco lungo altrove si porta via le op e il numero
-oscilla su cambiamenti che migliorano soltanto. Il numero da guardare e' `up-ch1`.
+The total of the global run **is not looked at**: the assignment of blocks is
+exclusive and greedy, so a long block elsewhere takes the ops away and the number
+swings on changes that only improve. The number to look at is `up-ch1`.
 
-Per regione, `--global-run 132 26100 --flow txpower --channel 1`. Il flow e' quello
-che `up-ch1` dichiara e non `init`: con `init` il port si ferma a 4594 op, la
-regione di init fa 4436 e le cinque regioni di calibrazione fanno **zero**, che non
-e' una misura di niente (trappola 11).
+Per region, `--global-run 132 26100 --flow txpower --channel 1`. The flow is the
+one `up-ch1` declares and not `init`: with `init` the port stops at about 4600
+ops, the init region does about 4400 and the five calibration regions do
+**zero**, which is a measure of nothing (trap 11).
 
-| regione | record | op | appaiate | non conf. | su conf. | spostate | assenti |
+| region | records | ops | paired | not comp. | on comp. | moved | absent |
 |---|---|---|---|---|---|---|---|
-| init vero e proprio | #132-10961 | 9696 | 8217 85% | **1180** | **96%** | 49 | 254 |
-| cal PAPD (`a4`) | #10962-14092 | 2662 | **2644 99%** | 0 | 99% | 4 | 14 |
-| cal RX IQ, ingresso | #14093-15920 | 1705 | 1696 99% | 3 | **100%** | 2 | 7 |
-| cal RX IQ, sweep di gain | #15921-22246 | 5917 | **5888 100%** | 0 | **100%** | 3 | 26 |
-| seconda cal RSSI | #22247-23771 | 960 | **960 100%** | 0 | **100%** | 0 | **0** |
-| coda | #23772-26100 | 2128 | 1911 90% | **176** | 98% | 10 | 31 |
-| **TOTALE** | | | | | | **68** | **332** |
+| init proper | #132-10961 | 9696 | 8420 87% | **1180** | **99%** | 38 | 62 |
+| PAPD cal (`a4`) | #10962-14092 | 2662 | **2644 99%** | 0 | 99% | 4 | 14 |
+| RX IQ cal, entry | #14093-15920 | 1705 | 1696 99% | 3 | **100%** | 2 | 7 |
+| RX IQ cal, gain sweep | #15921-22246 | 5917 | **5888 100%** | 0 | **100%** | 3 | 26 |
+| second RSSI cal | #22247-23771 | 960 | **960 100%** | 0 | **100%** | 0 | **0** |
+| tail | #23772-26100 | 2128 | 1921 90% | **176** | 98% | 9 | 22 |
+| **TOTAL** | | | | | | **56** | **131** |
 
-**Le due colonne misurano due difetti diversi e servono entrambe.** `appaiate`
-risponde a "in che ordine", e sull'init di un PHY l'ordine e' funzionale: le op vanno
-nella sequenza che l'hardware si aspetta, non in una qualunque che tocchi le stesse
-celle. `assenti` risponde a "ci sono", cioe' dove manca codice. Un'op **spostata** non
-e' innocua: e' un difetto d'ordine, e va chiusa come gli altri.
+**The two columns measure two different defects and both are needed.** `paired`
+answers "in what order", and on a PHY's init the order is functional: the ops go
+in the sequence the hardware expects, not in any one that touches the same cells.
+`absent` answers "are they there", i.e. where code is missing. A **moved** op is
+not harmless: it is an order defect, and it gets closed like the others.
 
-Perche' `appaiate` valga qualcosa il suo conto deve essere **ottimo**, e con difflib
-non lo era: vedi `lcsmatch.py`. Il conto di `assenti` non ritaglia il port, che non ha
-numeri di record: guarda l'avanzo, cioe' le op del port che nessun blocco ha appaiato,
-contate per stringa su tutto il flow, e le consuma.
+For `paired` to be worth anything its count has to be **optimal**, and with
+difflib it was not: see `lcsmatch.py`. The `absent` count does not crop the port,
+which has no record numbers: it looks at the remainder, i.e. the port's ops no
+block has paired, counted by string over the whole flow, and consumes them.
 
-`non conf.` sono famiglie che il port non ha modo di emettere, perche' l'harness
-compila il PHY e non il core — `OBJ.*` (1286 nella finestra), `MAC.MCTRL`/`MHF`
-(40), `TPL.RAMW` (19), `GPIO.OUT` (12) — e la object memory ha comunque
-l'encoding non confrontabile di `o708`/`o70e`. Nelle quattro regioni di calibrazione sono **zero**: tutte e 1356
-stanno nell'init e nella coda, dove il core lavora. Il totale in blocchi contigui
-non le esclude, di proposito.
+`not comp.` are families the port has no way to emit, because the harness builds
+the PHY and not the core — `OBJ.*`, `MAC.MCTRL`/`MHF`, `TPL.RAMW`, `GPIO.*` — and
+object memory has the non-comparable encoding of `o708`/`o70e` anyway. In the
+four calibration regions they are **zero**: all 1356 are in the init and the
+tail, where the core works. The total in contiguous blocks does not exclude them,
+on purpose.
 
-**L'init vero e proprio resta il residuo piu' grosso, e adesso si sa di quanto**:
-delle sue op non appaiate, 64 il port le fa altrove e **254 non le fa affatto**. Sono
-quelle 254 il posto dove cercare codice mancante. Il secondo e' lo sweep con 61, poi
-la cal PAPD con 29 e la coda con 27; la seconda cal RSSI e' a **zero**. Le spostate
-sono 201 in tutto e sono un difetto d'ordine, non un contorno.
+**The init proper is still the biggest residue, and how big is known now**: of
+its unpaired ops, 38 the port does elsewhere and **62 it does not do at all**.
+After it come the sweep with 26, the tail with 22 and the PAPD cal with 14; the
+second RSSI cal is at **zero**.
 
-Quanto vale il **buco singolo** piu' grande dentro l'init non lo dice nessuno
-strumento: `--global-run` stampa le run piu' lunghe, non le distanze fra loro. Serve
-per sapere dove stanno quelle 246.
+The tool now also prints the **biggest unpaired stretches**, with how many of
+their ops write: the largest starts at #5004, 20 comparable ops absent out of 577
+in the stretch, and all 20 write. Its footer counts 122 absent ops that write and
+176 that read over the whole window — 298, against the 131 of the per-region
+table; the two counts are not reconciled here. Either way the biggest stretch is
+not necessarily the most urgent: the `scrivono` column is the one to order the
+work by.
 
-## Come sta insieme la cal periodica
+## How the periodic cal holds together
 
-`wlc_phy_cal_perical_nphy_run()` e' chiamata una volta per fase, e ognuna fa la
-stessa parentesi: legge il tx gain da `7/0x110`, salva `nphy_txpwrctrl` e lo
-**spegne**, esegue la sua fase, e in coda ripristina — ed e' quel ripristino a
-scrivere `adj_pwr_tbl`, 84 celle per catena. Ricostruita in
-`b43_nphy_cal_perical_phyinit()`, con questi confini, tutti dalla cattura:
+`wlc_phy_cal_perical_nphy_run()` is called once per phase, and each one does the
+same bracket: it reads the tx gain from `7/0x110`, saves `nphy_txpwrctrl` and
+**turns it off**, runs its phase, and at the end restores — and it is that
+restore that writes `adj_pwr_tbl`, 84 cells per chain. Rebuilt in
+`b43_nphy_cal_perical_phyinit()`, with these boundaries, all from the capture:
 
-- **la parentesi si chiude una volta, alla fine.** Audit di ogni confine fra i
-  passi, col test sul payload (84 zeri = spegnimento, contenuto = accensione): fra
-  perical e TX I/Q LO nessuna transizione, fra TX I/Q LO e PAPD un solo
-  spegnimento, fra PAPD e RX IQ quattro spegnimenti, fra RX IQ e idle TSSI nessuna.
-  **Non c'e' una sola accensione fra le fasi**: il controllo resta spento per tutta
-  la sequenza.
-- **le sei fasi TX sono UN passo.** La cattura emette i dodici comandi di fila con
-  una sola lettura del gain, e il vendore ha una parentesi per tutto il blocco TX,
-  non sei.
-- **RX IQ e RSSI sono un passo solo.** Fra la rilettura dei coefficienti di
-  `save_cal` (#21169, `15/0x50 len 8`) e quella che apre `coef_setup` (#21187, len
-  7) ci sono diciotto op e nient'altro: in due passi fra i due passerebbero due
-  riprogrammazioni da 84 celle.
-- **la restituzione dell'indice sta fra la PAPD e la RX IQ**, e va fatta con
-  indice `-1`: la cattura ha la' due chiamate a `txpwr_index`, una per core, ognuna
-  col suo salva e riapplica (#14101/#14305 core 0, #14524/#14728 core 1).
-- **la restituzione differita non ripristina le compensazioni** (`restore_cals`
-  falso): nella cattura fra la write del bbmult e la riprogrammazione della tabella
-  di potenza non ci sono write a `15/0x50`, `15/0x55` e `15/0x5d`, e i quattro siti
-  di brcmsmac che chiamano con l'indice salvato passano tutti `false`.
-- **il bbmult si rimette in DUE celle**, 87 e 95: la cattura fa la read-modify-write
-  su `15/0x57` (#8096) e poi la stessa su `15/0x5f` (#8103), come fa il ramo che
-  forza l'indice. Il riferimento tocca solo la 87.
-- **l'indice per catena si legge dall'hardware all'ingresso**, dai bit 8..14 di
-  `C1_TXPCTL_STAT` e `C2_TXPCTL_STAT`, non da `index_internal`, e **non e' uno**:
-  quello che la coda riforza e' 10 sul core 0 e 12 sul core 1. Quale delle cinque
-  coppie di letture lo produca, e perche' non e' la coppia che il riferimento usa,
-  sta nella sezione dedicata piu' sotto.
-- **la coda della sequenza riforza quei due indici**, una chiamata per core, prima
-  della chiusura unica: la cattura legge `26/0xca` a #25017 e `27/0xcc` a #25418, e
-  fra le due chiamate il controllo di potenza resta spento — i quattro payload da 84
-  zeri di #24841, #25064, #25242, #25465 — con l'unica accensione dopo, a #25641, che
-  e' la chiusura. Vale **+762 op contigue**, il guadagno piu' grosso della serie, a
-  run invariate. Il port ci arriva coi numeri giusti ma per la ragione sbagliata:
-  vedi la sezione sulle cinque coppie.
-- **il test della restituzione e' sullo stato d'ingresso della sequenza**, non del
-  passo: con la chiusura unica alla fine lo stato per passo e' falso dopo la prima
-  apertura.
-- **`precal_txgain` due volte non e' un doppione**: la cattura ne ha due, una nel
-  blocco differito e una al passo INIT.
-- **la sequenza gira dopo `recalc_txpower`**, non in coda a `b43_phy_initn()`: il
-  vendore fa init, recalc (#5726-6500), poi la cal (#7034 in avanti). Il punto di
-  chiamata e' la coda di `b43_nphy_op_recalc_txpower()`, dietro
-  `nphy->perical_pending`, che e' il solo posto fra i due in cui l'harness passa;
-  nel riferimento la fa partire il watchdog, che qui non c'e'. mac80211 chiama
-  `recalc_txpower` dopo l'init **sempre**, quindi un flow che non lo faccia e' il
-  banco a essere infedele.
+- **the bracket closes once, at the end.** Audit of every boundary between the
+  steps, with the test on the payload (84 zeros = disabling, content = enabling):
+  between perical and TX I/Q LO no transition, between TX I/Q LO and PAPD a single
+  disabling, between PAPD and RX IQ four disablings, between RX IQ and idle TSSI
+  none. **There is not a single enabling between the phases**: the control stays
+  off for the whole sequence.
+- **the six TX phases are ONE step.** The capture emits the twelve commands in a
+  row with a single gain read, and the vendor has one bracket for the whole TX
+  block, not six.
+- **RX IQ and RSSI are a single step.** Between the reread of the `save_cal`
+  coefficients (#21169, `15/0x50 len 8`) and the one that opens `coef_setup`
+  (#21187, len 7) there are eighteen ops and nothing else: in two steps, two
+  84-cell reprogrammings would pass between them.
+- **handing the index back sits between PAPD and RX IQ**, and is done with index
+  `-1`: the capture has two calls to `txpwr_index` there, one per core, each with
+  its save and reapply (#14101/#14305 core 0, #14524/#14728 core 1).
+- **the deferred hand-back does not restore the compensations** (`restore_cals`
+  false): in the capture there are no writes to `15/0x50`, `15/0x55` and
+  `15/0x5d` between the write of the bbmult and the reprogramming of the power
+  table, and the four brcmsmac sites that call with the saved index all pass
+  `false`.
+- **the bbmult goes back into TWO cells**, 87 and 95: the capture does the
+  read-modify-write on `15/0x57` (#8096) and then the same on `15/0x5f` (#8103),
+  as the branch that forces the index does. The reference touches only 87.
+- **the per-chain index is read from the hardware at the entry**, from bits
+  8..14 of `C1_TXPCTL_STAT` and `C2_TXPCTL_STAT`, not from `index_internal`, and
+  **it is not one**: what the tail forces again is 10 on core 0 and 12 on core 1.
+  Which of the five pairs of reads produces it, and why it is not the pair the
+  reference uses, is in the dedicated section below.
+- **the tail of the sequence forces those two indices again**, one call per core,
+  before the single closing: the capture reads `26/0xca` at #25017 and `27/0xcc`
+  at #25418, and between the two calls the power control stays off — the four
+  payloads of 84 zeros at #24841, #25064, #25242, #25465 — with the only enabling
+  after them, at #25641, which is the closing. It is worth **+762 contiguous
+  ops**, the biggest gain of the series, with runs unchanged.
+- **the hand-back test is on the state at the entry of the sequence**, not of the
+  step: with the single closing at the end, the per-step state is false after the
+  first opening.
+- **`precal_txgain` twice is not a duplicate**: the capture has two, one in the
+  deferred block and one at the INIT step.
+- **the sequence runs after `recalc_txpower`**, not at the end of
+  `b43_phy_initn()`: the vendor does init, recalc (#5726-6500), then the cal
+  (#7034 on). The call point is the end of `b43_nphy_op_recalc_txpower()`, behind
+  `nphy->perical_pending`, which is the only place between the two the harness
+  goes through; in the reference the watchdog starts it, and there is none here.
+  mac80211 calls `recalc_txpower` after the init **always**, so a flow that does
+  not do it is the bench being unfaithful.
 
-`nphy->cal_orig_pwr_idx[]` e' impostata in **un posto solo**, dentro
-`if (nphy->perical != 2)`. Questo hardware ha `perical == 2` — che e' la ragione per
-cui esiste la macchina a stati — quindi la' non passa e quell'array resta a zero: va
-preso al passo INIT.
+`nphy->cal_orig_pwr_idx[]` is set in **one place only**, inside
+`if (nphy->perical != 2)`. This hardware has `perical == 2` — which is the reason
+the state machine exists — so it does not go through there and that array stays
+at zero: it has to be taken at the INIT step.
 
-**Il senso del precal e' diverso da come suona**: l'indice forzato serve solo a
-*leggere* dei gain, non a restare programmato. Il vendore lo forza, legge, e
-restituisce subito radio gain, dac gain, bbmult e le compensazioni; le cal girano
-sull'hardware di prima, coi gain letti all'indice forzato. **L'indice e' 10, e non
-e' quello che il riferimento sceglierebbe**: brcmsmac tiene 10 per radio 2057 rev 3,
-4 e 6 e 0 per tutto il resto, quindi il rev 8 finirebbe su 0, ma la cattura legge
-`off=0xca`, cioe' `192 + 10`. Il raggruppamento di brcmsmac e' piu' vecchio di questo
-radio, esattamente come quello dell'rccal (`gap-inventory.md` voce 5), e decide la
-cattura.
+**The meaning of the precal is different from how it sounds**: the forced index
+serves only to *read* some gains, not to stay programmed. The vendor forces it,
+reads, and at once gives back radio gain, dac gain, bbmult and the
+compensations; the cals run on the hardware as it was, with the gains read at
+the forced index. **The index is 10, and it is not the one the reference would
+choose**: brcmsmac keeps 10 for radio 2057 rev 3, 4 and 6 and 0 for everything
+else, so rev 8 would end up on 0, but the capture reads `off=0xca`, i.e.
+`192 + 10`. brcmsmac's grouping is older than this radio, exactly like the
+rccal's (`gap-inventory.md` entry 5), and the capture decides.
 
-Il parametro full/parziale non e' una costante: `fullcal = (canale != canale
-dell'ultima cal TX IQ/LO)`, lo stesso test che `b43_nphy_restore_cal()` fa gia'
-prima di riusare i coefficienti. Su questa cattura **non sposta op**, perche'
-entrambi gli init sono di un'interfaccia che sale su un canale non calibrato: cambia
-dalla seconda volta in poi, che nessuna cattura copre. Il tipo della cal RX IQ resta
-**2** e non e' una dimenticanza: brcmsmac chiede 2 alla prima cal dopo
-un'associazione e 0 dopo, b43 non traccia niente di equivalente, e fra le due
-costanti 2 e' la conservativa perche' 0 salta quasi tutto.
+The full/partial parameter is not a constant: `fullcal = (channel != channel of
+the last TX IQ/LO cal)`, the same test `b43_nphy_restore_cal()` already does
+before reusing the coefficients. On this capture it **moves no op**, because both
+inits are of an interface coming up on an uncalibrated channel: it changes from
+the second time on, which no capture covers. The type of the RX IQ cal stays
+**2** and it is not an oversight: brcmsmac asks for 2 at the first cal after an
+association and 0 afterwards, b43 tracks nothing equivalent, and between the two
+constants 2 is the conservative one because 0 skips almost everything.
 
-Attenzione a cosa **non** e' il discriminante, perche' e' la strada che sembra
-giusta: il `full_cal` di `wlc_phy_a4(pi, bool full_cal)` e' dichiarato e mai usato
-nel corpo, e i tre chiamanti passano tutti `true`; e `pi->nphy_papd_cal_type`, che
-sceglie fra `CAL_FULL` e `CAL_SOFT` per l'epsilon, non viene mai scritto in tutto
-`phy_n.c`. Metterli in b43 sarebbe trascrivere peso morto.
+Careful with what is **not** the discriminant, because it is the road that looks
+right: the `full_cal` of `wlc_phy_a4(pi, bool full_cal)` is declared and never
+used in the body, and the three callers all pass `true`; and
+`pi->nphy_papd_cal_type`, which chooses between `CAL_FULL` and `CAL_SOFT` for the
+epsilon, is never written anywhere in `phy_n.c`. Putting them in b43 would be
+transcribing dead weight.
 
-Le tre parti dello stato di cal — `rssical_chanspec`, `iqcal_chanspec`,
-`txiqlocal_chanspec` — vanno azzerate **insieme** fra i due init dell'harness, non
-due su tre, o il secondo init prende la strada parziale.
+The three parts of the cal state — `rssical_chanspec`, `iqcal_chanspec`,
+`txiqlocal_chanspec` — have to be cleared **together** between the harness's two
+inits, not two out of three, or the second init takes the partial road.
 
-## La cal RSSI narrowband
+## The narrowband RSSI cal
 
-La ricerca del VCM e' aritmetica pura, e mainline ne sbaglia due pezzi. La distanza
-da minimizzare e' `I² + Q²` e il secondo termine era `Q * I`, che non e' una distanza
-ed e' negativo ogni volta che le rail hanno segno opposto. E il ramo rev 7+ che
-programma il vincitore passava `vcm`, che all'uscita del ciclo vale 8 su un campo di
-tre bit: scriveva un bit fuori campo e buttava la ricerca. Le due stanno in
-`patches/mainline/`, sono provabili contro brcmsmac senza hardware e valgono anche
-per il rev 3.
+The VCM search is pure arithmetic, and mainline gets two pieces of it wrong. The
+distance to minimise is `I² + Q²` and the second term was `Q * I`, which is not a
+distance and is negative whenever the rails have opposite signs. And the rev 7+
+branch that programs the winner passed `vcm`, which at the loop exit is 8 on a
+three-bit field: it wrote a bit out of the field and threw the search away. The
+two are in `patches/mainline/`, can be proved against brcmsmac without hardware
+and hold for rev 3 too.
 
-Con le due, la seconda cal RSSI misurata da sola fa **956 su 960, il 100%**, in 3
-blocchi, con una run singola da 940. Era 623 in 22 blocchi.
+With the two, the second RSSI cal measured on its own does **956 of 960, 100%**,
+in 3 blocks, with a single run of 940. It was 623 in 22 blocks. In the per-phase
+table, `cal-rssi-2` is at **960 of 960**.
 
-La fase nella tabella per fase resta a 99 su 960, e **non e' una contraddizione**: i
-blocchi di poll di questa fase sono identici a quelli dello sweep della cal RX IQ, e
-l'assegnazione golosa li assegna a quella. E' il caso da citare quando un numero per fase
-non si muove dopo un fix giusto.
+The same region found the defect in the index field: the capture reads
+`0x1ed`/`0x1ee` at #7034 and #7036 and gets `0x1900`, so the index is 25 and the
+seven low bits are zero. The port wrote 0 there where the vendor writes 25.
 
-La stessa regione ha fatto trovare il difetto del campo dell'indice: la cattura
-legge `0x1ed`/`0x1ee` a #7034 e #7036 e rende `0x1900`, quindi l'indice e' 25 e i
-sette bit bassi sono zero. Il port ne scriveva 0 dove il vendore scrive 25.
+The read of `GPIO_SEL` outside the write's gate is needed too (see
+`patches/b43/NOTES.md`): without it, the region breaks into 22 blocks instead of
+3. It is inert on hardware and not a mainline candidate.
 
-Serve anche la lettura di `GPIO_SEL` fuori dal gate della scrittura (vedi
-`patches/b43/NOTES.md`): senza, la regione si spezza in 22 blocchi invece di 3. E' inerte
-sull'hardware e non e' un candidato mainline.
+## The five TXPCTL_STAT pairs at the entry, attributed
 
-## Le cinque coppie di TXPCTL_STAT all'ingresso, attribuite
-
-`wlc_phy_cal_perical_nphy_run` in testa fa, in quest'ordine:
+`wlc_phy_cal_perical_nphy_run` at its head does, in this order:
 
     if (phase_id == IDLE || phase_id == INIT) {
             nphy_cal_orig_pwr_idx[0..1] = (read_phy_reg(0x1ed/0x1ee) >> 8) & 0x7f;
@@ -298,1514 +308,1583 @@ sull'hardware e non e' un candidato mainline.
     tx_pwr_ctrl_state = pi->nphy_txpwrctrl;
     wlc_phy_txpwrctrl_enable_nphy(pi, PHY_TPC_HW_OFF);
 
-Nella cattura ci sono **dieci letture** di `0x1ed`/`0x1ee` in tutta `up-ch1`, cinque
-coppie, e si mappano una per una:
+In the capture there are **ten reads** of `0x1ed`/`0x1ee` in the whole of
+`up-ch1`, five pairs, and they map one by one:
 
-| record | valori | chi la fa |
+| record | values | who does it |
 |---|---|---|
-| #7034/#7036 | **25, 25** | `nphy_cal_orig_pwr_idx`, ramo IDLE/INIT, prima del gain |
-| #7038 | — | `nphy_cal_orig_tx_gain`, gateato su controllo acceso |
-| #7044/#7046 | **10, 12** | `wlc_phy_get_tx_gain_nphy()`, ramo a controllo acceso |
-| #7050/#7052 | 10, 12 | dentro `txpwrctrl_enable(OFF)`: e' `nphy_txpwr_idx` |
-| #10784/#10786 | 10, 12 | idem, nella regione PAPD |
-| #26073/#26075 | 10, 12 | idem, in coda |
+| #7034/#7036 | **25, 25** | `nphy_cal_orig_pwr_idx`, IDLE/INIT branch, before the gain |
+| #7038 | — | `nphy_cal_orig_tx_gain`, gated on the control being on |
+| #7044/#7046 | **10, 12** | `wlc_phy_get_tx_gain_nphy()`, branch with the control on |
+| #7050/#7052 | 10, 12 | inside `txpwrctrl_enable(OFF)`: it is `nphy_txpwr_idx` |
+| #10784/#10786 | 10, 12 | same, in the PAPD region |
+| #26073/#26075 | 10, 12 | same, at the end |
 
-**Il riferimento non descrive quello che la cattura fa in coda.** Il ramo
-`restore_tx_gain`, che la macchina a stati accende nella fase RSSICAL, riforza
-`nphy_cal_orig_pwr_idx`, cioe' **25 e 25**, che con `192 + indice` vorrebbe dire
-leggere `26/0xd9`. La cattura legge `26/0xca` e `27/0xcc`, cioe' **10 e 12**: gli
-indici che le due catene avevano *dopo* la lettura del gain, non prima. E' lo stesso
-schema dell'indice di precal e del raggruppamento dell'rccal — brcmsmac e' piu'
-vecchio di questo radio — e decide la cattura.
+**The reference does not describe what the capture does at the tail.** The
+`restore_tx_gain` branch, which the state machine turns on in the RSSICAL phase,
+forces `nphy_cal_orig_pwr_idx` again, i.e. **25 and 25**, which with
+`192 + index` would mean reading `26/0xd9`. The capture reads `26/0xca` and
+`27/0xcc`, i.e. **10 and 12**: the indices the two chains had *after* the gain
+read, not before. It is the same pattern as the precal index and the rccal's
+grouping — brcmsmac is older than this radio — and the capture decides.
 
-**Sistemato, e in due mosse.** Prima l'ordine: `target` si prende **prima** del
-precal, come il riferimento, non dopo. Poi la variabile: l'indice che la coda
-riforza lo registra `b43_nphy_get_tx_gains()`, nel suo ramo a controllo acceso, che
-e' la lettura di #7044/#7046 — cioe' la coda rimette 10 e 12, per costruzione e non
-per un accidente del piano di lettura.
+**Fixed, in two moves.** First the order: `target` is taken **before** the
+precal, like the reference, not after. Then the variable: the index the tail
+forces again is recorded by `b43_nphy_get_tx_gains()`, in its branch with the
+control on, which is the read at #7044/#7046 — i.e. the tail puts back 10 and 12
+by construction and not by an accident of the read plan.
 
-Le due strade sbagliate, provate e misurate, perche' sembrano entrambe quella
-giusta:
+The two wrong roads, tried and measured, because both look like the right one:
 
-- usare `tx_pwr_idx[]`, che sulla carta e' la coppia che vale 10 e 12: la coda passa
-  a `26/0xd9` e non combacia. Nel port quel campo finisce a 25/25, al contrario del
-  vendore, perche' le tre `tx_power_ctrl(false)` del blocco differito consumavano le
-  voci del piano prima della sequenza.
-- leggere la coppia in testa alla sequenza come fa il riferimento: da' 25 e 25, che
-  e' il valore giusto per `nphy_cal_orig_pwr_idx` e quello sbagliato per la coda.
+- using `tx_pwr_idx[]`, which on paper is the pair worth 10 and 12: the tail goes
+  to `26/0xd9` and does not match. In the port that field ends at 25/25, the
+  opposite of the vendor, because the three `tx_power_ctrl(false)` of the
+  deferred block consumed the plan's entries before the sequence.
+- reading the pair at the head of the sequence as the reference does: it gives
+  25 and 25, which is the right value for `nphy_cal_orig_pwr_idx` and the wrong
+  one for the tail.
 
-Restano fuori le due op di #7034/#7036: nel riferimento riempiono
-`nphy_cal_orig_pwr_idx`, che qui la coda non usa, quindi portarle vorrebbe dire
-aggiungere un campo che nessuno legge. Costano due op e stanno dichiarate qui.
+The two ops of #7034/#7036 were then ported too, with the reference's names and
+nobody reading them: see the next section, which says why an op whose value
+nobody needs is still an op to port.
 
-Misurato: blocchi contigui 19247 -> **19254**, a freddo 18167 -> **18169**,
-divergenze di `perical-ingresso` 905 -> **885**. Poi sono arrivate le due sotto.
+Measured: contiguous blocks 19247 -> **19254**, cold 18167 -> **18169**,
+`perical-ingresso` divergences 905 -> **885**. Then came the two below.
 
-## Due cose che valgono quanto un difetto, e non lo sono
+## Things worth as much as a defect, which are not one
 
-Le due correzioni che hanno mosso di piu' i numeri non aggiungono codice: mettono in
-ordine quello che c'era.
+The corrections that moved the numbers most add no code: they put in order what
+was there.
 
-**Il blocco differito deve girare dentro la parentesi.** Il riferimento spegne il
-controllo di potenza in testa alla run, prima che qualcosa forzi un indice. Il port
-lo spegneva solo entrando nel primo passo, quindi il precal e i due hand-back
-restituivano il controllo **acceso** e ognuno riprogrammava le 84 celle. Da qui, sei
-o sette blocchi da 80-110 op in cui il vendore scrive zeri e il port scrive
-contenuto. La sequenza ora riceve lo stato d'ingresso come argomento invece di
-rileggerlo dopo che il blocco differito lo ha girato. Divergenze di
-`perical-ingresso` **885 -> 323**, op mancanti **675 -> 42**.
+**The deferred block has to run inside the bracket.** The reference turns the
+power control off at the head of the run, before anything forces an index. The
+port turned it off only on entering the first step, so the precal and the two
+hand-backs returned the control **on** and each one reprogrammed the 84 cells.
+Hence six or seven blocks of 80-110 ops in which the vendor writes zeros and the
+port writes content. The sequence now gets the entry state as an argument
+instead of reading it again after the deferred block has turned it.
+`perical-ingresso` divergences **885 -> 323**, missing ops **675 -> 42**.
 
-**Il ramo di spegnimento apriva la porta dati a mano.** `b43_nphy_tx_power_ctrl()`
-scriveva 84 celle in un ciclo su `B43_NPHY_TABLE_DATALO` dove il ramo di accensione,
-dieci righe sotto, usa `b43_ntab_write_bulk()` sulle stesse due tabelle allo stesso
-offset. Stesse celle, strada diversa — ma il tracer del vendore aggancia la funzione
-di tabella, quindi la sua op c'e' e quella del port no, e **quell'unica op mancante
-sfasava di uno tutto cio' che seguiva**. Si vedeva nella mappa dei segmenti: i
-blocchi uguali si accorciavano di uno a ogni scrittura da 84 celle — 77, 76, 75, 74,
-73, 72... Totale per fase **7206 -> 7578**, `cal-rx-iq` da 420 a 510,
-`rxiq-ingresso` da 306 a 401, `txpwr-index` da 6 divergenze note a 4.
+**The disabling branch opened the data port by hand.**
+`b43_nphy_tx_power_ctrl()` wrote 84 cells in a loop on `B43_NPHY_TABLE_DATALO`
+where the enabling branch, ten lines below, uses `b43_ntab_write_bulk()` on the
+same two tables at the same offset. Same cells, different road — but the
+vendor's tracer hooks the table function, so its op is there and the port's is
+not, and **that single missing op put everything that followed one out of
+step**. It showed in the segment map: the equal blocks got one shorter at every
+84-cell write — 77, 76, 75, 74, 73, 72... Per-phase total **7206 -> 7578**,
+`cal-rx-iq` from 420 to 510, `rxiq-ingresso` from 306 to 401, `txpwr-index` from
+6 known divergences to 4.
 
-Il freddo perde 39 op (18750 -> 18711) e nessuna finestra si e' rotta:
-l'assegnazione dei blocchi e' esclusiva e golosa.
+Cold loses 39 ops (18750 -> 18711) and no window broke: the assignment of blocks
+is exclusive and greedy.
 
-**Le due letture d'ingresso del riferimento erano proprio le sei op che mancavano.**
-`nphy_cal_orig_pwr_idx` (la coppia, 2 op) e `nphy_cal_orig_tx_gain` (la table-read su
-`7/0x110`, 4 op) le fa il riferimento in testa alla run e poi non le rilegge — la
-coda rimette l'indice preso *con* i gain, non questo. Sembravano quindi due op morte
-da non portare, e non lo erano: senza di loro tutto il resto della fase stava sei op
-in anticipo, ed erano quei sei che facevano scattare le famiglie di sopra a ogni
-scrittura da 84 celle. Portate, coi nomi del riferimento e con lo stesso nulla che le
-legge; l'indice che la coda usa sta in `pwr_idx_at_gain[]`, scritto da
-`b43_nphy_get_tx_gains()`. Divergenze di `perical-ingresso` **286 -> 95**.
+**The reference's two entry reads were exactly the six ops that were missing.**
+`nphy_cal_orig_pwr_idx` (the pair, 2 ops) and `nphy_cal_orig_tx_gain` (the table
+read on `7/0x110`, 4 ops) are done by the reference at the head of the run and
+then not read again — the tail puts back the index taken *with* the gains, not
+this one. So they looked like two dead ops not to port, and they were not:
+without them the whole rest of the phase was six ops early, and it was those six
+that triggered the families above at every 84-cell write. Ported, with the
+reference's names and the same nothing reading them; the index the tail uses is
+in `pwr_idx_at_gain[]`, written by `b43_nphy_get_tx_gains()`.
+`perical-ingresso` divergences **286 -> 95**.
 
-Regola che ne viene: **un'op del vendore il cui valore non serve a nessuno non e' per
-questo un'op da non portare.** Se l'hardware la vede, la sequenza la contiene, e
-tutto quello che segue si misura da lei.
+The rule that comes from it: **a vendor op whose value nobody needs is not, for
+that reason, an op not to port.** If the hardware sees it, the sequence contains
+it, and everything that follows is measured from it.
 
-**Le due op che chiudono `perical-ingresso` erano un difetto di mainline e un
-ordine.** `nphy->txcal_bbmult` in mainline e' **letto e mai scritto**: lo legge
-`b43_nphy_update_tx_cal_ladder()`, che ci scala i 36 gradini della scala che la cal
-TX I/Q LO usa, e senza scrittore vale zero — ogni gradino esce ad ampiezza zero, su
-ogni N-PHY rev 3 e su. Il riferimento lo riempie in coda a
-`wlc_phy_precal_txgain_nphy()` quando `save_bbmult`, che sul rev 7 e su e' sempre, e
-di nuovo in coda a `wlc_phy_cal_txgainctrl_nphy()`. Nella cattura e' la `TBL.RD
-15/0x57` a #8076, subito dopo il forzamento. **Candidato mainline**, appena si e'
-misurato cosa cambia sulla cal.
+**The two ops that close `perical-ingresso` were a mainline defect and an
+order.** In mainline `nphy->txcal_bbmult` is **read and never written**:
+`b43_nphy_update_tx_cal_ladder()` reads it, and scales with it the 36 rungs of
+the ladder the TX I/Q LO cal uses, and with no writer it is zero — every rung
+comes out at zero amplitude, on every N-PHY rev 3 and up. The reference fills it
+at the end of `wlc_phy_precal_txgain_nphy()` when `save_bbmult`, which on rev 7
+and up is always, and again at the end of `wlc_phy_cal_txgainctrl_nphy()`. In
+the capture it is the `TBL.RD 15/0x57` at #8076, right after the forcing.
+**Mainline candidate**, as soon as what it changes on the cal has been measured.
 
-E i gain al forzamento si prendono fra il forzamento e la restituzione (#8080), non
-dentro il passo INIT della macchina a stati: il riferimento fa
-`cal_target_gain = get_tx_gain()` subito dopo `precal_txgain()`, nello stesso passo.
-Divergenze **95 -> 19**, run **409 -> 573**, totale per fase **7586 -> 7750**.
+And the gains at the forcing are taken between the forcing and the hand-back
+(#8080), not inside the INIT step of the state machine: the reference does
+`cal_target_gain = get_tx_gain()` right after `precal_txgain()`, in the same
+step. Divergences **95 -> 19**, run **409 -> 573**, per-phase total
+**7586 -> 7750**.
 
-**E la parentesi per passo non va su tutti i passi.** Con il controllo di potenza
-gia' spento da prima del blocco differito, `b43_nphy_pwr_ctl_open()` dentro il ciclo
-non spegne niente e la lettura del gain la salta: restano 172 op per passo che
-l'hardware non vede. Il port ne emetteva **48** di scritture da 84 celle contro le
-**36** del vendore, e le dodici in piu' erano queste.
+**And the per-step bracket does not go on every step.** With the power control
+already off since before the deferred block, `b43_nphy_pwr_ctl_open()` inside the
+loop turns nothing off and skips the gain read: 172 ops per step remain that the
+hardware does not see. The port emitted **48** 84-cell writes against the
+vendor's **36**, and the twelve extra were these.
 
-Quale tenere lo dice **l'audit dei confini**, non un'intuizione: fra perical e TX I/Q
-LO nessuna transizione, fra TX I/Q LO e PAPD **una**, fra PAPD e RX IQ quattro — che
-sono le due per core che la cal PAPD apre da se' — fra RX IQ e idle TSSI nessuna.
-Quindi resta la sola apertura in testa al passo PAPDCAL. Togliendole tutte e sei si
-guadagnava sull'ingresso della RX IQ e si perdevano **172 op contigue** altrove:
-misurato, non dedotto, ed e' il motivo per cui la risposta non era ne' "sempre" ne'
-"mai". `rxiq-ingresso` run **401 -> 500**, divergenze **722 -> 542**, op mancanti
-**184 -> 19**.
+Which one to keep is said by **the boundary audit**, not by intuition: between
+perical and TX I/Q LO no transition, between TX I/Q LO and PAPD **one**, between
+PAPD and RX IQ four — which are the two per core the PAPD cal opens itself —
+between RX IQ and idle TSSI none. So only the opening at the head of the PAPDCAL
+step stays. Removing all six gained on the RX IQ entry and lost **172 contiguous
+ops** elsewhere: measured, not deduced, and it is why the answer was neither
+"always" nor "never". `rxiq-ingresso` run **401 -> 500**, divergences
+**722 -> 542**, missing ops **184 -> 19**.
 
-**E il gain di calibrazione della RX IQ era sbagliato per due ragioni sovrapposte.**
-La cattura scrive `0x4077` su entrambe le catene, che e' il `cal_gain` della voce 10
-di `b43_ntab_tx_gain_ipa_2057_rev8_2g` (`0x4077002e`: ipa 7, pad 14, pga 0, txgm 4) —
-l'indice che il precal forza su entrambe. Il port scriveva `0x4027`, cioe' pad 4, che
-e' quello che si ottiene interpretando il contenuto corrente di `7/0x110`.
+**And the RX IQ calibration gain was wrong for two overlapping reasons.** The
+capture writes `0x4077` on both chains, which is the `cal_gain` of entry 10 of
+`b43_ntab_tx_gain_ipa_2057_rev8_2g` (`0x4077002e`: ipa 7, pad 14, pga 0, txgm 4) —
+the index the precal forces on both. The port wrote `0x4027`, i.e. pad 4, which
+is what comes out of interpreting the current content of `7/0x110`.
 
-La formula di `b43_nphy_iq_cal_gain_params()` e' identica al riferimento, quindi il
-difetto era nei gain che le arrivano, e sono due:
+The formula of `b43_nphy_iq_cal_gain_params()` is identical to the reference,
+so the defect was in the gains it receives, and they are two:
 
-1. **`b43_nphy_cal_perical_phyinit()` sovrascriveva il parametro** che aveva appena
-   ricevuto: rileggeva i gain in testa alla propria funzione, col controllo di potenza
-   gia' spento, quindi `b43_nphy_get_tx_gains()` prendeva il ramo che legge `7/0x110`
-   invece di quello che indicizza la tabella. Il chiamante passava pad 14,12 e la
-   funzione usava pad 4,4. Trovato con una stampa temporanea dopo che tre letture del
-   codice non l'avevano visto: **quando due valori plausibili si contendono un
-   risultato, si stampa.**
-2. **la cal RX IQ vuole i gain all'indice forzato**, non quelli d'ingresso. Coi gain
-   d'ingresso, che hanno gli indici per catena 10 e 12, escono `0x4077` e `0x4067`;
-   con quelli al forzamento, 10 su entrambe, escono `0x4077` e `0x4077`.
+1. **`b43_nphy_cal_perical_phyinit()` overwrote the parameter** it had just
+   received: it read the gains again at the head of its own function, with the
+   power control already off, so `b43_nphy_get_tx_gains()` took the branch that
+   reads `7/0x110` instead of the one that indexes the table. The caller passed
+   pad 14,12 and the function used pad 4,4. Found with a temporary print after
+   three readings of the code had not seen it: **when two plausible values
+   contend for a result, print.**
+2. **the RX IQ cal wants the gains at the forced index**, not the entry ones.
+   With the entry gains, which have per-chain indices 10 and 12, `0x4077` and
+   `0x4067` come out; with the ones at the forcing, 10 on both, `0x4077` and
+   `0x4077`.
 
-**La carrier search e' a contatore, e il hold esterno mancava.** `wlc_phy_a4()` la
-tiene aperta dalla riga 25133 alla 25380, cioe' per tutta la cal PAPD;
-`b43_nphy_papd_cal()` no. Il hold e' refcountato su `deaf_count`, quindi senza quello
-esterno le parentesi dei passi interni escono come coppie ingresso-uscita per conto
-loro: il port emetteva **8** coppie contro le **6** del vendore, e le due in piu'
-erano corte, 27 e 34 op, cioe' proprio inner che il vendore ha gratis. Il modo di
-vederlo e' contare le posizioni di `PHY.WR 0x2c = 0xffff` (ingresso) e `= 0x404e`
-(uscita) sui due lati e guardare la lunghezza delle coppie, non solo quante sono.
+**The carrier search is counted, and the outer hold was missing.**
+`wlc_phy_a4()` keeps it open from line 25133 to 25380, i.e. for the whole PAPD
+cal; `b43_nphy_papd_cal()` did not. The hold is refcounted on `deaf_count`, so
+without the outer one the brackets of the inner steps come out as entry-exit
+pairs of their own: the port emitted **8** pairs against the vendor's **6**, and
+the two extra were short, 27 and 34 ops, i.e. exactly inner ones the vendor gets
+for free. The way to see it is to count the positions of `PHY.WR 0x2c = 0xffff`
+(entry) and `= 0x404e` (exit) on both sides and look at the length of the pairs,
+not only at how many there are.
 
-**E la cattura lo conferma, che e' la sola verifica che conta qui.** Le sei coppie
-del vendore, per record, sono:
+**And the capture confirms it, which is the only check that counts here.** The
+vendor's six pairs, by record, are:
 
-| ingresso | uscita | op | cosa copre |
+| entry | exit | ops | what it covers |
 |---|---|---|---|
 | #1620 | #1666 | 34 | init |
-| #8492 | #10756 | 1601 | cal TX I/Q LO |
-| **#10771** | **#14946** | **3658** | **cal PAPD**, #10962-14092 |
-| #14964 | #21143 | 5615 | ingresso e sweep della RX IQ |
-| #22245 | #23900 | 1052 | coeff setup e cal RSSI |
+| #8492 | #10756 | 1601 | TX I/Q LO cal |
+| **#10771** | **#14946** | **3658** | **PAPD cal**, #10962-14092 |
+| #14964 | #21143 | 5615 | RX IQ entry and sweep |
+| #22245 | #23900 | 1052 | coeff setup and RSSI cal |
 | #24271 | #24317 | 34 | idle TSSI |
 
-La terza copre la cal PAPD per intero ed esce a #14946, che e' esattamente l'uscita
-che avevo visto nel gruppo da 25 op. E la forma delle coppie del port si avvicina:
+The third covers the whole PAPD cal and exits at #14946, which is exactly the
+exit seen in the 25-op group. And the shape of the port's pairs gets closer:
 
-    vendore          34 1601 3658      5615 1052 34
-    port, con hold   34 1052 1617 5112 5702 1052 34
-    port, senza      34 1052 1617 27 34 5702 1052 34
+    vendor           34 1601 3658      5615 1052 34
+    port, with hold  34 1052 1617 5112 5702 1052 34
+    port, without    34 1052 1617 27 34 5702 1052 34
 
-Da otto coppie a sette, e le due corte (27 e 34) spariscono nella lunga.
+From eight pairs to seven, and the two short ones (27 and 34) disappear into the
+long one.
 
-Attenzione a come si legge quel 5112 contro 3658: **non e' un hold fuori posto.**
-Guardate le due estremita' e combaciano op per op — all'uscita, sui due lati, `PHY.WR
-0x73=0x0`, `MOD 0x1e7 mask=0xe000`, `MOD 0x8f`, `MOD 0xa5`, `RD 0xb0`, `MOD 0xb0=0x7`,
-`WR 0x2c=0x404e`, `WR 0x42=0x404e`. La lunghezza differisce perche' il port emette
-1454 op **dentro** la cal PAPD che il vendore non emette, cosa che si sapeva gia'
-(`cal-papd` fa 847 su 2662 e `a3`/`a2` non ci sono). Contare la lunghezza di un hold
-non misura il hold, misura cio' che ci sta dentro.
+Careful with how that 5112 against 3658 is read: **it is not a misplaced hold.**
+Look at the two ends and they match op for op — at the exit, on both sides,
+`PHY.WR 0x73=0x0`, `MOD 0x1e7 mask=0xe000`, `MOD 0x8f`, `MOD 0xa5`, `RD 0xb0`,
+`MOD 0xb0=0x7`, `WR 0x2c=0x404e`, `WR 0x42=0x404e`. The length differs because
+the port emits 1454 ops **inside** the PAPD cal that the vendor does not, which
+was already known (`cal-papd` did 847 of 2662 and `a3`/`a2` were not there).
+Counting the length of a hold does not measure the hold, it measures what is
+inside it.
 
-Sui confini non resta niente da misurare, e i due numeri che stavano qui erano un
-artefatto della regola delle ombre. Contati sui due lati con la regola a coppia: il
-marcatore `PHY.WR 0x2c = 0xffff` fa **6 e 6**, e su `0xb0` i due lati sono identici
-valore per valore — 16 `MOD 0x7`, 6 `MOD 0x4`, 16 `RD 0xdf7`, 6 `RD 0xdf4`. Non c'e'
-nessuna coppia in piu' e nessuna lettura in piu'. Quel che resta su `0xb0` e'
-l'**ordine**: in `rxiq-ingresso` il port riceve `0xdf7` dove il vendore ha `0xdf4` e
-lo scambio si chiude undici posizioni dopo.
+At the boundaries there is nothing left to measure, and the two numbers that
+were here were an artefact of the shadows rule. Counted on both sides with the
+pair rule: the marker `PHY.WR 0x2c = 0xffff` does **6 and 6**, and on `0xb0` the
+two sides are identical value by value — 16 `MOD 0x7`, 6 `MOD 0x4`, 16 `RD 0xdf7`,
+6 `RD 0xdf4`. There is no extra pair and no extra read. What remains on `0xb0` is
+the **order**: in `rxiq-ingresso` the port receives `0xdf7` where the vendor has
+`0xdf4`, and the swap closes eleven positions later.
 
-Nota metodologica, e la avevo sbagliata: la prima versione di questa voce diceva
-"la run e' un proxy, il sorgente GPL non lo e'". **No.** brcmsmac e' molto piu' vecchio
-del driver da cui viene la cattura, e in questo lavoro lo ha dimostrato tre volte
-(l'indice di precal, il raggruppamento dell'rccal, l'indice che la coda riforza). La
-cattura decide, sempre. Qui la cattura e brcmsmac concordano, ma la verifica era
-disponibile e andava fatta prima — non dopo, e non perche' qualcuno l'ha fatto
-notare.
+A note on method, which was first got wrong: the first version of this entry
+said "the run is a proxy, the GPL source is not". **No.** brcmsmac is much older
+than the driver the capture comes from, and in this work it has shown it three
+times (the precal index, the rccal's grouping, the index the tail forces again).
+The capture decides, always. Here the capture and brcmsmac agree, but the check
+was available and should have been done first — not afterwards, and not because
+someone pointed it out.
 
-**E un'op sola valeva quattrocentosessantasei divergenze.** Il blocco di salvataggio
-della cal RX IQ salva un registro in piu' del port: `0x2ff`, letto a `#15015` subito
-dopo i quattro registri di override rev 7 e prima di `0x297` e `0x29b`. brcmsmac non
-lo legge **mai** — tocca solo i bit 0, 13, 14 e 15 di quell'indirizzo nel percorso di
-override rev 7 — quindi qui decide la cattura, come per l'indice di precal e il
-raggruppamento dell'rccal. Salvato e non ripristinato, che e' quello che la cattura
-fa: la lettura c'e', una write in questa fase no.
+**And one op was worth four hundred and sixty-six divergences.** The save block
+of the RX IQ cal saves one register more than the port: `0x2ff`, read at `#15015`
+right after the four rev 7 override registers and before `0x297` and `0x29b`.
+brcmsmac **never** reads it — it touches only bits 0, 13, 14 and 15 of that
+address in the rev 7 override path — so here the capture decides, as for the
+precal index and the rccal's grouping. Saved and not restored, which is what the
+capture does: the read is there, a write in this phase is not.
 
-Il perche' vale 466 divergenze e' la lezione: la lettura mancante sfasava di **uno**
-tutto quello che seguiva, e dopo non si riallineava mai, perche' da li' in poi sono
-corse lunghe di zeri identici e di contenuto identico della tabella dei campioni. I
-gruppi da 357, 46, 21, 16, 5 e le quattro coppie da 2 erano tutti quello. `rxiq-
-ingresso` da **530 a 64** divergenze.
+Why it is worth 466 divergences is the lesson: the missing read put everything
+that followed **one** out of step, and afterwards it never realigned, because
+from there on there are long runs of identical zeros and of identical sample
+table content. The groups of 357, 46, 21, 16, 5 and the four pairs of 2 were all
+that. `rxiq-ingresso` from **530 to 64** divergences.
 
-Il modo di trovarla, che e' la parte da riusare: quando i gruppi di divergenza sono
-molti e le corse uguali fra loro sono tutte della stessa lunghezza, **non sono molti
-difetti, e' un offset**. Si localizza cercando il punto da cui `port[i+1] ==
-vendor[i]` regge per una decina di op, e poi si fa la **differenza per multiinsieme**
-sulla span attorno: quello che resta da un lato solo, escluse le famiglie in deroga,
-e' l'op che manca. Qui era una riga.
+The way to find it, which is the part to reuse: when the divergence groups are
+many and the equal runs between them all have the same length, **they are not
+many defects, it is an offset**. It is located by looking for the point from
+which `port[i+1] == vendor[i]` holds for a dozen ops, and then by taking the
+**multiset difference** on the span around it: what remains on one side only,
+excluding the families with an exception, is the missing op. Here it was one
+line.
 
-**E la pulizia della cal PAPD va dentro la seconda parentesi, prima che si chiuda.**
-Il port faceva `run_one`, `pwr_ctl_close`, `cleanup`; la cattura ferma il tono,
-rimette il moltiplicatore e il coupler, cammina la lista degli override a
-#13749-#13918, e **solo dopo** riprogramma la tabella di potenza aggiustata.
+**And the PAPD cal cleanup goes inside the second bracket, before it closes.**
+The port did `run_one`, `pwr_ctl_close`, `cleanup`; the capture stops the tone,
+puts back the multiplier and the coupler, walks the list of overrides at
+#13749-#13918, and **only after** reprograms the adjusted power table.
 
-Trovato col confronto posizionale: allineando dopo la coda del passo 2, il vendore fa
-`PHY.RD 0xc7` — `stop_playback` — dove il port faceva `PHY.RD 0x1e7` e le 84 celle.
+Found with the positional comparison: aligning after the tail of step 2, the
+vendor does `PHY.RD 0xc7` — `stop_playback` — where the port did `PHY.RD 0x1e7`
+and the 84 cells.
 
-**Due righe scambiate**: blocchi contigui 20982 -> **21074 (92%)**, a freddo 18983 ->
-**19333 (70%)**, buco portabile 616 -> **524**. E' il rapporto migliore fra righe
-toccate e op recuperate di tutta la serie, meglio delle due corse della scala TX I/Q
-LO — e il buco da 163 op che inseguivo da tre giri non era un buco di contenuto, era
-questo.
+**Two lines swapped**: contiguous blocks 20982 -> **21074 (92%)**, cold 18983 ->
+**19333 (70%)**, portable hole 616 -> **524**. It is the best ratio of lines
+touched to ops recovered in the whole series, better than the two runs of the TX
+I/Q LO ladder — and the 163-op hole chased for three rounds was not a content
+hole, it was this.
 
-Metodo, che e' la parte riusabile: la **mappa dei segmenti** posizionali di una
-finestra ancorata — quanto lunga la corsa uguale, quanto lunga la diversa, e la prima
-op di ciascuna — riduce 885 divergenze a tre famiglie in una schermata. Contare le
-divergenze non dice niente; guardare come si distribuiscono dice tutto.
+Method, which is the reusable part: the positional **segment map** of an
+anchored window — how long the equal run, how long the different one, and the
+first op of each — reduces 885 divergences to three families in one screen.
+Counting the divergences says nothing; looking at how they are distributed says
+everything.
 
-## Il tetto non e' il 100%, ed e' il 94%
+## The ceiling is not 100%, it is 94%
 
-Le due metriche misurano cose diverse e conviene dirlo con i numeri. **La somma dei
-blocchi** su `up-ch1` fa 19454 su 23068; **la somma delle run** fa 8896 su 18923.
+The two metrics measure different things, and it is worth saying with numbers.
+**The sum of the blocks** on `up-ch1` is 21529 of 23068; **the sum of the runs**
+is 9069 of 18923.
 
-Il 47% delle run **non puo'** arrivare al 100% per costruzione: la run e' il *massimo*
-blocco dentro la fase, quindi una fase che ripete N volte la stessa sequenza si ferma
-a ~1/N. `cal-rx-iq` ne e' la dimostrazione: run 532 su 5728 (9%), forma `532 529 528
-511`, cioe' tutte e sei le iterazioni appaiate a ~530 ciascuna. Quel numero e' un
-rivelatore di regressioni, non un obiettivo.
+The 48% of the runs **cannot** reach 100% by construction: the run is the
+*largest* block inside the phase, so a phase that repeats the same sequence N
+times stops at ~1/N. `cal-rx-iq` is the proof: run 531 of 5728 (9%), shape
+`4x531 530 528 434`, i.e. the sweep's iterations paired at ~530 each. That number
+is a regression detector, not a goal.
 
-Il **92% dei blocchi** ha un tetto vero, e si calcola. Le 1752 op non appaiate, per
-famiglia:
+The **93% of the blocks** has a real ceiling, and it can be computed. The ops no
+port can emit, by family:
 
-| famiglia | op | portabile? |
+| family | ops | portable? |
 |---|---|---|
-| `OBJ.WR` + `OBJ.RD` | 1284 | **no**: 734 indirizzi distinti di object memory, 553 sopra 0x400. E' lo stato di MAC e ucode, e l'harness compila il PHY non il core |
-| `PHY.RD`/`WR`/`MOD` | 309 | **si** |
-| `TBL.WR`/`RD` | 60 | **si** |
-| `RAD.*` | 30 | **si** |
-| `TPL.RAMW`, `MAC.MCTRL`, `MAC.MHF`, `GPIO.OUT`, `CHANSPEC` | 69 | **no**, stessa ragione |
+| `OBJ.WR` + `OBJ.RD` | 1284 | **no**: 734 distinct object memory addresses, 553 above 0x400. It is MAC and ucode state, and the harness builds the PHY, not the core |
+| `TPL.RAMW`, `MAC.MCTRL`, `MAC.MHF`, `GPIO.OUT`, `CHANSPEC` | 69 | **no**, same reason |
 
-Quindi il raggiungibile e' **23068 - 1352 = 21716, il 94,1%**, e siamo a 21316:
-restano **400 op portabili**, cioe' siamo al **98,2% del tetto**. Di quelle, **332
-sono assenti e 68 spostate**: le prime sono codice che manca, le seconde ordine.
-Per regione le assenti sono 254 nell'init, 31 nella coda, 26 nello sweep, 14 nella
-cal PAPD, 7 nell'ingresso RX IQ e **0** nella seconda cal RSSI.
+So what is reachable is **23068 - 1352 = 21716, 94.1%**, and the port is at
+21529: **187 portable ops** are left, i.e. **99.1% of the ceiling**. Of those,
+**131 are absent and 56 moved** (the per-region table in "State"): the first are
+missing code, the second order. By region the absent ones are 62 in the init,
+22 in the tail, 26 in the sweep, 14 in the PAPD cal, 7 in the RX IQ entry and
+**0** in the second RSSI cal.
 
-Dei **106** tratti non appaiati, `--global-run` stampa i piu' grossi per op
-confrontabili, col taglio fra spostate e assenti:
+Of the **99** unpaired stretches, `--global-run` prints the largest by comparable
+ops, with the split between moved and absent:
 
-| da record | conf. | spostate | assenti | scrivono | op nel tratto |
+| from record | comp. | moved | absent | write | ops in the stretch |
 |---|---|---|---|---|---|
-| #877 | 55 | 4 | 51 | **3** | 61 |
-| **#4970** | 44 | 0 | 44 | **27** | 601 |
-| **#203** | 27 | 0 | 27 | **10** | 27 |
+| **#5004** | 20 | 0 | 20 | **20** | 577 |
 | #25823 | 19 | 2 | 17 | 2 | 195 |
 | **#10761** | 18 | **16** | 2 | 9 | 18 |
-| #9727 | 6 | 5 | 1 | 4 | 6 |
+| #9727 | 6 | 6 | 0 | 4 | 6 |
+| #9008 | 5 | 5 | 0 | 3 | 5 |
+| #24823 | 4 | 4 | 0 | 4 | 4 |
+| #3732 | 4 | 4 | 0 | 1 | 4 |
 
-La colonna `scrivono` dice quante op del tratto cambiano lo stato del PHY invece di
-leggerlo, e serve a **capire** il tratto, non a decidere se portarlo: un blocco di
-sole letture va portato comunque, perche' una read di un registro PHY non e' senza
-effetti — vedi `#877`, che erano 3 scritture su 51 ed erano tutte da fare. Il tratto
-piu' grosso che resta e' **#5004: 20 assenti, tutte e 20 scritture.**
+The `write` column says how many ops of the stretch change the PHY's state
+instead of reading it, and it serves to **understand** the stretch, not to decide
+whether to port it: a block of reads only is ported anyway, because a read of a
+PHY register is not without effects — see `#877` below, which was 3 writes out
+of 51 and all of them had to be done. The largest stretch left is **#5004: 20
+absent, all 20 writes**, and it is the ACI scan, which is not portable inside
+`phy_n.c` (below).
 
-Restano, in ordine di dimensione:
+What follows is how the stretches that were above these were closed, in order of
+size; the numbers in each paragraph are those of that step.
 
-**La cal PAPD pulsa il reset della valutazione di canale libero.** Subito dopo il hold
-della carrier search e molto prima delle tabelle, la cattura a #10773-#10776 legge
-BBCFG, lo riscrive col bit `RSTCCA` a uno e poi con `RSTCCA` e `RSTRX` a zero. Il port
-aveva solo la write che salva e azzera il reset RX — che la cattura ha anch'essa, ma
-**dentro** la finestra `papd-tables`, come `PHY.MOD mask=0x8000`. Sono due scritture
-distinte in due punti distinti e il port ne aveva una: una singola write del valore
-azzerato lascia lo stesso valore dietro e **non resetta mai la valutazione**.
+**The PAPD cal pulses the reset of the clear channel assessment.** Right after
+the carrier search hold and well before the tables, the capture at
+#10773-#10776 reads BBCFG, writes it back with the `RSTCCA` bit set and then with
+`RSTCCA` and `RSTRX` clear. The port had only the write that saves and clears the
+RX reset — which the capture has too, but **inside** the `papd-tables` window, as
+`PHY.MOD mask=0x8000`. They are two distinct writes at two distinct points and
+the port had one: a single write of the cleared value leaves the same value
+behind and **never resets the assessment**.
 
-Il posto conta e l'ho sbagliato due volte: al posto della write esistente, o prima
-delle tabelle scalari, la run per fase perde **262 op** e `papd-tables` passa da `ok`
-a `noto`, perche' il confronto la' e' posizionale. Dopo il hold e prima delle tabelle
-torna tutto pieno.
+The spot matters and it was got wrong twice: in place of the existing write, or
+before the scalar tables, the per-phase run loses **262 ops** and `papd-tables`
+goes from `ok` to `noto`, because the comparison there is positional. After the
+hold and before the tables everything is full again.
 
-**La cal TX I/Q LO rimette i registri radio che si prende.**
-`b43_nphy_tx_cal_radio_setup_rev7()` salva nove celle per core — `TX_SSI_MASTER`,
-`IQCAL_VCM_HG`, `IQCAL_IDAC`, `TSSI_VCM`, `TX_SSI_MUX`, `TSSIA`, `TSSIG`,
-`TSSI_MISC1` — le riscrive coi valori della calibrazione, e **niente le rimetteva**:
-restavano sporche per tutto il tempo che l'interfaccia stava su. Sedici registri del
-radio. La cattura le ripristina in ordine di indirizzo a #10737-#10752, subito dopo
-che i gain tornano al loro posto. **+16** e **+16**, esattamente il numero delle
-write.
+**The TX I/Q LO cal puts back the radio registers it takes.**
+`b43_nphy_tx_cal_radio_setup_rev7()` saves nine cells per core —
+`TX_SSI_MASTER`, `IQCAL_VCM_HG`, `IQCAL_IDAC`, `TSSI_VCM`, `TX_SSI_MUX`, `TSSIA`,
+`TSSIG`, `TSSI_MISC1` — rewrites them with the calibration's values, and
+**nothing put them back**: they stayed dirty for as long as the interface was
+up. Sixteen radio registers. The capture restores them in address order at
+#10737-#10752, right after the gains go back in place. **+16** and **+16**,
+exactly the number of writes.
 
-Restano 14 dei sedici con conteggi diversi (vendore 9-14 contro port 5-10): quelle
-differenze sono altrove, non nel ripristino.
+14 of the sixteen remain with different counts (vendor 9-14 against port 5-10):
+those differences are elsewhere, not in the restore.
 
-**80 op a #796: chiuse.** L'ordine fra aux ADC e sequenze RF era il punto, e la
-risposta e' che il device fa la tx2rx due volte, la seconda dopo l'aux ADC. Voce sotto.
+**80 ops at #796: closed.** The order between aux ADC and RF sequences was the
+point, and the answer is that the device does the tx2rx twice, the second after
+the aux ADC. Entry below.
 
-**La coda di abilitazione della PAPD e' portata.** A #13842-#13854 il vendore rimette
-gli offset epsilon e accende il motore, con le riletture di stato in mezzo: adjust
-core 0, letture di `0x2bf` e `0x2c0`, adjust core 1, letture di `0x2b1` e `0x2b2`,
-poi il bit 0 di `PAPD_EN0` e `PAPD_EN1`. Servono quattro nomi nuovi in `phy_n.h` per
-le celle di stato, che b43 non aveva. Contando registro per registro, ora **tutti e
-dieci** quelli del motore combaciano: `0x297`, `0x298`, `0x29b`, `0x29c`, `0x2a3`,
-`0x2a4`, `0x2b1`, `0x2b2`, `0x2bf`, `0x2c0`. Numeri fermi, e sta dentro perche' quel
-bit **accende il motore**: una cal PAPD che non lo accende non serve a niente.
+**The PAPD enabling tail is ported.** At #13842-#13854 the vendor puts back the
+epsilon offsets and turns the engine on, with the status rereads in between:
+adjust core 0, reads of `0x2bf` and `0x2c0`, adjust core 1, reads of `0x2b1` and
+`0x2b2`, then bit 0 of `PAPD_EN0` and `PAPD_EN1`. It needs four new names in
+`phy_n.h` for the status cells, which b43 did not have. Counting register by
+register, now **all ten** of the engine's match: `0x297`, `0x298`, `0x29b`,
+`0x29c`, `0x2a3`, `0x2a4`, `0x2b1`, `0x2b2`, `0x2bf`, `0x2c0`. Numbers unchanged,
+and it is in because that bit **turns the engine on**: a PAPD cal that does not
+turn it on is useless.
 
-**55 op a #884 e 20 a #5614** — sono una coppia: il vendore **rilegge** il gruppo che
-`gain_ctl_workarounds` scrive (`0x20`, `0x2a7`, `0x21`, `0x2a8`, `7/0x106`, `0x280`,
-`0x283`) e piu' tardi lo **riscrive** con gli stessi valori. brcmsmac non ha nessun
-salva/ripristina di quel gruppo. Nessun rischio di stato: il ripristino riscrive
-quello che c'e' gia'.
+**55 ops at #884 and 20 at #5614** — they are a pair: the vendor **reads back**
+the group `gain_ctl_workarounds` writes (`0x20`, `0x2a7`, `0x21`, `0x2a8`,
+`7/0x106`, `0x280`, `0x283`) and later **rewrites** it with the same values.
+brcmsmac has no save/restore of that group. No risk to the state: the restore
+rewrites what is already there.
 
-**32 op a #203** — le `0x1df`/`0x1e1`, cioe' `STRA_2U`/`STRA_2L`, gia' dichiarate non
-portabili: b43 le ha solo come define e brcmsmac non le scrive mai. Vanno sottratte
-dal tetto.
+**32 ops at #203** — the `0x1df`/`0x1e1`, i.e. `STRA_2U`/`STRA_2L`, once declared
+not portable: b43 has them only as defines and brcmsmac never writes them. Closed
+by the spur workaround, below.
 
-**174 op in 81 frammenti sotto le 10 op** — questi non si chiudono a mano: frammenti
-da 2-9 op sono dove il tracer del vendore ha i suoi buchi di osservabilita'
-(`phyclk_fgc`, `switch_macfreq`) e dove non si distingue un'op mancante da un'op non
-registrata. Servono la cattura nuova e i due hook.
+**174 ops in 81 fragments under 10 ops** — these do not close by hand: 2-9 op
+fragments are where the vendor's tracer has its observability holes
+(`phyclk_fgc`, `switch_macfreq`) and where a missing op cannot be told from an
+unrecorded one. They need the new capture and the two hooks.
 
-**Lo spur workaround era uno stub, ed era il primo buco dell'init: portato.**
-`b43_nphy_spur_workaround()` apriva e chiudeva la parentesi di carrier search e in
-mezzo non faceva niente. Il device li' fa qualcosa, a `#203-#234`, subito dopo la
-scrittura di `0x3830` su `NDATAT_DUP40` che e' il sito di chiamata.
+**The spur workaround was a stub, and it was the first hole of the init:
+ported.** `b43_nphy_spur_workaround()` opened and closed the carrier search
+bracket and did nothing in between. The device does something there, at
+`#203-#234`, right after the write of `0x3830` to `NDATAT_DUP40`, which is the
+call site.
 
-Il riferimento su un canale a 20 MHz e radio rev 8 non emette niente, ed e' per questo
-che lo stub non si notava: `wlc_phy_adjust_rx_analpfbw_nphy` vale per phy rev < 7,
-`adjust_min_noisevar` ha la lista vuota fuori dai canali 3-10 a 40 MHz, e
-`adjust_crsminpwr` ripristina solo cio' che un aggiustamento precedente ha salvato.
-Quindi la cattura e' l'unica voce, e le due catture concordano.
+The reference on a 20 MHz channel and radio rev 8 emits nothing, and that is why
+the stub went unnoticed: `wlc_phy_adjust_rx_analpfbw_nphy` holds for phy rev < 7,
+`adjust_min_noisevar` has the list empty outside channels 3-10 at 40 MHz, and
+`adjust_crsminpwr` restores only what a previous adjustment saved. So the
+capture is the only voice, and the two captures agree.
 
-Cosa fa: lo stesso valore `0x1591` nei due registri `STRA_2U`/`STRA_2L`, poi una
-rilettura — una coppia di celle della tabella 7 a `0x106`, e poi **due volte** tre
-celle della tabella 0 a `0x0b`, `0x13`, `0x23` e il registro `TRLOSS` (`0x169`). I
-valori si buttano, e non e' una ragione per togliere le letture.
+What it does: the same value `0x1591` into the two registers
+`STRA_2U`/`STRA_2L`, then a reread — a pair of table 7 cells at `0x106`, and then
+**twice** three table 0 cells at `0x0b`, `0x13`, `0x23` and the `TRLOSS` register
+(`0x169`). The values are thrown away, and that is no reason to remove the reads.
 
-Vale **54 op**: le 27 del suo tratto e 27 piu' avanti che erano spaiate solo perche'
-l'allineamento aveva slittato. L'init da 8297 a **8351** appaiate e le sue assenti da
-183 a **129**, il totale delle assenti da 261 a **207**, i blocchi da 21396 a
-**21450** e a freddo da 21257 a **21299**. `MESSAGES.md#0031`. Nota: `docs/gap-inventory.md`
-resta com'e', perche' quella tabella e' misurata sul tree **pristine** e lo stub la'
-c'e' ancora — e' `b43/` che lo riempie.
+It is worth **54 ops**: the 27 of its stretch and 27 further on that were
+unpaired only because the alignment had slipped. The init from 8297 to **8351**
+paired and its absent from 183 to **129**, the total absent from 261 to **207**,
+the blocks from 21396 to **21450** and cold from 21257 to **21299**.
+`MESSAGES.md#0031`. Note: `docs/gap-inventory.md` stays as it is, because that
+table is measured on the **pristine** tree and the stub is still there — it is
+`b43/` that fills it.
 
-**Il tratto a #10714: b43 lascia acceso l'override lpf, una volta per init.** Non sono
-quattro op di trace, e' uno stato che resta nell'hardware. Contati sui due lati:
+**The stretch at #10714: b43 leaves the lpf override on, once per init.** It is
+not four trace ops, it is state that stays in the hardware. Counted on both
+sides:
 
-| | vendore | port |
+| | vendor | port |
 |---|---|---|
-| accende il bit di override (`0x342`, `0x80`) | 9 | 9 |
-| spegne il campo di banda (`0x340`, `0x700`) | **9** | **8** |
-| spegne il bit di override (`0x342`, `0x80`) | 5 | 4 |
+| turns the override bit on (`0x342`, `0x80`) | 9 | 9 |
+| turns the band field off (`0x340`, `0x700`) | **9** | **8** |
+| turns the override bit off (`0x342`, `0x80`) | 5 | 4 |
 
-Nel vendore accensioni e spegnimenti del campo si appaiano uno a uno:
+In the vendor the field's turn-ons and turn-offs pair one to one:
 
     on  1641  8629 11764 12878 15056 15060 18136 18140 24292
     off 1714 10715 12871 13839 15057 15061 18137 18141 24365
 
-La coppia lunga e' `8629 -> 10715`: l'override acceso da un sample play resta su per
-tutta la cal TX I/Q LO e viene spento solo al confine della cal PAPD. Il port ne perde
-esattamente uno, quindi **un'accensione senza spegnimento**.
+The long pair is `8629 -> 10715`: the override turned on by a sample play stays
+up for the whole TX I/Q LO cal and is turned off only at the boundary of the
+PAPD cal. The port loses exactly one, so **a turn-on without a turn-off**.
 
-La causa e' la contabilita': `lpf_bw_overrode_for_sample_play` e' un **bool**, e
-`b43_nphy_run_samples()` lo mette a vero solo `if (!(lpf_bw3 | lpf_bw4))`, cioe' solo
-se l'override non era gia' acceso. Il primo `b43_nphy_stop_playback()` che passa lo
-consuma e lo azzera, e l'accensione di un play successivo resta senza proprietario.
-Il device invece spegne una volta per accensione, nove e nove.
+The cause looked like bookkeeping: `lpf_bw_overrode_for_sample_play` is a
+**bool**, and `b43_nphy_run_samples()` sets it true only
+`if (!(lpf_bw3 | lpf_bw4))`, i.e. only if the override was not already on. The
+first `b43_nphy_stop_playback()` that goes by consumes it and clears it, and the
+turn-on of a later play is left without an owner. The device instead turns off
+once per turn-on, nine and nine.
 
-**Chiuso, e il contatore non era la strada.** Guardando i record fra `8629` e `10715`:
-c'e' **un solo** `stop_playback`, a `#10693`, e l'override gli sopravvive — viene spento
-21 record dopo, in coda al resto del cleanup. Quindi quell'override non e' del sample
-play: e' della **cal TX I/Q LO**, acceso da `b43_nphy_tx_cal_phy_setup()`, e nessuno lo
-spegneva. Il bool di `stop_playback` va bene per l'override che quella funzione possiede
-davvero; questo dura piu' di diversi play.
+**Closed, and the counter was not the road.** Looking at the records between
+`8629` and `10715`: there is **a single** `stop_playback`, at `#10693`, and the
+override survives it — it is turned off 21 records later, at the end of the rest
+of the cleanup. So that override does not belong to the sample play: it belongs
+to the **TX I/Q LO cal**, turned on by `b43_nphy_tx_cal_phy_setup()`, and nobody
+turned it off. The `stop_playback` bool is fine for the override that function
+really owns; this one outlives several plays.
 
-Spento alla fine di `b43_nphy_tx_cal_phy_cleanup()`, dove finisce il suo proprietario.
-Ora sono **nove e nove** su entrambi i lati, l'init passa da 8416 a **8420** appaiate e
-le sue assenti da 66 a **62**, i blocchi da 21525 a **21529**. `MESSAGES.md#0036`.
+Turned off at the end of `b43_nphy_tx_cal_phy_cleanup()`, where its owner ends.
+Now it is **nine and nine** on both sides, the init goes from 8416 to **8420**
+paired and its absent from 66 to **62**, the blocks from 21525 to **21529**.
+`MESSAGES.md#0036`.
 
-E la sequenza del port lo diceva, contata sulle op normalizzate: `ON@6925` con
-`stop@8409` e nessun `off`, mentre le altre otto coppie si chiudevano tutte.
+And the port's sequence said so, counted on the normalised ops: `ON@6925` with
+`stop@8409` and no `off`, while the other eight pairs all closed.
 
-**Il tratto a #5004: e' l'ACI scan, e sta sopra il PHY.** Le sue 20 op confrontabili
-stanno a `#5614-#5633` e sono un **applica-e-ripristina** dei gain e delle soglie CRS:
-`0x20`/`0x2a7` a `0x7e`, `0x21`/`0x2a8` a `0x624`, `7/0x106` a `0x623f`, `0x280`/`0x283`
-mascherati a `0x44`, `0x2e6` a `0x4477`, `0xc33` a `0x10`, e poi di nuovo `0x283`,
-`0x280`, `7/0x106` e `0x21`/`0x2a8`.
+**The stretch at #5004: it is the ACI scan, and it sits above the PHY.** Its 20
+comparable ops are at `#5614-#5633` and are an **apply-and-restore** of the gains
+and of the CRS thresholds: `0x20`/`0x2a7` to `0x7e`, `0x21`/`0x2a8` to `0x624`,
+`7/0x106` to `0x623f`, `0x280`/`0x283` masked to `0x44`, `0x2e6` to `0x4477`,
+`0xc33` to `0x10`, and then again `0x283`, `0x280`, `7/0x106` and
+`0x21`/`0x2a8`.
 
-**Diciotto su venti sono idempotenti**: quei valori sono esattamente quelli che i
-registri hanno gia', letti a `#884-#896` — `0x7e`, `0x624`, `0x3644` la cui parte bassa
-e' `0x44`, `0x623f` — e riletti identici a `#26077-#26087`. Le due che non si possono
-verificare sono `0x2e6` e `0xc33`, senza nome ne' qui ne' nel riferimento e mai lette
-nella cattura.
+**Eighteen of twenty are idempotent**: those values are exactly the ones the
+registers already have, read at `#884-#896` — `0x7e`, `0x624`, `0x3644` whose low
+part is `0x44`, `0x623f` — and read back identical at `#26077-#26087`. The two that
+cannot be checked are `0x2e6` and `0xc33`, with no name here or in the reference
+and never read in the capture.
 
-**Non e' portabile dentro `phy_n.c`**, e non e' una scusa: quel blocco sta fra op che il
-port non emette affatto — la pulizia della SHM a `#5600-#5612` e una `MAC.MHF` — e
-prima del setup del chanspec. Cioe' viene da **sopra il PHY**, come l'ACI scan, ed e'
-la sua prima comparsa dentro l'init. L'harness compila il PHY e non il MAC, quindi da
-qui non si puo' nemmeno misurare. Stessa voce dell'ACI scan.
+**It is not portable inside `phy_n.c`**, and it is not an excuse: that block sits
+among ops the port does not emit at all — the SHM cleanup at `#5600-#5612` and a
+`MAC.MHF` — and before the chanspec setup. That is, it comes from **above the
+PHY**, like the ACI scan, and it is its first appearance inside the init. The
+harness builds the PHY and not the MAC, so from here it cannot even be measured.
+Same entry as the ACI scan.
 
-**I tratti a #4958 e #6330: mezzi chiusi.** Sono lo stesso blocco di quattro op due
-volte, ed e' `b43_nphy_tx_power_ctrl()` sul ramo che **accende**: il device azzera i due
-bit di abilitazione (`0xc000` = `HWPCTLEN|PCTLEN`, lasciando `COEFF`), rimette i due
-indici, e **poi** accende tutti e tre (`0xe000`). b43 accendeva prima e rimetteva gli
-indici dopo, quindi il controllo girava con gli indici vecchi per due scritture.
+**The stretches at #4958 and #6330: half closed.** They are the same four-op
+block twice, and it is `b43_nphy_tx_power_ctrl()` on the branch that **turns
+on**: the device clears the two enable bits (`0xc000` = `HWPCTLEN|PCTLEN`,
+leaving `COEFF`), puts the two indices back, and **then** turns all three on
+(`0xe000`). b43 turned on first and put the indices back afterwards, so the
+control ran with the old indices for two writes.
 
-Riordinato: le due op sui bit ora combaciano. Le due scritture degli indici no, e per
-due ragioni insieme — sono gateate su `tx_pwr_idx != 128`, e i valori che b43 ha la'
-sono `0x19` dove il device scrive `0xa` e `0xc`. **Quella e' una domanda su cosa
-conserva il salvataggio dell'indice**, non su dove sta l'op. Vale assenti da 138 a
-**135** e blocchi da 21522 a **21525**. `MESSAGES.md#0035`.
+Reordered: the two ops on the bits now match. The two writes of the indices do
+not, for two reasons together — they are gated on `tx_pwr_idx != 128`, and the
+values b43 has there are `0x19` where the device writes `0xa` and `0xc`. **That is
+a question about what the save of the index keeps**, not about where the op sits.
+Worth absent from 138 to **135** and blocks from 21522 to **21525**.
+`MESSAGES.md#0035`.
 
-**Il tratto a #3732: localizzato, non chiuso.** E' **una** lettura del gain corrente
-(`TBL.RD 7/0x110 len=2`) che il vendore fa fra `restore_rssi_cal` e
-`tx_pwr_ctrl_coef_setup` — la lettura della tabella 15/80 di `#3738` e' la prima op di
-`coef_setup` — e che b43 fa **prima**. I conteggi combaciano, **nove e nove**, quindi
-e' ordine e non codice mancante: otto delle nove si appaiano al record esatto, e solo
-la prima e' in ritardo di ~1000 record.
+**The stretch at #3732: located, not closed.** It is **one** read of the current
+gain (`TBL.RD 7/0x110 len=2`) the vendor does between `restore_rssi_cal` and
+`tx_pwr_ctrl_coef_setup` — the read of table 15/80 at `#3738` is the first op of
+`coef_setup` — and that b43 does **before**. The counts match, **nine and
+nine**, so it is order and not missing code: eight of the nine pair at the exact
+record, and only the first is ~1000 records late.
 
-Chi la fa, con `B43_TEST_TBLDBG=7:110`: sette dalle chiamate a
-`b43_nphy_int_pa_set_tx_dig_filters()` (`phy_n.c:5549`), una da
-`run_pending_perical()` (`7777`), una da `5958` e una da `6708`. Quella in ritardo e'
-la prima delle sette, e in `b43_phy_initn` l'ordine e'
-`int_pa_set_tx_dig_filters` (che legge) → `restore_rssi_cal` → `coef_setup`, dove il
-vendore ha `restore_rssi_cal` → legge → `coef_setup`.
+Who does it, with `B43_TEST_TBLDBG=7:110`: seven from the calls to
+`b43_nphy_int_pa_set_tx_dig_filters()` (`phy_n.c:5549`), one from
+`run_pending_perical()` (`7777`), one from `5958` and one from `6708` (lines of
+`phy_n.c` at the time of the measurement: they have moved since, and `b43/` no
+longer has those calls at those lines). The late one is the first of the seven, and in `b43_phy_initn`
+the order is `int_pa_set_tx_dig_filters` (which reads) → `restore_rssi_cal` →
+`coef_setup`, where the vendor has `restore_rssi_cal` → read → `coef_setup`.
 
-**Non l'ho spostata**, e la ragione e' che dentro `int_pa_set_tx_dig_filters` quel
-valore **si usa**: `curr_gain` diventa `target` per le tre righe di filtri. Spostare la
-lettura vuol dire cambiare quale gain quella funzione vede, e non ho una fonte che dica
-che il vendore la legge due volte o che la usa altrove. Quattro op, e per muoverle
-serve capire chi consuma il valore nel vendore.
+**It was not moved**, and the reason is that inside `int_pa_set_tx_dig_filters`
+that value **is used**: `curr_gain` becomes `target` for the three rows of
+filters. Moving the read means changing which gain that function sees, and there
+is no source saying the vendor reads it twice or uses it elsewhere. Four ops, and
+moving them needs understanding who consumes the value in the vendor.
 
-**`tssi-setup` chiusa, 19 su 19, e dentro c'era un valore sbagliato.** Due cose, a
-`#1251-#1281`.
+**`tssi-setup` closed, 19 of 19, and there was a wrong value inside.** Two
+things, at `#1251-#1281`.
 
-La prima: `b43_nphy_ipa_internal_tssi_setup()` scrive sette registri radio per core, e
-il device **ne rilegge quattro prima** — `r+8`, `r+9`, `r+0xB`, `r+0xA` in quest'ordine,
-una volta per core, a `#1251-#1257` e `#1266-#1272`. Aggiunte.
+The first: `b43_nphy_ipa_internal_tssi_setup()` writes seven radio registers per
+core, and the device **reads four of them back first** — `r+8`, `r+9`, `r+0xB`,
+`r+0xA` in this order, once per core, at `#1251-#1257` and `#1266-#1272`. Added.
 
-La seconda e' piu' di un'op fuori posto. Sul percorso 2 GHz b43 scrive **1** nel
-registro TSSI di banda G di ogni core per ogni phy rev diversa da 7, e `0x31` per la 7.
-E' trascritto giusto dal riferimento (`phy_n.c:17075-17080`). **Il device non fa
-nessuna delle due**: legge quel registro, trova `2`, e lo lascia — in `#1259-#1281` non
-c'e' nessuna `RAD.WR 0x17b` ne' `0x19b`, e il `2` e' ancora la' quando la cal TX I/Q LO
-mette `0x31` a `#8537` e rimette `2` a `#10743`. Quindi non e' ordine: e' un **valore
-sbagliato lasciato nella radio per tutto l'init**, e la cattura e' l'unica voce contro
-il riferimento. Scrittura gateata via sul radio rev 8.
+The second is more than an op out of place. On the 2 GHz path b43 writes **1**
+into each core's G-band TSSI register for every phy rev other than 7, and `0x31`
+for 7. It is transcribed right from the reference (`phy_n.c:17075-17080`). **The
+device does neither**: it reads that register, finds `2`, and leaves it — in
+`#1259-#1281` there is no `RAD.WR 0x17b` nor `0x19b`, and the `2` is still there
+when the TX I/Q LO cal puts `0x31` at `#8537` and puts `2` back at `#10743`. So it
+is not order: it is a **wrong value left in the radio for the whole init**, and
+the capture is the only voice against the reference. The write is gated off on
+radio rev 8.
 
-Vale l'init da 8406 a **8414** appaiate e le sue assenti da 76 a **68**, il totale delle
-assenti da 154 a **138**, i blocchi da 21505 a **21521**. E le finestre con divergenze
-dichiarate scendono da **sei a cinque**. `MESSAGES.md#0033` e `#0034`.
+Worth the init from 8406 to **8414** paired and its absent from 76 to **68**, the
+total absent from 154 to **138**, the blocks from 21505 to **21521**. And the
+windows with declared divergences go down from **six to five**.
+`MESSAGES.md#0033` and `#0034`.
 
-**Il tratto a #877: portato.** Sono 61 op, `#877-#987`, in coda ai workaround fra la
-seconda passata della tx2rx e l'impulso `BBCFG RESETCCA` di `#988`, e il port non
-emetteva **niente** li': andava da `#876` a `#988` di fila.
+**The stretch at #877: ported.** It is 61 ops, `#877-#987`, at the end of the
+workarounds between the second tx2rx pass and the `BBCFG RESETCCA` pulse at
+`#988`, and the port emitted **nothing** there: it went from `#876` to `#988`
+straight.
 
-Ogni registro letto e' uno che `gain_ctl_workarounds()` e le tabelle di gain hanno
-appena **scritto**: i quattro gain iniziali e le soglie di clip per core, le soglie
-narrowband, i due `CRSMINPOWER`, le dodici soglie `ED_CRS` (`0x224`-`0x22f`), due
-blocchi della tabella 4 e i registri master e RSSI IDAC su entrambi i core radio.
-Rileggere quello che si e' appena programmato e' cio' che fa un driver prima che
-qualcosa possa cambiarlo, e quel qualcosa qui e' l'**ACI scan**, che la cattura fa
-dopo e che questo driver non ha.
+Every register read is one that `gain_ctl_workarounds()` and the gain tables
+have just **written**: the four initial gains and the clip thresholds per core,
+the narrowband thresholds, the two `CRSMINPOWER`, the twelve `ED_CRS` thresholds
+(`0x224`-`0x22f`), two blocks of table 4 and the master and RSSI IDAC registers
+on both radio cores. Reading back what was just programmed is what a driver does
+before something can change it, and that something here is the **ACI scan**,
+which the capture does afterwards and this driver does not have.
 
-I valori si buttano, e non e' una ragione per saltare le letture. **Fuori dalla patch
-di proposito**: la lista in SHM a `0x1570`-`0x1576` che dichiara `0x8f`, `0xa6`,
-`0xa5`, `0xa7` all'ucode, e un bit nella parola 4 degli hostflag. Quel bit non ha nome
-ne' in b43 ne' nel riferimento, e accendere un flag dell'ucode senza nome sulla sola
-fede di una cattura sarebbe una congettura sul firmware.
+The values are thrown away, and that is no reason to skip the reads. **Left out
+of the patch on purpose**: the list in SHM at `0x1570`-`0x1576` that declares
+`0x8f`, `0xa6`, `0xa5`, `0xa7` to the ucode, and a bit in word 4 of the
+hostflags. That bit has no name either in b43 or in the reference, and turning
+on an unnamed ucode flag on the sole faith of a capture would be a conjecture
+about the firmware.
 
-Vale l'init da 8351 a **8406** appaiate, cioe' il **99%** delle confrontabili, e le
-sue assenti da 129 a **76**; il totale delle assenti da 207 a **154**, i blocchi da
-21450 a **21505** e a freddo da 21299 a **21350**. `MESSAGES.md#0032`.
+Worth the init from 8351 to **8406** paired, i.e. **99%** of the comparable
+ones, and its absent from 129 to **76**; the total absent from 207 to **154**,
+the blocks from 21450 to **21505** and cold from 21299 to **21350**.
+`MESSAGES.md#0032`.
 
-**Il tratto a #796: chiuso, ed erano 80 op su 122.** Non erano le otto maskset a
-mancare — quelle c'erano gia', **nella passata sbagliata**. Il device programma la
-sequenza RF **tx2rx due volte**, con gli stessi sette eventi e gli stessi ritardi:
-la prima a #390-#420 e la seconda a #796-#874, questa preceduta dalle otto maskset su
-`AFECTL_C1`/`C2` e dalle tabelle dell'ADC ausiliario a #771-#789. Contate su tutta la
-finestra: il device scrive `7/0x10`, `7/0x90` e le nove celle di padding **due volte**,
-b43 una. I valori sono identici fra le due passate e fra i due lati, ed e' per questo
-che uscivano come op **mancanti** e non come valori sbagliati.
+**The stretch at #796: closed, and it was 80 ops of 122.** It was not the eight
+masksets that were missing — those were already there, **in the wrong pass**.
+The device programs the RF **tx2rx** sequence **twice**, with the same seven
+events and the same delays: the first at #390-#420 and the second at
+#796-#874, the latter preceded by the eight masksets on `AFECTL_C1`/`C2` and by
+the auxiliary ADC tables at #771-#789. Counted over the whole window: the device
+writes `7/0x10`, `7/0x90` and the nine padding cells **twice**, b43 once. The
+values are identical between the two passes and between the two sides, and that
+is why they came out as **missing** ops and not as wrong values.
 
-Ne' b43 ne' il riferimento avevano la seconda passata. Aggiunta in coda a
-`b43_nphy_workarounds_rev7plus()`, dopo le tabelle dell'ADC, con le maskset spostate
-la' dalla prima passata dove non ci vanno. Vale l'init da 8217 op appaiate a **8297**
-e le sue assenti da 254 a **183**, il totale delle assenti da 332 a **261**, i blocchi
-da 21316 a **21396** e a freddo da 21177 a **21257**. `MESSAGES.md#0030`.
+Neither b43 nor the reference had the second pass. Added at the end of
+`b43_nphy_workarounds_rev7plus()`, after the ADC tables, with the masksets moved
+there from the first pass where they do not belong. Worth the init from 8217
+paired ops to **8297** and its absent from 254 to **183**, the total absent from
+332 to **261**, the blocks from 21316 to **21396** and cold from 21177 to
+**21257**. `MESSAGES.md#0030`.
 
-Quel che resta di quel tratto e' un'altra cosa e comincia a **#877**: 51 op assenti,
-le letture appaiate di `0x20`/`0x2a7`, `0x21`/`0x2a8`, `0x22`/`0x2a9` e le quattro
-`OBJ.WR` a `0x1570`-`0x1576` che dichiarano all'ucode i registri `0x8f`, `0xa6`,
-`0xa5`, `0xa7` — cioe' la lista della tempsense. E' il buco piu' grosso che resta.
+What remained of that stretch was another thing and starts at **#877**: the 51
+absent ops ported by `0032`, above, and the four `OBJ.WR` at `0x1570`-`0x1576`
+that declare to the ucode the registers `0x8f`, `0xa6`, `0xa5`, `0xa7` — i.e. the
+tempsense list — which stay out.
 
-## Cosa resta aperto
+## What remains open
 
-- **`M_CTS_DURATION`: messo.** La fase RXCAL ora lo scrive col MAC acceso, come il
-  riferimento. Serviva una define nuova, `B43_SHM_SH_CTSDUR = 0x00B8`, e la stessa in
-  `test/unit/stubs/b43_defs.h`, che il README dichiara generato dal `b43.h` del tree ma per
-  cui non c'e' uno script: aggiunta a mano, conteggio da 487 a 488.
+Most of the entries below are closed, and they stay as the record of how: each
+says what it changed, with the numbers of its step. What is open is said as
+such.
 
-  E ha fatto emergere due cose sul confronto. `MAC.EN`/`MAC.SUSP` **il port li
-  emette** — `wrap.c` righe 689 e 694 — e non e' vero che l'harness li stubba muti: il
-  decoder del vendore li chiama `MAC.MCTRL val=0x1/0x0 mask=0x1`, cioe' col bit di
-  MACCTL che cambiano, ed e' un problema di nomi come `GPIO.OUTEN` → `GPIO.OE`.
-  Normalizzati in `compare.py`. E lo spazio della object memory: b43 passa
-  `B43_SHM_SHARED`, che nella sua enum vale 1, dove il decoder del vendore stampa
-  `0x10000` — in queste due catture `0x10000` e' l'**unico** valore che compare, 3565
-  e 3295 volte, quindi la traduzione e' univoca per i dati che abbiamo. Tradotta in
-  `compare.py`, con la nota che se salta fuori una cattura con un secondo spazio
-  quella funzione va rifatta con una mappa.
+- **`M_CTS_DURATION`: in.** The RXCAL phase now writes it with the MAC on, like
+  the reference. It needed a new define, `B43_SHM_SH_CTSDUR = 0x00B8`, and the
+  same one in `test/unit/stubs/b43_defs.h`, which the README declares generated
+  from the tree's `b43.h` but for which there is no script: added by hand, count
+  from 487 to 488.
 
-  Prima di arrivarci ho provato uno **skip** sulle due `MAC.MCTRL`, ed era il
-  meccanismo sbagliato: uno skip dice "questa op non e' emettibile", e quelle lo sono.
-  Rimosso.
+  And it brought out two things about the comparison. **The port does emit**
+  `MAC.EN`/`MAC.SUSP` — `wrap.c` lines 689 and 694 — and it is not true that the
+  harness stubs them silently: the vendor's decoder calls them
+  `MAC.MCTRL val=0x1/0x0 mask=0x1`, i.e. with the MACCTL bit they change, and it
+  is a naming problem like `GPIO.OUTEN` → `GPIO.OE`. Normalised in `compare.py`.
+  And the object memory space: b43 passes `B43_SHM_SHARED`, which in its enum is
+  1, where the vendor's decoder prints `0x10000` — in these two captures
+  `0x10000` is the **only** value that appears, 3565 and 3295 times, so the
+  translation is unambiguous for the data we have. Translated in `compare.py`,
+  with the note that if a capture with a second space shows up that function has
+  to be redone with a map.
 
-- **La coppia di troppo non era una coppia, ed era il seme.** Il settimo marcatore
-  `PHY.WR 0x2c = 0xffff` non e' un ingresso in carrier search: e' la clip detection
-  che `b43_nphy_rev3_rssi_cal()` spegne da se'. Le coppie vere sono sei, risolte una
-  per una: `run_samples` (tre volte), `cal_tx_iq_lo`, `papd_cal`, `rev3_cal_rx_iq`.
+  Before getting there a **skip** on the two `MAC.MCTRL` was tried, and it was
+  the wrong mechanism: a skip says "this op cannot be emitted", and these can.
+  Removed.
 
-  E il vendore, nel suo primo passo RSSI, **non calibra: restaura**. Fra #132 e #8000
-  legge `0x219` **una volta sola** — zero poll — e a #3712-#3731 scrive di fila i due
-  registri radio e i dodici PHY, che e' esattamente il corpo di
-  `b43_nphy_restore_rssi_cal()`. La cattura e' un init **a caldo**: il driver del
-  vendore ha gia' `rssical_chanspec` valorizzata da un boot precedente e prende la
-  strada del restore. Il banco azzerava quella chanspec insieme alle altre, quindi il
-  port faceva una calibrazione completa: **1052 op che il vendore non ha**.
+- **The extra pair was not a pair, and it was the seed.** The seventh marker
+  `PHY.WR 0x2c = 0xffff` is not an entry into carrier search: it is the clip
+  detection that `b43_nphy_rev3_rssi_cal()` turns off by itself. The real pairs
+  are six, resolved one by one: `run_samples` (three times), `cal_tx_iq_lo`,
+  `papd_cal`, `rev3_cal_rx_iq`.
 
-- **L'override uno-a-molti del TX gain usa il campo sbagliato.** Il caso `TX_GAIN`
-  di `b43_nphy_rf_ctl_override_one_to_many()` passava `0x4000`; il riferimento fa
-  `(0x1 << 12)` per il gain e **`(0x1 << 13)`** per il lpf gain, cioe' `0x1000` e
-  `0x2000`. E il conteggio degli spegnimenti su `0xe7`/`0xec` lo conferma da solo: il
-  vendore spegne `0x4000` **zero** volte e `0x2000` otto, il port spegneva `0x4000`
-  quattro volte e `0x2000` due. Corretto anche il taglio del secondo argomento,
-  `(value & 0x8000) >> 14` invece di `value >> 14`, che si portava dietro il bit 14 —
-  lo stesso che la prima chiamata prende dentro il gain.
+  And the vendor, in its first RSSI step, **does not calibrate: it restores**.
+  Between #132 and #8000 it reads `0x219` **only once** — zero polls — and at
+  #3712-#3731 it writes the two radio registers and the twelve PHY ones in a row,
+  which is exactly the body of `b43_nphy_restore_rssi_cal()`. The capture is a
+  **hot** init: the vendor's driver already has `rssical_chanspec` set from a
+  previous boot and takes the restore road. The bench cleared that chanspec
+  together with the others, so the port did a full calibration: **1052 ops the
+  vendor does not have**.
 
-  Blocchi contigui 20951 -> **20971**, a freddo 18964 -> **18972**, e i frammenti
-  piccoli di `cal-papd` da 19 a **9**. Dopo la correzione i conteggi per campo
-  combaciano tutti tranne `0x8` (6 contro 4) e `0x2000` (8 contro 12).
+  Fixed in the **bench**, not in the driver: `rssical_chanspec_2G` stays set.
+  The other three are cleared as before, because the capture really contains the
+  TX I/Q LO and RX I/Q cals (the brackets at #8492 and #14964 say so).
 
-  **Riletta tutta, campo per campo, e il resto e' a posto.** `RXRF_PU` fa
-  `(1<<5)`, `(1<<4)`, `(1<<3)` su ID1; `RX_PU` le cinque su ID1/ID1/ID1/ID2/ID1 con
-  `0x800` a zero; `TX_PU` le cinque su ID0/ID1/ID2/ID2/ID1 con `0x800` a uno — e
-  quella quinta c'e' perche' la mette una mainline; `RX_GAIN` usa `(0x1 << 11)` e
-  `(0x3 << 13)`, cioe' `0x800` e `0x6000`, e il taglio `value >> 8` su una `u16` e'
-  equivalente al `(value & 0xff00) >> 8` del riferimento. Solo `TX_GAIN` era rotta.
+  **The values are not seeded: the first init, which does the calibration, puts
+  them there.** The two radio registers and **eleven of the twelve** PHY ones come
+  out identical to the capture. Copying them from the capture instead of letting
+  them be computed is worth **one op** on `up-ch1` (20403 against 20402), and
+  fourteen constants copied into the bench are not worth an op.
 
-  Dopo la correzione i conteggi per campo degli spegnimenti su `0xe7`/`0xec`
-  combaciavano tutti tranne due, e vanno inseguiti **per lo stato, non per il
-  punteggio**: se il vendore spegne un override e noi no, quello resta acceso.
+  The only one that differs is `0x1ac`, the fine narrowband offset of **core 0 on
+  the Q rail**: the bench computes 0, the capture has 1. And the loop that writes
+  it already uses `offset[i]` and not `offset[2 * core]`, so it is not the shape of
+  the code — it is the polled values that differ by one step. Open, and small.
 
-  **`0x8`, due nel port contro tre: era un override lasciato acceso.** La cal TX I/Q
-  LO interna al setup fa `rf_ctl_override_rev7(0x8, 0, 0x3, false, 0)` — accende il
-  campo 0x8 su tabella 0 — e niente lo rispegneva. Restava acceso su entrambi i core
-  dopo la calibrazione. La cattura lo spegne a #10729 e #10731, subito prima che i
-  gain tornino al loro posto, **e il punto conta**: messo dopo `stop_playback` costa
-  13 op sulla run di `cal-tx-iqlo`, messo attaccato al `ntab_write_bulk(7, 0x110,
-  save)` ne vale quattro. Blocchi contigui 20971 -> **20975**, a freddo 18972 ->
-  **18976**.
+  **Cold, how they are computed is unknown, and it is not an omission: there is
+  no capture.** `full-init-ch1-bw20` **starts** the RSSI cal and is cut off: the
+  first two groups of polls are at #32637 and #32709, and at #32769 the
+  65285-record hole begins. So of the cold algorithm we have the code — the VCM
+  sweep, which in this work was corrected twice — and no trace to check it
+  against. Having one needs a new capture that covers past #32769.
 
-  **`0x2000`, sei nel port contro quattro: aperto, e con due ipotesi gia' bruciate.**
-  Gli **accensioni** combaciano, due e due; sono gli spegnimenti a essere sei contro
-  quattro. I sei del port stanno due per passo con due passi per core piu' due
-  pulizie; i quattro del vendore (#12321, #12777, #13373, #13745) uno per core piu'
-  due. Il verso e' quello innocuo — op in piu', non in meno, quindi nessun override
-  resta acceso.
+  | | before | after |
+  |---|---|---|
+  | **per-phase total** | 7749 (41%) | **8590 (46%)** |
+  | `up-ch1` contiguous blocks | 20035 (87%) | **20403 (89%)** |
+  | `cal-rssi-2` | run 99, 10% | **run 940, 98%**, shape `940 18` |
+  | `rssi-cal` window | 1/16, 15 missing | **9/16, 4 missing** |
+  | carrier search pairs | 7 | **6**, like the vendor |
+  | reads of `0xb0` | 25 | 22 (vendor 16) |
 
-  **Chiuso, e la mia classificazione era sbagliata.** Il confronto **posizionale** di
-  sedici op, allineando la coda del passo 2 del core 1, lo dice senza appello: senza
-  la coppia `0x1000`/`0x2000` che avevo messo in testa a `b43_nphy_papd_cal_cleanup()`
-  fa **16 su 16**, e dentro quelle sedici c'e' il `0x1000`/`0x2000` di #13741-#13748
-  che avevo attribuito alla pulizia. Non e' della pulizia: e' la **coda di
-  `papd_run_one()`**, che le emette gia'.
+  It is the biggest gain of the whole work, and it is not a line of driver: it is
+  a line of seed. **When a phase does an order of magnitude less than the rest,
+  look at whether the bench is forcing it down a branch the capture does not
+  take.**
 
-  Quindi i quattro spegnimenti di `0x2000` del vendore sono **due per core nei
-  passi**, e la pulizia non ne fa nessuno. Togliata la coppia, i conteggi combaciano
-  tutti — `0x2000` quattro e quattro, `0x1000` otto e otto — e la classificazione per
-  presenza di un `0x2000` accanto e' identica op per op: `solo, E, E, solo, E, E,
-  solo, solo`.
 
-  Resta il **secondo** spegnimento di `0x1000` da solo nella lista dei campi della
-  pulizia (#12820, #13788, dopo `0x800`/tabella 0): quello e' reale e sta dentro.
+- **The one-to-many override of the TX gain used the wrong field.** The
+  `TX_GAIN` case of `b43_nphy_rf_ctl_override_one_to_many()` passed `0x4000`; the
+  reference does `(0x1 << 12)` for the gain and **`(0x1 << 13)`** for the lpf gain,
+  i.e. `0x1000` and `0x2000`. And the count of the turn-offs on `0xe7`/`0xec`
+  confirms it on its own: the vendor turns `0x4000` off **zero** times and `0x2000`
+  eight, the port turned `0x4000` off four times and `0x2000` two. Also corrected
+  the cut of the second argument, `(value & 0x8000) >> 14` instead of
+  `value >> 14`, which carried bit 14 along — the same one the first call takes
+  inside the gain.
 
-  E cade l'idea di gatare la coda di `run_one` su `gain_ctrl`: il vendore la fa in
-  **entrambi** i passi.
+  Contiguous blocks 20951 -> **20971**, cold 18964 -> **18972**, and the small
+  fragments of `cal-papd` from 19 to **9**. After the fix the per-field counts all
+  matched except `0x8` (6 against 4) and `0x2000` (8 against 12).
 
-  **Nota sull'arbitro.** Quel gate l'avevo misurato tre volte e ogni volta perdeva 258
-  op, e io ne avevo concluso che il vendore lo facesse in un passo solo. Le 258 erano
-  un artefatto di `difflib`, che **non e' monotono**: togliendo op dal lato port puo'
-  perdere appaiamenti. Per una domanda su otto op l'arbitro e' il confronto
-  posizionale su un'ancora vicina, non il matcher — e le tre misure che avevo scritto
-  in questa pagina erano tutte inutili.
+  **Read again in full, field by field, and the rest is fine.** `RXRF_PU` does
+  `(1<<5)`, `(1<<4)`, `(1<<3)` on ID1; `RX_PU` the five on ID1/ID1/ID1/ID2/ID1 with
+  `0x800` at zero; `TX_PU` the five on ID0/ID1/ID2/ID2/ID1 with `0x800` at one — and
+  that fifth is there because a mainline patch puts it; `RX_GAIN` uses
+  `(0x1 << 11)` and `(0x3 << 13)`, i.e. `0x800` and `0x6000`, and the cut
+  `value >> 8` on a `u16` is equivalent to the reference's `(value & 0xff00) >> 8`.
+  Only `TX_GAIN` was broken.
 
-  Bruciata anche **spostare le tabelle dell'ADC ausiliario prima delle sequenze RF**,
-  che e' l'ordine della cattura: costa 24 op. La posizione delle otto maskset su
-  `AFECTL_C1/C2` resta legata a quella.
+  The two per-field counts that did not match were chased **for the state, not
+  for the score**: if the vendor turns an override off and we do not, it stays on.
 
-- **Otto maskset su `AFECTL_C1`/`C2`, gateate su radio rev 8.** La cattura le ha a
-  #796-#803: bit 2, 3 e 6 a uno e bit 7 a zero, core 0 poi core 1 ogni volta, e senza
-  toccare la coppia di override accanto. Il riferimento quei bit li tocca solo nel
-  percorso della tempsense, e la' sempre insieme a `0x8f` e `0xa5`.
+  **`0x8`, two in the port against three: it was an override left on.** The TX
+  I/Q LO cal inside the setup does `rf_ctl_override_rev7(0x8, 0, 0x3, false, 0)` —
+  it turns on field 0x8 on table 0 — and nothing turned it off again. It stayed on
+  on both cores after the calibration. The capture turns it off at #10729 and
+  #10731, right before the gains go back in place, **and the spot matters**: put
+  after `stop_playback` it costs 13 ops on the `cal-tx-iqlo` run, put right next to
+  `ntab_write_bulk(7, 0x110, save)` it is worth four. Contiguous blocks 20971 ->
+  **20975**, cold 18972 -> **18976**.
 
-  Numeri fermi, e la posizione **non** e' ancora quella del vendore: lui le mette fra
-  le tabelle dell'ADC ausiliario e le sequenze RF, il port le mette prima di entrambe.
-  Spostare le tabelle dell'aux ADC prima delle sequenze, che e' l'ordine della cattura,
-  costa **24 op**: qualcosa in mezzo dipende dall'ordine e non e' capito. Le otto op
-  stanno dentro perche' la cattura le ha.
+  **`0x2000`, six in the port against four: closed, and the classification was
+  wrong.** The turn-ons matched, two and two; it was the turn-offs that were six
+  against four. The **positional** comparison of sixteen ops, aligning the tail of
+  core 1's step 2, settles it: without the `0x1000`/`0x2000` pair that had been put
+  at the head of `b43_nphy_papd_cal_cleanup()` it does **16 of 16**, and inside
+  those sixteen there is the `0x1000`/`0x2000` of #13741-#13748 that had been
+  attributed to the cleanup. It does not belong to the cleanup: it is the **tail of
+  `papd_run_one()`**, which already emits it.
 
-- **Il primo ritardo della sequenza TX2RX e' `0x46`, non 8.** La cattura lo scrive a
-  #806, nel bulk da sette celle su tabella 7 offset `0x90`. Per rev 7 e su il
-  riferimento non aiuta: `wlc_phy_workarounds_nphy_rev7()` **non programma affatto** la
-  sequenza TX2RX, quindi l'8 che stava in `b43_nphy_workarounds_rev7plus()` non aveva
-  niente dietro. I sei ritardi che seguono e tutti e sette gli eventi combaciavano
-  gia'. Costa **una** op, perche' quella cella sta dentro il buco da 135 che comincia
-  prima: sta dentro perche' il valore ha una fonte e il precedente no.
+  So the vendor's four turn-offs of `0x2000` are **two per core in the steps**, and
+  the cleanup does none. With the pair removed, the counts all match — `0x2000`
+  four and four, `0x1000` eight and eight — and the classification by presence of
+  a `0x2000` next to it is identical op for op:
+  `alone, P, P, alone, P, P, alone, alone`.
 
-- **`tx_power_offset[]` va riempita prima dell'init tracciato, ed e' ancora il seme.**
-  A #2000 e #2086 il vendore scrive le 84 celle della tabella di potenza aggiustata
-  **col contenuto** — `0 0 0 0` e poi `2 c c c` ripetuto — dove il port scriveva
-  ottantaquattro zeri. Il motivo: `nphy->tx_power_offset[]` la riempie solo
-  `recalc_txpower`, che nell'harness girava **dopo** l'init tracciato; il driver del
-  vendore quegli offset ce li ha perche' la cattura e' un init a caldo e il suo boot
-  precedente li ha calcolati. Aggiunto un `recalc_txpower` non tracciato subito dopo
-  l'init a freddo, dentro la regione che scrive su `/dev/null`.
+  The **second** turn-off of `0x1000` alone in the cleanup's list of fields
+  (#12820, #13788, after `0x800`/table 0) remains: that one is real and stays in.
 
-  **Attenzione al pending**: senza spegnere `perical_pending` prima, quel recalc si
-  tira dietro la sequenza differita, che rifa' la cal RSSI e riscrive la cache — e il
-  secondo init restaurerebbe quella invece di quella del primo. Provato: `up-ch1`
-  perdeva 479 op e la finestra `rssi-cal` non trovava piu' la sua ancora (`PHY.WR
-  0x1b8 val=0x3f` sparisce). Con `perical_pending = false` prima, resta solo il calcolo
-  degli offset.
+  And the idea of gating the tail of `run_one` on `gain_ctrl` falls: the vendor
+  does it in **both** steps.
 
-  Blocchi contigui 20632 -> **20952 (91%)**, per fase 8590 -> **8756 (47%)**, buco
-  portabile 963 -> **643**, e la finestra `pwr-setup` passa da 266/432 a **432/432**.
+  **A note on the arbiter.** That gate had been measured three times and each time
+  it lost 258 ops, and from that it had been concluded that the vendor did it in
+  one step only. The 258 were an artefact of `difflib`, which **is not
+  monotonic**: removing ops from the port's side can lose pairings. For a question
+  on eight ops the arbiter is the positional comparison on a nearby anchor, not the
+  matcher — and the three measurements written on this page were all useless.
 
-  Terza volta che il collo di bottiglia e' il seme e non il driver, dopo la cal RSSI e
-  i gain d'ingresso. **La regola vale: prima di cercare codice mancante, guardare se il
-  banco parte da uno stato che la cattura non ha.**
+  Also burnt: **moving the auxiliary ADC tables before the RF sequences**, which is
+  the capture's order: it costs 24 ops. (The question was then answered by the
+  second tx2rx pass, "#796" in "The ceiling".)
 
-- **La scala della cal TX I/Q LO si scrive in due corse, non interleavata.**
-  `b43_nphy_update_tx_cal_ladder()` scriveva 0, 32, 1, 33, 2, 34...; la cattura scrive
-  `0x00`-`0x11` e poi `0x20`-`0x31`, due blocchi consecutivi, e lo mostra **due volte**
-  (#9015-#9123 e #9735-#9843). Stesse trentasei celle della tabella 15 e stessi valori:
-  cambia solo il raggruppamento. brcmsmac interleava anche lui — **quinta volta**.
+- **Eight masksets on `AFECTL_C1`/`C2`, gated on radio rev 8.** The capture has
+  them at #796-#803: bits 2, 3 and 6 to one and bit 7 to zero, core 0 then core 1
+  each time, and without touching the override pair next to them. The reference
+  touches those bits only in the tempsense path, and there always together with
+  `0x8f` and `0xa5`. They now sit in the second tx2rx pass, where the capture has
+  them (`MESSAGES.md#0030`).
 
-  Blocchi contigui 20426 -> **20632 (90%)**, a freddo 18758 -> **18965 (69%)**, buco
-  portabile 1169 -> **963**. Due righe di ciclo per 206 op: il rapporto migliore fra
-  righe toccate e op recuperate di tutta la serie.
+- **The first delay of the TX2RX sequence is `0x46`, not 8.** The capture writes
+  it at #806, in the seven-cell bulk on table 7 offset `0x90`. For rev 7 and up the
+  reference does not help: `wlc_phy_workarounds_nphy_rev7()` **does not program**
+  the TX2RX sequence at all, so the 8 that was in
+  `b43_nphy_workarounds_rev7plus()` had nothing behind it. The six delays that
+  follow and all seven events already matched. It costs **one** op, because that
+  cell sat inside a hole that started earlier: it is in because the value has a
+  source and the previous one did not.
 
-- **Le tabelle dell'ADC ausiliario non sono piu' un `/* TODO */`.** In
-  `b43_nphy_workarounds_rev7plus()` le quattro write bulk su tabella 8, offset `0x08`,
-  `0x18`, `0x0c` e `0x1c`, erano commentate via perche' gli array non c'erano. La
-  cattura le ha a #771-#794: `0x8e 0x96 0x96 0x8b` per il core 0, `0x8f 0x9f 0x9f
-  0x96` per il core 1, `0x02 0x02 0x02 0x00` per i due di gain.
+- **`tx_power_offset[]` has to be filled before the traced init, and it is the
+  seed again.** At #2000 and #2086 the vendor writes the 84 cells of the adjusted
+  power table **with content** — `0 0 0 0` and then `2 c c c` repeated — where the
+  port wrote eighty-four zeros. The reason: only `recalc_txpower` fills
+  `nphy->tx_power_offset[]`, and in the harness it ran **after** the traced init;
+  the vendor's driver has those offsets because the capture is a hot init and its
+  previous boot computed them. Added an untraced `recalc_txpower` right after the
+  cold init, inside the region that writes to `/dev/null`.
 
-  Il riferimento sceglie l'ultimo elemento dal power detector range e dalla banda.
-  Solo la combinazione di questa board sta nel port — range 2, radio 2057 rev 8, 2 GHz
-  — perche' le altre non hanno cattura dietro. E la' brcmsmac scrive `0x8c` su
-  **entrambi** i core dove la cattura scrive `0x8b` sul core 0 e lascia il core 1 a
-  `0x96`, che e' il default dell'array; l'elemento di gain concorda a 0. **Quarta
-  volta** che brcmsmac e' piu' vecchio del driver delle catture.
+  **Mind the pending flag**: without turning `perical_pending` off first, that
+  recalc drags along the deferred sequence, which redoes the RSSI cal and rewrites
+  the cache — and the second init would restore that one instead of the first
+  one's. Tried: `up-ch1` lost 479 ops and the `rssi-cal` window no longer found its
+  anchor (`PHY.WR 0x1b8 val=0x3f` disappears). With `perical_pending = false`
+  first, only the computation of the offsets remains.
 
-  Blocchi contigui 20402 -> **20426**, a freddo 18734 -> **18758**, buco portabile
+  Contiguous blocks 20632 -> **20952 (91%)**, per phase 8590 -> **8756 (47%)**,
+  portable hole 963 -> **643**, and the `pwr-setup` window goes from 266/432 to
+  **432/432**.
+
+  Third time the bottleneck was the seed and not the driver, after the RSSI cal
+  and the entry gains. **The rule holds: before looking for missing code, look at
+  whether the bench starts from a state the capture does not have.**
+
+- **The ladder of the TX I/Q LO cal is written in two runs, not interleaved.**
+  `b43_nphy_update_tx_cal_ladder()` wrote 0, 32, 1, 33, 2, 34...; the capture
+  writes `0x00`-`0x11` and then `0x20`-`0x31`, two consecutive blocks, and shows it
+  **twice** (#9015-#9123 and #9735-#9843). The same thirty-six cells of table 15
+  and the same values: only the grouping changes. brcmsmac interleaves too —
+  **fifth time**.
+
+  Contiguous blocks 20426 -> **20632 (90%)**, cold 18758 -> **18965 (69%)**,
+  portable hole 1169 -> **963**. Two lines of loop for 206 ops.
+
+- **The auxiliary ADC tables are no longer a `/* TODO */`.** In
+  `b43_nphy_workarounds_rev7plus()` the four bulk writes on table 8, offsets
+  `0x08`, `0x18`, `0x0c` and `0x1c`, were commented out because the arrays were
+  not there. The capture has them at #771-#794: `0x8e 0x96 0x96 0x8b` for core 0,
+  `0x8f 0x9f 0x9f 0x96` for core 1, `0x02 0x02 0x02 0x00` for the two gain ones.
+
+  The reference picks the last element from the power detector range and from the
+  band. Only this board's combination is in the port — range 2, radio 2057 rev 8,
+  2 GHz — because the others have no capture behind them. And there brcmsmac
+  writes `0x8c` on **both** cores where the capture writes `0x8b` on core 0 and
+  leaves core 1 at `0x96`, which is the array's default; the gain element agrees
+  at 0. **Fourth time** brcmsmac is older than the driver of the captures.
+
+  Contiguous blocks 20402 -> **20426**, cold 18734 -> **18758**, portable hole
   1193 -> **1169**.
 
-- **La pulizia della cal PAPD spegne anche il campo `0x2000`, e le due prime vanno
-  prima di fermare il tono.** La cattura, a #13741-#13748: `e7`+`0x7c` e `ec`+`0x7f`
-  (campo `0x1000`), poi `e7`+`0x348` e `ec`+`0x349` (campo `0x2000`, il cui valore sta
-  nei quattro bit bassi di quei due registri e non in un registro intero). Il port il
-  `0x2000` non lo spegneva affatto e il `0x1000` lo spegneva dopo. Ora le otto op sono
-  op per op quelle della cattura, e i numeri **non si muovono**: quel vicinato resta
-  dentro il buco da 167 op, che va capito per intero. Sta dentro perche' e' giusto, non
-  perche' paga.
+- **The PAPD cal cleanup also turns off field `0x2000`, and the first two go
+  before stopping the tone.** The capture, at #13741-#13748: `e7`+`0x7c` and
+  `ec`+`0x7f` (field `0x1000`), then `e7`+`0x348` and `ec`+`0x349` (field `0x2000`,
+  whose value sits in the four low bits of those two registers and not in a whole
+  register). Those eight ops turned out to be the tail of `papd_run_one()`, not of
+  the cleanup (entry on `0x2000` above), and that is where they are now.
 
-  Corretto nel **banco**, non nel driver: `rssical_chanspec_2G` resta valorizzata. Le
-  altre tre si azzerano come prima, perche' la cattura la cal TX I/Q LO e la RX I/Q le
-  contiene davvero (le parentesi a #8492 e #14964 lo dicono).
+- **Old: the gate in `b43_nphy_run_samples()` is NOT to be added.** The reference
+  gates there on `phyhang_avoid` (`phy_n.c:23087`) and b43 calls unconditionally;
+  and `hang_avoid` in b43 is `(rev == 3 || rev == 4)`, false on rev 8. It looks
+  like a typo, and it is not: inside the **vendor**'s first 34-op pair
+  (#1620-#1666) there are `0xa1`, `0xa3`, `0xa4`, `0xc3`, `0xc4`, `0xc5`, `0xc6`, the
+  lpf override on `0x340`-`0x343` and the read of `15/0x57` — i.e. `run_samples`,
+  with the bracket, on a rev 8. The vendor does it, and b43's ungated call is
+  right **for this hardware**. brcmsmac is older, again.
 
-  **I valori non si seminano: ce li mette il primo init**, che la calibrazione la fa.
-  Ne escono i due registri radio e **undici dei dodici** PHY identici alla cattura.
-  Copiarli dalla cattura invece di lasciarli calcolare vale **una op** su `up-ch1`
-  (20403 contro 20402), e quattordici costanti copiate dentro il banco non valgono
-  un'op.
+  The gate was tried and measured: the port goes from **7 pairs to 5** where the
+  vendor has 6, i.e. it moves away; cold however it gains **+1137** (18734 ->
+  19871, 68% -> 72%) and hot it loses 126, with the per-phase run from 7749 to
+  7737. Withdrawn for the pair count and for the run, but **that +1137 cold is not
+  explained**, and it was the biggest thing not understood at the time.
 
-  L'unico che differisce e' `0x1ac`, l'offset fine narrowband del **core 0 sulla rail
-  Q**: il banco calcola 0, la cattura ha 1. E il ciclo che lo scrive usa gia'
-  `offset[i]` e non `offset[2 * core]`, quindi non e' la forma del codice — sono i
-  valori polled a differire di un passo. Voce aperta, e piccola.
+  The site of the extra pair was then the one of 1052 ops that opens at `@3271`,
+  right after the last op of `b43_nphy_tx_power_ctl_setup()`, and it is **not**
+  `tx_power_ctl_setup` — that one is gated on `hang_avoid` in both drivers,
+  checked. The method that works: `fprintf` with `__builtin_return_address(0)`
+  inside `b43_nphy_stay_in_carrier_search()` and resolution with `nm -n`, keeping
+  in mind that the PIE offset has to be computed and that a wrong estimate shifts
+  the symbol by one. (It turned out to be the RSSI cal's clip detection, entry
+  above.)
 
-  **A freddo non sappiamo come vengono calcolati, e non e' un'omissione: non c'e'
-  cattura.** `full-init-ch1-bw20` la cal RSSI la **comincia** e viene troncata: i
-  primi due gruppi di poll stanno a #32637 e #32709, e a #32769 parte il buco da 65285
-  record. Quindi dell'algoritmo a freddo abbiamo il codice — lo sweep dei VCM, che in
-  questo lavoro e' stato corretto due volte — e nessuna traccia contro cui verificarlo.
-  Per averla serve una cattura nuova che copra oltre #32769.
+- **A mainline defect found on the way, which does not concern this hardware.**
+  `hang_avoid` in b43 is `(phy->rev == 3 || phy->rev == 4)`; in brcmsmac
+  `NREV_GE(rev, 3) && NREV_LT(rev, 6)`, i.e. 3, 4 **and 5**. On rev 5 b43 skips all
+  the anti-hang brackets the reference puts in. Mainline candidate, provable
+  against brcmsmac without hardware, not measurable here.
 
-  | | prima | dopo |
+- **The count of the `rxiq-ingresso` window goes from 64 to 555, and it is not a
+  regression.** With the three ops in their place the parity of the alignment
+  changes and a shift that was masked comes back up: the read plan of `0xb0`. The
+  ops stay the same — 18 missing and 18 extra out of 1503 — and the two big
+  measures go up by 4 each. It closes by removing the extra carrier search pair,
+  not by working in that window.
+
+- **Old entry, for the record: `M_CTS_DURATION` was not an exception.** In the
+  15-op group of `rxiq-ingresso` the vendor does, between the two `MAC.MCTRL`, an
+  `OBJ.WR addr=0xb8 val=0x2710`: it is `write_shm(M_CTS_DURATION, 10000)`, because
+  `M_CTS_DURATION = M_PSM_SOFT_REGS + 0x5c * 2 = 0xb8`. The reference does it
+  **twice**, in both branches that lead to the RX IQ cal (`phy_n.c:25413` for the
+  state machine and `25460` for the other), and in b43 it was **nowhere**:
+  `grep CTS_DURATION` over the whole driver found nothing.
+
+  It had been filed under the `OBJ.WR` exception, and the exception says
+  something else: that the harness cannot **emit** object memory ops in a
+  comparable way — not that the driver may skip **doing** the write. And indeed
+  `wrap.c` has `b43_shm_write16()` and prints it as `OBJ.WR`, so the write would
+  even be visible in the trace. The two `MAC.MCTRL` around it are
+  `b43_mac_enable()` and `b43_mac_suspend()`.
+
+- **`rxiq-ingresso`, 510 of 1510 with 57 divergences, and they are three groups,
+  all attributed.** Six are the 9-bit reread of tables 26/27 beyond offset 576, at
+  `@31`, `@434` and `@947` with the high word next to it. Two are on `0xb0`, where
+  the counts match and only the order changes. The other **49 are a single shift
+  of two**: at `@1459` the vendor reads `0x340` and `0x341` and the port does not
+  read them there; from `@1461` the two sequences are the same, shifted by two.
+  Those two ops are identified and **closed**, entry below.
+
+- **The two reads of `0x340`/`0x341` in `run_samples`: closed.**
+  `b43_nphy_run_samples()` on the `rev >= 7` branch read `0x342` and `0x343` for
+  the lpf override bits and stopped there. The reference reads two more and
+  throws both values away — `read_phy_reg(pi, 0x340)` and `(pi, 0x341)`,
+  `phy_n.c:23109` and `23110`, with the comment `lpf_bw_ctl_miscreg3/4` — and the
+  capture does the same: of the 28 reads of `0x340`, **22 are preceded exactly by
+  `RD 0x342`, `RD 0x343`**, i.e. every sample play. The other six are two other
+  sites b43 already has. The value thrown away does not authorise removing the
+  read: a read of a PHY register is not without effects.
+
+  Added (`MESSAGES.md#0027`): `rxiq-ingresso` from 57 divergences to **37** and run
+  from 510 to 532, `cal-rssi-2` to **960 of 960**, `idle-tssi` from 357 to 432,
+  per-phase run from 8779 to **8896**.
+
+  The collapse of the blocks this change seemed to cause — 21110 to 19454, the
+  sweep from 5784 paired to 4112 — was **difflib**, not the order: see
+  `lcsmatch.py`. With the optimal pairing the sweep is at **5798** and `up-ch1` at
+  **21140**, i.e. 30 ops better than before the change. The diff of the port's two
+  traces already said so: 51 lines, 26 ops added and **four** lines of different
+  behaviour.
+
+- **difflib did not look for the longest common subsequence, and for a year the
+  block count gave false numbers: closed.** `SequenceMatcher` looks for the
+  longest contiguous block and then recurses right and left. On the RX IQ cal,
+  which repeats an almost identical sequence seven times, the first block it
+  latches onto can be the wrong iteration, and from there a whole iteration stays
+  unpaired on both sides. Measured: on `up-ch1` difflib pairs **19454** ops where
+  the optimum pairs **21140**, i.e. it leaves **1686** on the table.
+
+  `lcsmatch.py` does the optimal pairing: bit-parallel LCS for the lengths and
+  Hirschberg for the alignment, 0.4 s on `up-ch1`. The bitvector that comes out of
+  one LCS pass encodes the lengths on all prefixes of the second argument, so the
+  row Hirschberg reads costs a single pass. Its tests check three things: the
+  lengths against a naive DP on all prefixes, that the blocks are a **valid**
+  alignment — monotonic, and with ops that really match, because a long wrong
+  alignment is worse than a short one — and that it is never worse than difflib.
+
+  What changes, with the same driver and the same capture:
+
+  | | difflib | optimal |
   |---|---|---|
-  | **totale per fase** | 7749 (41%) | **8590 (46%)** |
-  | `up-ch1` blocchi contigui | 20035 (87%) | **20403 (89%)** |
-  | `cal-rssi-2` | run 99, 10% | **run 940, 98%**, forma `940 18` |
-  | finestra `rssi-cal` | 1/16, mancano 15 | **9/16, mancano 4** |
-  | coppie carrier search | 7 | **6**, come il vendore |
-  | letture di `0xb0` | 25 | 22 (vendore 16) |
-
-  E' il guadagno piu' grande di tutto il lavoro, e non e' una riga di driver: e' una
-  riga di seme. **Quando una fase fa un ordine di grandezza in meno del resto,
-  guardare se il banco la sta forzando su un ramo che la cattura non prende.**
-
-- **Vecchio: il gate in `b43_nphy_run_samples()` NON va messo.** Il riferimento la' gatea su `phyhang_avoid`
-  (`phy_n.c:23087`) e b43 chiama senza condizione; e `hang_avoid` in b43 e'
-  `(rev == 3 || rev == 4)`, falso su rev 8. Sembra un refuso, e non lo e': dentro la
-  prima coppia da 34 op del **vendore** (#1620-#1666) ci sono `0xa1`, `0xa3`, `0xa4`,
-  `0xc3`, `0xc4`, `0xc5`, `0xc6`, l'override lpf su `0x340`-`0x343` e la lettura di
-  `15/0x57` — cioe' `run_samples`, con la parentesi, su un rev 8. Il vendore la fa, e
-  la chiamata senza gate di b43 e' giusta **per questo hardware**. brcmsmac e' piu'
-  vecchio, di nuovo.
-
-  Provato a mettere il gate e misurato: il port passa da **7 coppie a 5** dove il
-  vendore ne ha 6, cioe' si allontana; a freddo pero' guadagna **+1137** (18734 ->
-  19871, 68% -> 72%) e a caldo perde 126, con la run per fase da 7749 a 7737.
-  Ritratto per il conteggio delle coppie e per la run, ma **quel +1137 a freddo non e'
-  spiegato**, ed e' la cosa piu' grossa non capita adesso.
-
-  Il sito della coppia in piu' resta da trovare: e' quella da 1052 op che apre a
-  `@3271`, subito dopo l'ultima op di `b43_nphy_tx_power_ctl_setup()`, e **non** e'
-  `tx_power_ctl_setup` — quella e' gateata su `hang_avoid` in entrambi i driver,
-  verificato. Il metodo che funziona: `fprintf` con `__builtin_return_address(0)`
-  dentro `b43_nphy_stay_in_carrier_search()` e risoluzione con `nm -n`, tenendo
-  presente che l'offset PIE va calcolato e che una stima sbagliata sposta il simbolo
-  di uno.
-
-- **Difetto di mainline trovato per strada, che non riguarda questo hardware.**
-  `hang_avoid` in b43 e' `(phy->rev == 3 || phy->rev == 4)`; in brcmsmac
-  `NREV_GE(rev, 3) && NREV_LT(rev, 6)`, cioe' 3, 4 **e 5**. Su rev 5 b43 salta tutte
-  le parentesi anti-hang che il riferimento mette. Candidato mainline, dimostrabile
-  contro brcmsmac senza hardware, non misurabile qui.
-
-- **Il conto della finestra `rxiq-ingresso` passa da 64 a 555, e non e' una
-  regressione.** Con le tre op al loro posto la parita' dell'allineamento cambia e
-  riemerge uno sfasamento che era mascherato: il piano di lettura di `0xb0`. Le op
-  restano le stesse — mancano 18 e ce ne sono 18 in piu' su 1503 — e le due misure
-  grandi salgono di 4 ciascuna. Si chiude togliendo la coppia di carrier search di
-  troppo, non lavorando in quella finestra.
-
-- **Vecchia voce, per memoria: `M_CTS_DURATION` non era una deroga.** Nel gruppo da 15
-  op di `rxiq-ingresso` il vendore fa, in mezzo alle due `MAC.MCTRL`, una `OBJ.WR
-  addr=0xb8 val=0x2710`: e' `write_shm(M_CTS_DURATION, 10000)`, perche'
-  `M_CTS_DURATION = M_PSM_SOFT_REGS + 0x5c * 2 = 0xb8`. Il riferimento la fa **due
-  volte**, in entrambi i rami che portano alla cal RX IQ (`phy_n.c:25413` per la
-  macchina a stati e `25460` per l'altro), e in b43 **non c'e' da nessuna parte**:
-  `grep CTS_DURATION` su tutto il driver non trova niente.
-
-  L'avevo archiviata dentro la deroga `OBJ.WR`, e la deroga dice un'altra cosa: che
-  l'harness non puo' **emettere** op di object memory in modo confrontabile — non che
-  il driver non debba **fare** la scrittura. E infatti `wrap.c` ha `b43_shm_write16()`
-  e la stampa come `OBJ.WR`, quindi la scrittura sarebbe perfino visibile nel trace.
-  Le due `MAC.MCTRL` attorno sono `b43_mac_enable()` e `b43_mac_suspend()`: quelle si
-  la' l'harness le stubba, e la deroga su di loro regge.
-
-- **`rxiq-ingresso`, 510 su 1510 con 57 divergenze, e sono tre gruppi tutti
-  attribuiti.** Sei sono la rilettura a 9 bit delle tabelle 26/27 oltre l'offset 576,
-  a `@31`, `@434` e `@947` con la word alta accanto. Due sono su `0xb0`, dove i
-  conteggi combaciano e cambia solo l'ordine. Le altre **49 sono un solo sfasamento
-  di due**: a `@1459` il vendore legge `0x340` e `0x341` e il port li' non li legge;
-  da `@1461` le due sequenze sono le stesse, spostate di due. Quelle due op sono
-  identificate e **chiuse**, voce sotto.
-
-- **Le due letture di `0x340`/`0x341` in `run_samples`: chiuse.**
-  `b43_nphy_run_samples()` sul ramo `rev >= 7` leggeva `0x342` e `0x343` per i bit di
-  override lpf e si fermava li'. Il riferimento ne legge altre due e butta via entrambi
-  i valori — `read_phy_reg(pi, 0x340)` e `(pi, 0x341)`, `phy_n.c:23109` e `23110`, col
-  commento `lpf_bw_ctl_miscreg3/4` — e la cattura fa lo stesso: delle 28 letture di
-  `0x340`, **22 sono precedute esattamente da `RD 0x342`, `RD 0x343`**, cioe' ogni
-  sample play. Le altre sei sono altri due siti che b43 ha gia'. Il valore buttato non
-  autorizza a togliere la lettura: una read di un registro PHY non e' senza effetti.
-
-  Aggiunte (`MESSAGES.md#0027`): `rxiq-ingresso` da 57 divergenze a **37** e
-  run da 510 a 532, `cal-rssi-2` a **960 su 960**, `idle-tssi` da 357 a 432, run per
-  fase da 8779 a **8896**.
-
-  Il crollo dei blocchi che questa modifica sembrava causare — 21110 a 19454, lo sweep
-  da 5784 appaiate a 4112 — era **difflib**, non l'ordine: vedi `lcsmatch.py`. Con
-  l'appaiamento ottimo lo sweep sta a **5798** e `up-ch1` a **21140**, cioe' 30 op
-  meglio di prima della modifica. Il diff dei due trace del port lo diceva gia': 51
-  righe, 26 op aggiunte e **quattro** righe di comportamento diverso.
-
-- **difflib non cercava la sottosequenza comune piu' lunga, e per un anno il conto
-  per blocchi ha detto numeri falsi: chiuso.** `SequenceMatcher` cerca il blocco
-  contiguo piu' lungo e poi ricorre a destra e a sinistra. Sulla cal RX IQ, che ripete
-  sette volte una sequenza quasi identica, il primo blocco che aggancia puo' essere
-  l'iterazione sbagliata, e da li' un'iterazione intera resta spaiata su entrambi i
-  lati. Misurato: su `up-ch1` difflib appaia **19454** op dove l'ottimo ne appaia
-  **21140**, cioe' ne lascia **1686** sul tavolo.
-
-  `lcsmatch.py` fa l'appaiamento ottimo: LCS bit-parallel per le lunghezze e
-  Hirschberg per l'allineamento, 0,4 s su `up-ch1`. Il bitvector che esce da una
-  passata di LCS codifica le lunghezze su tutti i prefissi del secondo argomento,
-  quindi la riga che Hirschberg legge costa una passata sola. I suoi test verificano
-  tre cose: le lunghezze contro una DP ingenua su tutti i prefissi, che i blocchi
-  siano un allineamento **valido** — monotono, e con le op che combaciano davvero,
-  perche' un allineamento lungo e sbagliato e' peggio di uno corto — e che non sia mai
-  peggio di difflib.
-
-  Cosa cambia, con lo stesso driver e la stessa cattura:
-
-  | | difflib | ottimo |
-  |---|---|---|
-  | `up-ch1`, blocchi | 19454 (84%) | **21140 (92%)** |
+  | `up-ch1`, blocks | 19454 (84%) | **21140 (92%)** |
   | `up-ch1-freddo` | 19867 (72%) | **21011 (76%)** |
-  | sweep della cal RX IQ | 4112 (69%) | **5798 (98%)** |
-  | `cal-rx-iq`, forma | `532 529 528 511` | `531 528 2x527 2x524` |
-  | buchi contigui | 120 | 114 |
-  | op portabili non appaiate | 2262 | **576** |
+  | RX IQ cal sweep | 4112 (69%) | **5798 (98%)** |
+  | `cal-rx-iq`, shape | `532 529 528 511` | `531 528 2x527 2x524` |
+  | contiguous holes | 120 | 114 |
+  | portable ops unpaired | 2262 | **576** |
 
-  La forma di `cal-rx-iq` e' la firma: sei iterazioni appaiate a ~527 ciascuna, che e'
-  quello che una fase che ripete sei volte deve dare. Con difflib erano quattro
-  numeri sopra 500 e due iterazioni sparite.
+  The shape of `cal-rx-iq` is the signature: six iterations paired at ~527 each,
+  which is what a phase repeating six times has to give. With difflib they were
+  four numbers above 500 and two iterations gone.
 
-- **La deroga su `PHY.CLK` adesso e' applicata, non solo dichiarata.** Il ragionamento
-  che la giustifica sta nella lista delle deroghe piu' sotto: `b43_phy_force_clock()`
-  e' `phyclk_fgc`, il tracer aggancia `core_phy_clk`, quindi quelle op non sono
-  osservabili e nelle due catture della DSL-3580L sono **zero**. Restava pero' dentro
-  il flusso del port, e li' faceva danno: il confronto per finestra e' posizionale,
-  quindi una sola op che un lato non puo' avere sfasa di uno tutto quello che segue.
-  Toglierla dal lato port — `PORT_UNSHOWABLE` in `compare.py`, il simmetrico di
-  `NOT_COMPARABLE` — vale `perical-ingresso` da 13 divergenze a **5** e
-  `rxiq-ingresso` da 492 a **57**. Il denominatore non si tocca: il danno non era la'.
+- **The `PHY.CLK` exception is now applied, not just declared.** The reasoning
+  that justifies it is in the list of exceptions further down:
+  `b43_phy_force_clock()` is `phyclk_fgc`, the tracer hooks `core_phy_clk`, so those
+  ops are not observable and in the two DSL-3580L captures they are **zero**. It
+  still stayed in the port's flow though, and there it did harm: the per-window
+  comparison is positional, so a single op one side cannot have shifts everything
+  that follows by one. Removing it from the port's side — `PORT_UNSHOWABLE` in
+  `compare.py`, the mirror of `NOT_COMPARABLE` — takes `perical-ingresso` from 13
+  divergences to **5** and `rxiq-ingresso` from 492 to **57**. The denominator is
+  not touched: the harm was not there.
 
-  Se un giorno si misura contro `router-data/vd630/fullinit.txt`, attenzione: la' due
-  `PHY.CLK` ci sono, entrambe `val=0x1`, e vengono dall'altra funzione. Lo stesso nome
-  copre due cose e vanno separate prima.
+  If one day the measurement is made against `router-data/vd630/fullinit.txt`,
+  careful: there two `PHY.CLK` are present, both `val=0x1`, and they come from the
+  other function. The same name covers two things and they have to be separated
+  first.
 
-- **L'ombra di una `MOD` e' una coppia, e va riconosciuta come coppia: chiuso.**
-  `drop_rmw_shadows()` riconosceva l'ombra dal solo prefisso e si mangiava una **run**
-  intera di `RD` sullo stesso indirizzo, quindi cancellava tutte e 110 le letture del
-  poll di `0x129` (`IQEST_CMD`), che stanno a valle della `MOD` che accende il
-  comando, e le sei `RD 0xb0` che sono il read della **seconda** chiamata a
-  `b43_nphy_classifier()` dentro `stay_in_carrier_search()`. Il port quelle letture le
-  fa, e restavano senza controparte.
+- **The shadow of a `MOD` is a pair, and has to be recognised as a pair:
+  closed.** `drop_rmw_shadows()` recognised the shadow by prefix alone and ate a
+  whole **run** of `RD`s on the same address, so it deleted all 110 reads of the
+  poll of `0x129` (`IQEST_CMD`), which sit downstream of the `MOD` that starts the
+  command, and the six `RD 0xb0` that are the read of the **second** call to
+  `b43_nphy_classifier()` inside `stay_in_carrier_search()`. The port does those
+  reads, and they were left without a counterpart.
 
-  La lettura interna di una read-modify-write non arriva mai da sola: se il tracer
-  registra la read registra anche la write. Quindi una `RD` che segue una `MOD` senza
-  una `WR` dietro e' un'op vera. Su `up-ch1` la vecchia regola scartava 175 op in run
-  di lunghezza `1x6 2x28 3x1 5x1 6x5 27x1 48x1`: le run da 1 e da 2 erano ombre vere,
-  le altre 113 no.
+  The inner read of a read-modify-write never comes alone: if the tracer records
+  the read it records the write too. So an `RD` that follows a `MOD` without a `WR`
+  behind it is a real op. On `up-ch1` the old rule dropped 175 ops in runs of
+  length `1x6 2x28 3x1 5x1 6x5 27x1 48x1`: the runs of 1 and 2 were real shadows,
+  the other 113 were not.
 
-  Cosa e' cambiato: `up-ch1` da 22951 a **23068** op del vendore, e le letture visibili
-  di `0xb0` da 16 a **22**, che e' il numero vero della cattura. `perical-ingresso` da
-  17 divergenze a **13**, `rxiq-ingresso` da 555 a **492**, la run di `idle-tssi` da
-  334 a **357**. Nessuna finestra si e' aperta.
+  What changed: `up-ch1` from 22951 to **23068** vendor ops, and the visible reads
+  of `0xb0` from 16 to **22**, which is the real number in the capture.
+  `perical-ingresso` from 17 divergences to **13**, `rxiq-ingresso` from 555 to
+  **492**, the `idle-tssi` run from 334 to **357**. No window opened.
 
-- **Il piano di lettura di `0x129` e' fuori fase, e la regola delle ombre lo nascondeva.**
-  Il vendore chiude ogni poll leggendo **due volte** il valore con START spento — 8
-  stime su 8: quattro `1 1 1 1 0 0`, una `1 1 1 16 16`, una `1 1 1 1 32 32`, una da 48
-  e una da 27. Il riferimento ne fa **tre**, di letture in coda: `SPINWAIT`
-  (`phy_n.c:26050`), la `WARN` (`26052`) e l'`if` che apre la lettura degli
-  accumulatori (`26056`); la cattura ne ha due, quindi il wl 6.30 non ha la `WARN`.
-  b43 ne fa **una**, che gli serve sia da test d'uscita sia da guardia.
+- **The read plan of `0x129` was out of phase, and the shadows rule hid it.** The
+  vendor closes every poll by reading the value with START off **twice** — 8
+  estimates out of 8: four `1 1 1 1 0 0`, one `1 1 1 16 16`, one `1 1 1 1 32 32`,
+  one of 48 and one of 27. The reference does **three** reads at the end:
+  `SPINWAIT` (`phy_n.c:26050`), the `WARN` (`26052`) and the `if` that opens the
+  read of the accumulators (`26056`); the capture has two, so wl 6.30 does not
+  have the `WARN`. b43 does **one**, which serves both as exit test and as guard.
 
-  Il piano e' una coda per indirizzo, quindi la voce di troppo non la consumava
-  nessuno e se la prendeva la chiamata dopo, che uscisse al primo giro:
-  `B43_TEST_PLANDBG=1` dava 65 letture in 8 chiamate, forme `5 1 5 1 4 1 47 1`, con le
-  entry consumate tutte dentro le **prime quattro** stime del vendore. Le chiamate
-  pari non aspettavano niente.
+  The plan is a queue per address, so the extra entry was consumed by nobody and
+  taken by the next call, which exited at the first round:
+  `B43_TEST_PLANDBG=1` gave 65 reads in 8 calls, shapes `5 1 5 1 4 1 47 1`, with
+  the entries all consumed inside the vendor's **first four** estimates. The even
+  calls waited for nothing.
 
-  Non era l'invariante del banco a cedere: `wrap.c` la dichiara per indirizzo, e dice
-  che se il port salta una lettura i valori di quell'indirizzo si sfasano di uno. Qui
-  il port non saltava niente: e' il vendore che ne fa una in piu' **per forma del
-  sorgente**, e b43 non ha modo di consumarla. Lo sfasamento era quindi strutturale e
-  cresceva di uno per stima.
+  It was not the bench's invariant giving way: `wrap.c` declares it per address,
+  and says that if the port skips a read the values of that address shift by
+  one. Here the port skipped nothing: it is the vendor doing one more **by the
+  shape of its source**, and b43 has no way to consume it. The shift was
+  therefore structural and grew by one per estimate.
 
-  **Chiuso in `gen_readplans.py`, con una lista dichiarata**: `POLL_DOUBLE_TAIL` tiene
-  i registri di comando la cui fine il sorgente del vendore legge due volte, e oggi ha
-  una riga sola, `PHY 0x129`. Una regola generale non si puo' dedurre dalla cattura, e
-  ci ho provato: "togli la coda duplicata di ogni poll" tocca anche `0x21a` e `0x219`,
-  che nella seconda cal RSSI sono **otto campionamenti uguali di fila** e non un poll,
-  e affamerebbe il loro piano di 416 voci. `PHY 0x0c0` (`IQLOCAL_CMD`) invece non ci
-  va e la ragione e' misurata: i suoi 24 gruppi finiscono col valore che cambia una
-  volta sola (`0x8434 0x8434 0x8434 0x434`), quindi b43 e il vendore ne fanno lo
-  stesso numero.
+  **Closed in `gen_readplans.py`, with a declared list**: `POLL_DOUBLE_TAIL` holds
+  the command registers whose end the vendor's source reads twice, and today it
+  has a single line, `PHY 0x129`. A general rule cannot be deduced from the
+  capture, and it was tried: "drop the duplicated tail of every poll" also touches
+  `0x21a` and `0x219`, which in the second RSSI cal are **eight equal samplings in
+  a row** and not a poll, and would starve their plan of 416 entries.
+  `PHY 0x0c0` (`IQLOCAL_CMD`) on the other hand does not belong there and the
+  reason is measured: its 24 groups end with the value changing only once
+  (`0x8434 0x8434 0x8434 0x434`), so b43 and the vendor do the same number.
 
-  Il piano perde 8 voci su 110 e il poll torna in fase: 102 letture in 8 chiamate,
-  forme `5 5 4 47 5 5 5 26`, cioe' una per stima e ciascuna una lettura meno del
-  vendore, che e' esattamente giusto. Vale lo sweep da 5798 appaiate a **5882**, le
-  sue **spostate da 58 a 11** e le **assenti da 61 a 24**, il totale delle spostate da
-  201 a **153** e delle assenti da 375 a **339**, `up-ch1` da 21140 a **21224** e a
-  freddo da 21011 a **21093**. Il buco da 47 op portabili a #17913 non c'e' piu'.
+  The plan loses 8 entries of 110 and the poll is back in phase: 102 reads in 8
+  calls, shapes `5 5 4 47 5 5 5 26`, i.e. one per estimate and each one read fewer
+  than the vendor, which is exactly right. Worth the sweep from 5798 paired to
+  **5882**, its **moved from 58 to 11** and **absent from 61 to 24**, the total moved
+  from 201 to **153** and absent from 375 to **339**, `up-ch1` from 21140 to
+  **21224** and cold from 21011 to **21093**. The 47-portable-op hole at #17913 is
+  gone.
 
-  I dodici accumulatori (`0x12c`-`0x131`, `0x134`-`0x139`) erano **8 e 8 su tutti e
-  dodici** anche prima, quindi i valori della stima erano quelli della cattura: era
-  falsa l'attesa, non la stima.
-- **`perical-ingresso` e' chiusa**: 575 su 1402 con 17 divergenze dichiarate.
-- **Resta una voce piccola**: le due `PHY.MOD 0x349 val=0x0 mask=0xf` a #13320 e
-  #13392 che il port non emette mai — la maschera a 4 bit e' il campo `0x2000` da
-  solo, la voce `(0x1 << 13)` della tabella di override rev 7.
-- **Metà della cattura non è confrontata con niente, e ora si sa cosa contiene.**
-  La cattura arriva a **#70796** e `up-ch1` misura `#132-26100`. La struttura, contata
-  sui marcatori `CHANSPEC`:
+  The twelve accumulators (`0x12c`-`0x131`, `0x134`-`0x139`) were **8 and 8 on all
+  twelve** before too, so the values of the estimate were the capture's: it was
+  the waiting that was wrong, not the estimate.
+- **`perical-ingresso` is closed**: 575 of 1402 with 17 declared divergences.
+- **A small entry remains**: the two `PHY.MOD 0x349 val=0x0 mask=0xf` at #13320 and
+  #13392 the port never emits — the 4-bit mask is field `0x2000` alone, the
+  `(0x1 << 13)` entry of the rev 7 override table.
+- **Half of the capture was compared with nothing, and now what it contains is
+  known.** The capture goes up to **#70796** and `up-ch1` measures `#132-26100`.
+  The structure, counted on the `CHANSPEC` markers:
 
-  | | record | cosa |
+  | | records | what |
   |---|---|---|
-  | `#132` ch=1 | 25969 | l'init, cioe' `up-ch1` |
-  | `#26101`-`#34937` | 8837 | 14 salti dell'ACI scan, ch1↔ch5 ogni 2 s |
-  | `#34938` ch=6 | **27034** | il cambio canale e cio' che segue |
-  | `#61972`-`#70796` | 8825 | 15 salti dell'ACI scan, ch6↔ch2↔ch10 |
+  | `#132` ch=1 | 25969 | the init, i.e. `up-ch1` |
+  | `#26101`-`#34937` | 8837 | 14 hops of the ACI scan, ch1↔ch5 every 2 s |
+  | `#34938` ch=6 | **27034** | the channel change and what follows |
+  | `#61972`-`#70796` | 8825 | 15 hops of the ACI scan, ch6↔ch2↔ch10 |
 
-  Non e' "ch1 poi ch6": e' init, scan, cambio, scan. Del blocco da 27034 record ne
-  confrontavamo **42 op**, quelle di `chanswitch-ch6`. E quel blocco non e' un cambio
-  canale: entro **1,45 s** dal cambio il vendore rifa' la calibrazione da zero —
-  `IQLOCAL_CMD` a #43852, i sample play a #43366, le stime I/Q a #51744 — un blocco
-  grande come l'init.
+  It is not "ch1 then ch6": it is init, scan, change, scan. Of the 27034-record
+  block we compared **42 ops**, those of `chanswitch-ch6`. And that block is not
+  a channel change: within **1.45 s** of the change the vendor redoes the
+  calibration from scratch — `IQLOCAL_CMD` at #43852, the sample plays at #43366,
+  the I/Q estimates at #51744 — a block as big as the init.
 
-  **E quel blocco e' un init da capo.** La sottosequenza comune piu' lunga fra
-  `#132-26100` e `#34938-61971` e' **22308 op su 23649, il 94%**: al cambio canale il
-  device rifa' la stessa sequenza dell'init, sul canale nuovo.
+  **And that block is an init all over again.** The longest common subsequence
+  between `#132-26100` and `#34938-61971` is **22308 ops of 23649, 94%**: on the
+  channel change the device redoes the same sequence as the init, on the new
+  channel.
 
-  **Chi la chiama in b43 non c'e', e non e' un refuso.** Il blocco `do_cal` /
-  `deferred_cal` sta in **`b43_phy_initn()`**, non nel percorso del cambio canale:
-  `b43_nphy_set_channel()` passa da `b43_nphy_channel_setup()`, che di calibrazione
-  non ha niente. Quindi `op_switch_channel` emette **60 op** e non puo' emetterne
-  altre. E la condizione `do_cal = !nphy->iqcal_chanspec_2G.center_freq` e' **identica**
-  al riferimento (`wlc_phy_init_nphy`, `phy_n.c:19483`), quindi non c'e' niente da
-  correggere li': nel riferimento la ricalibrazione arriva dal **watchdog**,
-  `wlc_phy_cal_perical(PHY_PERICAL_WATCHDOG)` sotto `glacial_timer`
-  (`phy_cmn.c:2278`), e b43 non ha l'equivalente.
+  **Whoever calls it in b43 does not exist, and it is not a typo.** The `do_cal` /
+  `deferred_cal` block is in **`b43_phy_initn()`**, not in the channel change
+  path: `b43_nphy_set_channel()` goes through `b43_nphy_channel_setup()`, which
+  has nothing of calibration. So `op_switch_channel` emits **60 ops** and cannot
+  emit more. And the condition `do_cal = !nphy->iqcal_chanspec_2G.center_freq` is
+  **identical** to the reference (`wlc_phy_init_nphy`, `phy_n.c:19483`), so there
+  is nothing to fix there: in the reference the recalibration comes from the
+  **watchdog**, `wlc_phy_cal_perical(PHY_PERICAL_WATCHDOG)` under `glacial_timer`
+  (`phy_cmn.c:2278`), and b43 has no equivalent.
 
-  Conseguenza sull'hardware, non sul banco: **b43 rimette su ch6 la calibrazione TX
-  I/Q LO e RX I/Q fatta su ch1**, dove il device ricalibra da zero.
+  Consequence on hardware, not on the bench: **b43 puts back on ch6 the TX I/Q LO
+  and RX I/Q calibration made on ch1**, where the device recalibrates from
+  scratch.
 
-  **Provato separatamente, il codice della calibrazione il canale nuovo lo sa fare.**
-  `flow_chancal` fa l'init a caldo, cambia canale e rifa' l'init: e' una manovra del
-  banco — le chanspec di cal azzerate come fa `flow_init` prima dell'init tracciato —
-  e serve a separare "il codice sa" da "qualcuno lo chiama". Misurato:
+  **Tried separately, the calibration code knows how to do the new channel.**
+  `flow_chancal` does the hot init, changes channel and does the init again: it is
+  a manoeuvre of the bench — the cal chanspecs cleared as `flow_init` does before
+  the traced init — and it serves to separate "the code knows" from "someone
+  calls it". Measured:
 
       ./phase_compare.py --vendor .../opinit-ch1-ch6-bw20.decoded \
           --global-run 34938 61971 --flow chancal --channel 6
-      -> 21593 su 23649, il 91%
+      -> 21593 of 23649, 91%
 
-  cioe' quanto `up-ch1`. La superficie misurata del repo raddoppia.
+  i.e. as much as `up-ch1`. The measured surface of the repository doubles.
 
-  Due cose sono servite per arrivarci, ed erano entrambe trappole del banco. **I piani
-  di lettura finivano con `up-ch1`**: senza quelli del range nuovo ogni attesa cade sul
-  mirror e gira fino al suo limite — misurato, 181338 letture di `0x2be` in un solo
-  poll della cal PAPD e quattro milioni di op in tutto. Ora `gen_readplans.py` sa fare
-  set con nomi diversi (`--name ch6` -> `b43_test_load_readplans_ch6()`) e c'e'
-  `readplans_ch6.h`. E **`--max-len` tronca**: con 512, `0x2be` ne perdeva 466 su 978 e
-  il poll girava a vuoto comunque. I piani di `up-ch1` non erano troncati, quel range
-  sta sotto 512.
+  Two things were needed to get there, and both were traps of the bench. **The
+  read plans ended with `up-ch1`**: without those of the new range every wait
+  falls on the mirror and spins up to its limit — measured, 181338 reads of
+  `0x2be` in a single poll of the PAPD cal and four million ops in all. Now
+  `gen_readplans.py` can make sets with different names
+  (`--name ch6` -> `b43_test_load_readplans_ch6()`) and there is
+  `readplans_ch6.h`. And **`--max-len` truncates**: with 512, `0x2be` lost 466 of
+  978 and the poll spun anyway. `up-ch1`'s plans were not truncated, that range
+  stays under 512.
 
-  I due blocchi **non sono finestre**, e non per dimenticanza: 23649 e 29979 op contro
-  46307 e 55304 del port costano minuti a `lcsmatch`, che e' O(n*m/64) per livello di
-  Hirschberg. Si misurano con la global run, e i due comandi stanno nel commento nel
-  punto della tabella dove le finestre sarebbero andate.
+  The two blocks **are not windows**, and not by oversight: 23649 and 29979 ops
+  against the port's 46307 and 55304 cost `lcsmatch` minutes, being
+  O(n*m/64) per Hirschberg level. They are measured with the global run, and the
+  two commands are in the comment at the point of the table where the windows
+  would have gone.
 
-  E `flow_full` era costruito su `initcal` invece che sull'init a caldo, quindi non si
-  confrontava con questa cattura, e nessuna finestra lo usava. Ora e' `flow_txpower`
-  piu' il cambio canale, cioe' `op_init` fino alla fine di `op_switch_channel`, e resta
-  a 60 op perche' quello e' quanto b43 fa davvero.
+  And `flow_full` was built on `initcal` instead of on the hot init, so it did not
+  compare with this capture, and no window used it. Now it is `flow_txpower` plus
+  the channel change, i.e. `op_init` up to the end of `op_switch_channel`, and it
+  stays at 60 ops because that is how much b43 really does.
 
-  **Anche la cattura a freddo ha lo stesso blocco, e adesso e' misurato.**
-  `full-init-*` ha `#339` ch=1, poi `#98383` ch=**11** per **34738 record**, poi i
-  salti ACI ch7↔ch11. Il buco da 65286 record fra `#32769` e `#98055` e' il giro del
-  buffer del tracer, quindi il blocco ch11 e' dati buoni. Ed e' init anche lui: LCS con
-  l'init a freddo troncato **26521 su 29979, l'88%** (col caldo su ch1 il 75%, che dice
-  che il freddo assomiglia piu' al freddo). `flow_chancalpor`, base `flow_initpor`,
-  piani `readplans_ch11.h`:
+  **The cold capture has the same block too, and now it is measured.**
+  `full-init-*` has `#339` ch=1, then `#98383` ch=**11** for **34738 records**, then
+  the ACI hops ch7↔ch11. The 65286-record hole between `#32769` and `#98055` is
+  the tracer's buffer wrapping around, so the ch11 block is good data. And it is
+  an init too: LCS with the truncated cold init **26521 of 29979, 88%** (with the
+  hot one on ch1, 75%, which says that cold resembles cold more).
+  `flow_chancalpor`, based on `flow_initpor`, plans `readplans_ch11.h`:
 
       --global-run 98383 133120 --flow chancalpor --channel 11
-      -> 25526 su 29979, l'85%
+      -> 25526 of 29979, 85%
 
-  Piu' del 76% dell'init a freddo, che ha dentro la roba del power-on che il banco non
-  fa.
+  More than the 76% of the cold init, which contains the power-on things the
+  bench does not do.
 
-  **Le due basi c'erano gia' e sono quelle che le finestre usano**: `flow_txpower` per
-  la cattura a caldo, `flow_initpor` per quella a freddo. Cio' che mancava era un set
-  di piani di lettura per range, uno per cattura, e `flow_chancal_from()` che prende
-  base e piani come parametri. I due flow sono tre righe a testa.
+  **The two bases were already there and they are the ones the windows use**:
+  `flow_txpower` for the hot capture, `flow_initpor` for the cold one. What was
+  missing was a set of read plans per range, one per capture, and
+  `flow_chancal_from()`, which takes base and plans as parameters. The two flows
+  are three lines each.
 
-  **Quanta cattura e' dentro un range confrontato, contando i record che esistono:**
+  **How much of each capture is inside a compared range, counting the records that
+  exist:**
 
-  | cattura | record presenti | prima | ora |
+  | capture | records present | before | now |
   |---|---|---|---|
-  | `opinit-*` (caldo) | 59693 | 23211, 39% | **47003, 79%** |
-  | `full-init-*` (freddo) | 69557 | 28401, 41% | **59127, 85%** |
+  | `opinit-*` (hot) | 59693 | 23211, 39% | **47003, 79%** |
+  | `full-init-*` (cold) | 69557 | 28401, 41% | **59127, 85%** |
 
-  Il resto sono i salti dell'ACI scan, che e' una politica sopra il PHY.
+  The rest are the hops of the ACI scan, which is a policy above the PHY.
 
-- **Le 75 op spostate della cal PAPD sono UNA commutazione di troppo del controllo
-  di potenza.** Non sono sparse: quattro sono `PHY.MOD 0x2a3`/`0x2a4 val=0x3 mask=0x7`
-  isolate (#12220, #12354, #13334, #13406), le altre **71 sono un blocco contiguo**,
-  `#13842-#13918`, che il port emette tutto insieme e nell'ordine giusto — le letture
-  `PAPD_STAT`, i `PAPD_EN`, le maschere sui `CAL_SHIFTS`, la `BBCFG` e le tre righe dei
-  filtri, cioe' la coda di `b43_nphy_papd_cal()` (`phy_n.c:7340-7353`).
+- **The 75 moved ops of the PAPD cal are ONE switching too many of the power
+  control.** They are not scattered: four are isolated
+  `PHY.MOD 0x2a3`/`0x2a4 val=0x3 mask=0x7` (#12220, #12354, #13334, #13406), the
+  other **71 are a contiguous block**, `#13842-#13918`, which the port emits all
+  together and in the right order — the `PAPD_STAT` reads, the `PAPD_EN`, the masks
+  on the `CAL_SHIFTS`, the `BBCFG` and the three rows of filters, i.e. the tail of
+  `b43_nphy_papd_cal()`.
 
-  Di quanto e' fuori posto: l'appaiamento prima di quel blocco ha scostamento **-23**,
-  dopo **-94**, e il port lo emette a `@12267` dove lo scostamento precedente lo
-  metterebbe a `@12091`. **176 op tardi**, e in mezzo il port ne infila 176 che
-  cominciano con `PHY.RD 0x1e7` e `TBL.WR id=0x1a off=0x40 len=84`.
+  How far out of place: the pairing before that block has offset **-23**, after it
+  **-94**, and the port emits it at `@12267` where the previous offset would put it
+  at `@12091`. **176 ops late**, and in between the port slips in 176 that start
+  with `PHY.RD 0x1e7` and `TBL.WR id=0x1a off=0x40 len=84`.
 
-  Il conto torna esatto. Una `TBL.WR` da 84 celle si srotola sulla porta delle tabelle
-  in **86 op** (`0x72` con l'indirizzo, poi 84 `0x73`, piu' la `TBL.WR` stessa), e il
-  controllo di potenza le scrive **a coppie**, tabella 26 e tabella 27:
-  `86 + 86 + 4 = 176`. Non e' un blocco di lavoro: e' **una sola** commutazione del
-  controllo di potenza in piu'.
+  The count adds up exactly. A `TBL.WR` of 84 cells unrolls on the table port into
+  **86 ops** (`0x72` with the address, then 84 `0x73`, plus the `TBL.WR` itself), and
+  the power control writes them **in pairs**, table 26 and table 27:
+  `86 + 86 + 4 = 176`. It is not a block of work: it is **a single** extra switch
+  of the power control.
 
-  Chi le scrive e' `b43_nphy_tx_power_ctrl()` (`phy_n.c:3766`): zeri quando spegne
-  (`3802`), `adj_pwr_tbl` quando accende (`3827`), su entrambe le tabelle. Ha nove
-  chiamanti, e dentro la calibrazione ogni fase spegne e riaccende. Contate le
-  scritture di `26/0x40` su `#132-26100`: il port ne fa **43**, il vendore **36**, e
-  tutte e sette le in piu' cadono nella regione di cal.
+  Who writes them is `b43_nphy_tx_power_ctrl()`: zeros when it turns off,
+  `adj_pwr_tbl` when it turns on, on both tables. It has nine callers, and inside
+  the calibration every phase turns off and on again. Counted the writes of
+  `26/0x40` over `#132-26100`: the port does **43**, the vendor **36**, and all seven
+  extra fall in the cal region.
 
-  Quindi "75 op spostate nella cal PAPD" si riduce a **sette commutazioni di troppo del
-  controllo di potenza durante la cal**, una delle quali si mette fra il blocco
-  precedente e la coda della `papd_cal`. Trovare quale dei nove chiamanti le fa vuole
-  un contatore per sito, che non c'e'.
+- **The seven extra reprogrammings of the power table: closed.** Found with
+  `B43_TEST_PWRCTLDBG=1`, which in the wrap of `b43_ntab_write_bulk()` prints the
+  `backtrace()` of every 84-cell write of `26/0x40`. The offsets resolve with
+  `addr2line -f -e nphy_trace`. Of the 43 of the traced round:
 
-- **Le sette riprogrammazioni di troppo della tabella di potenza: chiuse.**
-  Trovate con `B43_TEST_PWRCTLDBG=1`, che nel wrap di `b43_ntab_write_bulk()` stampa il
-  `backtrace()` di ogni scrittura di `26/0x40` da 84 celle. Gli offset si risolvono con
-  `addr2line -f -e nphy_trace`. Delle 43 del giro tracciato:
-
-  | scritture | sito che commuta il controllo |
+  | writes | site that switches the control |
   |---|---|
-  | **24** | `b43_nphy_txpwr_index()`, il suo spegni/riaccendi interno (`4038` e `4107`) |
-  | 10 | `b43_nphy_pwr_ctl_open`/`close()` dentro `b43_nphy_papd_cal()` |
+  | **24** | `b43_nphy_txpwr_index()`, its internal turn off/on |
+  | 10 | `b43_nphy_pwr_ctl_open`/`close()` inside `b43_nphy_papd_cal()` |
   | 3 | `b43_phy_initn()` |
   | 2 | `b43_nphy_op_recalc_txpower()` |
-  | 2 | `run_pending_perical()` e `cal_perical_phyinit()` |
-  | 2 | `b43_nphy_txpwr_index()` a `4005` |
+  | 2 | `run_pending_perical()` and `cal_perical_phyinit()` |
+  | 2 | `b43_nphy_txpwr_index()`, another site |
 
-  Ogni sito e' in parentesi perfetta, spegni e riaccendi: `gainctrl` ne apre **sei**,
-  non dodici. Le dodici sono le *scritture*, due per parentesi, e distinguere le due
-  cose e' cio' che serve per non sbagliare la conclusione.
+  Every site is in a perfect bracket, off and on: `gainctrl` opens **six**, not
+  twelve. The twelve are the *writes*, two per bracket, and telling the two apart
+  is what it takes not to get the conclusion wrong.
 
-  Non e' che b43 scriva dove il device non scrive: **anche il riferimento scrive gli 84
-  zeri quando spegne** (`wlc_phy_txpwrctrl_enable_nphy`, ramo `PHY_TPC_HW_OFF`), e il
-  commento a `phy_n.c:3796` lo dice gia'. La differenza e' **quante volte** si commuta,
-  e adesso si sa dove, perche' le scritture del port si attribuiscono alle regioni
-  passando dall'appaiamento: quelle dentro un blocco appaiato hanno il record del
-  vendore esatto, non stimato.
+  It is not that b43 writes where the device does not: **the reference too writes
+  the 84 zeros when it turns off** (`wlc_phy_txpwrctrl_enable_nphy`,
+  `PHY_TPC_HW_OFF` branch). The difference is **how many times** it switches, and
+  now where is known, because the port's writes are attributed to the regions
+  through the pairing: those inside a paired block have the vendor's exact record,
+  not an estimated one.
 
-  | regione | vendore | port |
+  | region | vendor | port |
   |---|---|---|
   | init | 13 | 13 |
-  | **cal PAPD** | **1** | **8** |
-  | ingresso RX IQ | 7 | 7 |
-  | sweep RX IQ | 9 | 9 |
-  | seconda cal RSSI | 0 | 0 |
-  | coda | 6 | 6 |
+  | **PAPD cal** | **1** | **8** |
+  | RX IQ entry | 7 | 7 |
+  | RX IQ sweep | 9 | 9 |
+  | second RSSI cal | 0 | 0 |
+  | tail | 6 | 6 |
 
-  **Tutte e sette le scritture di troppo stavano nella cal PAPD, e nessun'altra regione
-  ne aveva una di scarto.** Il device fa quella calibrazione riprogrammando la tabella
-  di potenza aggiustata **una volta sola**, alla fine; b43 la riprogrammava otto, con
-  le quattro parentesi di `pwr_ctl_open`/`close` — una per passata, due per catena — e
-  quelle interne di `txpwr_index`.
+  **All seven extra writes were in the PAPD cal, and no other region had one too
+  many.** The device does that calibration reprogramming the adjusted power table
+  **once**, at the end; b43 reprogrammed it eight times, with the four brackets of
+  `pwr_ctl_open`/`close` — one per pass, two per chain — and the inner ones of
+  `txpwr_index`.
 
-  **Chiuso**: una parentesi sola attorno a tutta la calibrazione, aperta prima del
-  ciclo per catena e chiusa dopo le righe dei filtri, che e' dove il device scrive la
-  tabella (#13921, subito dopo che le righe finiscono a #13918). Le passate il
-  controllo spento lo hanno ancora, e le parentesi interne diventano innocue da sole:
-  il ramo che spegne tocca la tabella **solo se il controllo e' davvero acceso**
-  nell'hardware, quindi trovano i bit gia' spenti e non emettono niente.
+  **Closed**: a single bracket around the whole calibration, opened before the
+  per-chain loop and closed after the rows of filters, which is where the device
+  writes the table (#13921, right after the rows end at #13918). The passes still
+  have the control off, and the inner brackets become harmless by themselves: the
+  turning-off branch touches the table **only if the control is really on** in the
+  hardware, so they find the bits already off and emit nothing.
 
-  Vale: la cal PAPD da 2573 op appaiate a **2644 su 2662**, le sue **spostate da 75 a
-  4**, lo sweep al **100%**, il totale delle spostate da 153 a **76**, i blocchi
-  contigui da 21239 a **21316**, i buchi da 112 a **105**. `MESSAGES.md#0029`. Le
-  assenti non si muovono, ed e' il punto: cambia **quando** il driver fa una cosa, non
-  se la fa.
+  Worth: the PAPD cal from 2573 paired ops to **2644 of 2662**, its **moved from 75
+  to 4**, the sweep at **100%**, total moved from 153 to **76**, contiguous blocks
+  from 21239 to **21316**, holes from 112 to **105**. `MESSAGES.md#0029`. The absent
+  do not move, and that is the point: it changes **when** the driver does a thing,
+  not whether it does it.
 
-  E cade il commento a `phy_n.c:7303`, che diceva che nella cattura ogni parentesi
-  aperta e' cio' che permette alla chiusura di riprogrammare la tabella, citando
-  quattro aperture a #12197, #12331, #13311, #13383: le aperture ci sono, ma non
-  riprogrammano niente. Resta **una** scrittura di scarto nella cal PAPD, 2 contro 1.
+  And the comment that said that in the capture every opened bracket is what lets
+  the closing reprogram the table, quoting four openings at #12197, #12331, #13311,
+  #13383, goes: the openings are there, but they reprogram nothing. **One** extra
+  write remains in the PAPD cal, 2 against 1.
 
-- **La riscrittura della riga 1 dei filtri TX: chiusa per il rev 8.**
-  `b43_nphy_int_pa_set_tx_dig_filters()` scrive le prime tre righe di
-  `tbl_tx_filter_coef_rev4` su `0x186`, `0x195` e `0x2c5`, quindici registri per
-  riga, e poi riscrive la riga 1 su `0x195` una seconda volta **solo** se
-  `phy.rev == 17`. Questo device e' rev 8 e lo fa: nella cattura i gruppi su `0x195`
-  sono **quattro** contro tre di `0x186` e due di `0x2c5` — `#304` e `#334` all'init,
-  `#13874` e `#13904` in coda alla cal — e i quindici valori sono **identici** nei
-  quattro. Contati sui due lati: `0x186` 45 e 45, `0x2c5` 30 e 30, `0x195` 60 e 30.
+- **The rewrite of row 1 of the TX filters: closed for rev 8.**
+  `b43_nphy_int_pa_set_tx_dig_filters()` writes the first three rows of
+  `tbl_tx_filter_coef_rev4` on `0x186`, `0x195` and `0x2c5`, fifteen registers per
+  row, and then rewrites row 1 on `0x195` a second time **only** if
+  `phy.rev == 17`. This device is rev 8 and does it: in the capture the groups on
+  `0x195` are **four** against three of `0x186` and two of `0x2c5` — `#304` and
+  `#334` at init, `#13874` and `#13904` at the end of the cal — and the fifteen
+  values are **identical** in all four. Counted on both sides: `0x186` 45 and 45,
+  `0x2c5` 30 and 30, `0x195` 60 and 30.
 
-  E' idempotente, quindi lo stato dei registri non cambia; il difetto e' la
-  **forma**. Le tre righe sono un blocco unico di quarantacinque scritture, e
-  quindici mancanti nel mezzo fanno cadere fuori posto tutto quello che segue. Con la
-  riscrittura la finestra `txdigi-filts` passa da "mancano 15" a **60 su 60**, le
-  finestre con divergenze dichiarate scendono da 7 a **6**, l'init guadagna 15 op
-  appaiate e le assenti totali scendono da 339 a **324**.
+  It is idempotent, so the state of the registers does not change; the defect is
+  the **shape**. The three rows are a single block of forty-five writes, and
+  fifteen missing in the middle put everything that follows out of place. With the
+  rewrite the `txdigi-filts` window goes from "15 missing" to **60 of 60**, the
+  windows with declared divergences go down from 7 to **6**, the init gains 15
+  paired ops and the total absent go down from 339 to **324**.
 
-  Il gate e' la revisione su cui e' misurato. brcmsmac nel percorso a 20 MHz non
-  scrive `0x195` due volte — `wlc_phy_ipa_set_tx_digi_filts_nphy` scrive le tre righe
-  e basta — quindi la cattura e' l'unica voce, e non e' una voce su nessun'altra
-  revisione.
+  The gate is the revision it is measured on. brcmsmac on the 20 MHz path does not
+  write `0x195` twice — `wlc_phy_ipa_set_tx_digi_filts_nphy` writes the three rows
+  and that is it — so the capture is the only voice, and it is no voice on any
+  other revision.
 
-  **Quello che resta** e' che nella cal PAPD le quindici op sono ora **spostate** e non
-  appaiate: la seconda occorrenza, a `#13904`, e' agganciata all'altra. Le spostate
-  della regione salgono da 60 a 75 e le assenti scendono da 29 a 14, cioe' il conto
-  totale migliora ma la coda della cal ha un ordine suo, ancora da guardare.
+  **What remains** is that in the PAPD cal the fifteen ops are now **moved** and
+  not paired: the second occurrence, at `#13904`, is latched onto the other one.
+  The region's moved go from 60 to 75 and its absent from 29 to 14, i.e. the total
+  count improves but the cal's tail has an order of its own, still to look at.
 
-- **`cal-papd`: restano fuori `a3`/`a2`**, due buchi da 349 e 276 op a caldo e 920 e
-  930 a freddo, perche' a freddo la ricerca dell'indice di gain e' completa.
-- Il buco **#190-254** di `switch_channel` non e' portabile, e non e' lo spurwar: in
-  brcmsmac entrambi i flag che accendono quel corpo, `nphy_gband_spurwar_en` e
-  `nphy_gband_spurwar2_en`, sono gateati `phy_rev < 7` in `wlc_phy_attach_nphy`,
-  quindi su rev 8 la funzione non fa niente — esattamente come lo stub di b43. Le op
-  che restano fuori sono `PHY.WR 0x1df = 0x1591`, `0x1e1 = 0x1591` e una `TBL.RD
-  id=0x7 off=0x106 len=2`; quei due indirizzi (`STRA_2U`/`STRA_2L`) in b43 esistono
-  solo come define e **brcmsmac non li scrive mai**. Stessa categoria di `RAD.RD
-  0x81`: op del vendore senza riferimento GPL, non si porta.
-- **Il ciclo di misura e' l'ACI scan.** Il nome sta in brcmsmac, che ne tiene il
-  **prototipo e non il corpo**: `int wlc_phy_aci_scan_nphy(struct brcms_phy *pi);`
-  in `phy/phy_int.h:1097`. ACI e' *adjacent channel interference*, e spiega la forma
-  che la cattura mostra: l'hop fuori canale ogni ~2 secondi, 100 campioni per core
-  su `0x1c9`/`0x1ca`, e l'assenza dal primo up. **Non e' `poll_rssi`**: quella
-  alterna i due registri e su rev 8 legge `0x219`/`0x21a`, mentre qui sono 100
-  consecutive su un registro e 100 sull'altro. E i due indirizzi su rev 8 non sono i
-  latch GPIO che dicono i nomi in `phy_n.h`: nella cattura **3400 letture e zero
-  scritture**. Il prototipo orfano e' il punto: e' una **politica** che sta sopra il
-  PHY, e il posto corrispondente in b43 e' la mitigazione dell'interferenza
-  (`B43_INTERFMODE_*`), che esiste solo per il G-PHY. `b43_nphy_rev8_chan_meas()` in
-  `0015` e' la sua primitiva di misura e resta senza chiamante finche' la politica
-  non c'e'.
+- **`cal-papd`: `a3`/`a2` stay out**, two holes of 349 and 276 ops hot and 920 and
+  930 cold, because cold the gain index search is complete.
+- The **#190-254** hole of `switch_channel` is not portable, and it is not the
+  spurwar: in brcmsmac both flags that turn that body on,
+  `nphy_gband_spurwar_en` and `nphy_gband_spurwar2_en`, are gated `phy_rev < 7` in
+  `wlc_phy_attach_nphy`, so on rev 8 the function does nothing — exactly like b43's
+  stub. The ops left out are `PHY.WR 0x1df = 0x1591`, `0x1e1 = 0x1591` and a
+  `TBL.RD id=0x7 off=0x106 len=2`; those two addresses (`STRA_2U`/`STRA_2L`) exist in
+  b43 only as defines and **brcmsmac never writes them**. Same category as
+  `RAD.RD 0x81`: vendor ops with no GPL reference, not ported. (The spur workaround
+  entry in "The ceiling" has since ported them on the capture alone, `0031`.)
+- **The measurement loop is the ACI scan.** The name is in brcmsmac, which keeps
+  its **prototype and not its body**: `int wlc_phy_aci_scan_nphy(struct brcms_phy *pi);`
+  in `phy/phy_int.h:1097`. ACI is *adjacent channel interference*, and it explains
+  the shape the capture shows: the off-channel hop every ~2 seconds, 100 samples per
+  core on `0x1c9`/`0x1ca`, and its absence from the first up. **It is not
+  `poll_rssi`**: that one alternates the two registers and on rev 8 reads
+  `0x219`/`0x21a`, while here they are 100 consecutive on one register and 100 on
+  the other. And on rev 8 the two addresses are not the GPIO latches the names in
+  `phy_n.h` say: in the capture **3400 reads and zero writes**. The orphan
+  prototype is the point: it is a **policy** that sits above the PHY, and the
+  corresponding place in b43 is the interference mitigation
+  (`B43_INTERFMODE_*`), which exists only for the G-PHY.
+  `b43_nphy_rev8_chan_meas()` in `0015` is its measurement primitive and stays
+  without a caller until the policy exists.
 
-## Una cosa dell'hardware, non del port
+## One thing of the hardware, not of the port
 
-In 26/27 oltre l'offset 576 la rilettura e' il valore scritto **mascherato a 9
-bit**, misurato su cinque celle su cinque (`0x24a`, `0x24c`, `0x25e` sui due core:
-scritto `0xffffffe9`, riletto `0x01e9`; scritto `0xffffffbb`, riletto `0x01bb`). I
-due lati scrivono lo **stesso** valore e il mirror delle tabelle nell'harness tiene i
-32 bit interi: **non e' stato mascherato di proposito**, perche' cinque celle di una
-regione in una cattura non giustificano una larghezza dentro lo strumento, e la
-divergenza e' inerte — il solo consumatore e' `b43_nphy_txpwr_index()`, che fa
-`(((s16)v) << 4) & 0x1ff0`, e `0xffffffe9` e `0x01e9` danno entrambi `0x1e90`. Costa
-due op sulla finestra `txpwr-index` e sta dichiarata la'.
+In 26/27 beyond offset 576 the readback is the written value **masked to 9
+bits**, measured on five cells out of five (`0x24a`, `0x24c`, `0x25e` on both
+cores: written `0xffffffe9`, read back `0x01e9`; written `0xffffffbb`, read back
+`0x01bb`). The two sides write the **same** value and the harness's table mirror
+keeps all 32 bits: **it was not masked on purpose**, because five cells of one
+region in one capture do not justify a width inside the tool, and the divergence
+is inert — the only consumer is `b43_nphy_txpwr_index()`, which does
+`(((s16)v) << 4) & 0x1ff0`, and `0xffffffe9` and `0x01e9` both give `0x1e90`. It
+costs two ops on the `txpwr-index` window and is declared there.
 
-## La struttura della cattura
+## The structure of the capture
 
-`wlc_phy_a4` è la cal PAPD e gira **una volta per init**; `a3_nphy` (147 righe)
-cerca l'indice di gain e **legge** la tabella epsilon, `a2_nphy` (279) la
-**scrive**. Mappa completa in `docs/papd-cal-map.md`, flusso affiancato dei due
-driver in `docs/init-flow.md`.
+`wlc_phy_a4` is the PAPD cal and runs **once per init**; `a3_nphy` (147 lines)
+looks for the gain index and **reads** the epsilon table, `a2_nphy` (279)
+**writes** it. Full map in `docs/papd-cal-map.md`, the two drivers' flows side by
+side in `docs/init-flow.md`.
 
-`do_full_init` (b43) == `phy_init_por` (brcmsmac): dietro ci stanno il download
-delle tabelle statiche e rcal/rccal.
+`do_full_init` (b43) == `phy_init_por` (brcmsmac): behind it are the download of
+the static tables and rcal/rccal.
 
-Dentro `up-ch1` la cal PAPD si legge cosi', ed e' il modo in cui va citata: blocchi
-a #10966 (847 op), #11822 (334), #12784 (145), #12936 (334), #13752 (90), #13856
-(48), #13921 (172).
+Inside `up-ch1` the PAPD cal reads like this, and it is how it is to be quoted:
+blocks at #10966 (847 ops), #11822 (334), #12784 (145), #12936 (334), #13752 (90),
+#13856 (48), #13921 (172). (Block positions of an earlier pairing; the current
+shape of the phase is `792 518 2x381 371`, see "State".)
 
-**Le catture sono due e servono a cose diverse.** `opinit-ch1-ch6-bw20.decoded`
-(70796 record) e' il riferimento di tutto quello che sta qui sopra: e' un init **a
-caldo** e non contiene il download statico — l'apertura della tabella 10 non compare
-in nessuno dei suoi due init — e per questo il flow `init` fa due init e traccia
-solo il secondo. `full-init-ch1-bw20.decoded` (81397 record) e' un init **a
-freddo**, ed e' la sola che contenga le tabelle di init: contro quella, col flow
-`initpor`, il port **le riproduce op per op** — 1424/1424 sulla tabella 13 e 806/806
-sulla 18, finestre `static-tables` e `static-tables-2`, le uniche due che dichiarano
-`capture=`. Ha un buco da 65285 record oltre #32769, quindi solo #2-32769 e'
-confrontabile posizionalmente.
+**There are two captures and they serve different purposes.**
+`opinit-ch1-ch6-bw20.decoded` (70796 records) is the reference of everything
+above: it is a **hot** init and does not contain the static download — the
+opening of table 10 appears in neither of its two inits — and that is why the
+`init` flow does two inits and traces only the second. `full-init-ch1-bw20.decoded`
+(81397 records) is a **cold** init, and the only one that contains the init
+tables: against it, with the `initpor` flow, the port **reproduces them op for
+op** — 1424/1424 on table 13 and 806/806 on table 18, windows `static-tables` and
+`static-tables-2`, the only two that declare `capture=`. It has a 65285-record
+hole beyond #32769, so only #2-32769 can be compared positionally.
 
-I numeri di record qui e nei documenti sono di `opinit-*` quando non e' detto
-altrimenti: gli intervalli esistono in entrambi i file e **non si
-autoidentificano**.
+The record numbers here and in the documents are `opinit-*`'s unless said
+otherwise: the ranges exist in both files and **do not identify themselves**.
 
-In mainline la cal periodica non parte: `perical = 2`, e il ramo che ne consegue in
-`b43_phy_initn` è un `;/* TODO */`. `0012` ci mette l'init delle tabelle PAPD e
-`0014` la sequenza del vendore, gateata su phy rev 8 e radio rev 8. Il flow `full`
-non si muove, perché mette `perical = 0` e prende l'altro ramo. `initpor` e' l'unico
-flow che traccia un init a freddo **con** le cal: non azzera `perical`, quindi passa
-dal ramo di `0014`.
+In mainline the periodic cal does not start: `perical = 2`, and the branch that
+follows in `b43_phy_initn` is a `;/* TODO */`. `0012` puts the init of the PAPD
+tables there and `0014` the vendor's sequence, gated on phy rev 8 and radio rev
+8. The `full` flow does not move, because it sets `perical = 0` and takes the
+other branch. `initpor` is the only flow that traces a cold init **with** the
+cals: it does not clear `perical`, so it goes through `0014`'s branch.
 
-## Le finestre, che sono due: una per comportamento
+## The regions, which are two: one per behaviour
 
-`CONTIG` in `phase_compare.py` ha **due** voci, e sono la stessa macro operazione
-nei suoi due comportamenti. Non sono due fasi: sono due strade che il codice
-prende, e una fase di calibrazione verificata contro una cattura sola valida un
-ramo e non dice niente dell'altro.
+`CONTIG` in `phase_compare.py` has **two** entries, and they are the same macro
+operation in its two behaviours. They are not two phases: they are two roads the
+code takes, and a calibration phase checked against a single capture validates
+one branch and says nothing about the other.
 
-| finestra | cattura | flow | op | in blocchi |
+| region | capture | flow | ops | in blocks |
 |---|---|---|---|---|
-| `up-ch1` | `opinit-*`, init a caldo | `txpower` | 23060 | **21316, 92%** |
-| `up-ch1-freddo` | `full-init-*`, init completo | `initpor` | 27704 | **21364, 77%** |
+| `up-ch1` | `opinit-*`, hot init | `txpower` | 23060 | **21529, 93%** |
+| `up-ch1-freddo` | `full-init-*`, full init | `initpor` | 27704 | **21364, 77%** |
 
-`up-ch1` comincia dove comincia `switch_channel` — la `CHANSPEC` di **#132**, che
-il tracer emette e il port no — e finisce col **MAC abilitato che trasmette**,
-#26100. Nessuna ancora: la finestra e' tutta la run, quindi i blocchi si trovano
-sull'intero output del flow senza agganciarsi a un'op scelta a mano.
+`up-ch1` starts where `switch_channel` starts — the `CHANSPEC` at **#132**, which
+the tracer emits and the port does not — and ends with the **MAC enabled and
+transmitting**, #26100. No anchor: the region is the whole run, so the blocks are
+found over the whole output of the flow without latching onto an op picked by
+hand.
 
-`up-ch1-freddo` parte dalla `CHANSPEC` di **#339** e finisce a **#32769**, che non
-e' il MAC abilitato ma il limite di confrontabilita'. Copre **piu'** dell'altra
-perche' contiene il download delle tabelle statiche, che a caldo non c'e' — si
-vedono come blocchi da **1424** e **806** op.
+`up-ch1-freddo` starts from the `CHANSPEC` at **#339** and ends at **#32769**,
+which is not the MAC enabled but the limit of comparability. It covers **more**
+than the other because it contains the download of the static tables, which is
+not there hot — they show as blocks of **1424** and **806** ops.
 
-Tutto cio' che precede, **#1-131, e' `op_init` e `rfkill`**: e' lo stato che questa
-finestra non puo' avere, e si **semina** invece di tracciarlo (sotto).
+Everything before, **#1-131, is `op_init` and `rfkill`**: it is the state this
+region cannot have, and it is **seeded** instead of traced (below).
 
-Le region per fase sono state provate e togliere, e non e' un ripensamento estetico:
-**una fase presa da sola non dice niente su cio' che le arriva addosso da prima**.
-La finestra `chanswitch-ch6` dice 33/39 e "nessuna op mancante", e la fase intera
-sta al **14%**, perche' il 62% e' un ciclo di misura che il port non fa affatto. Il
-verdetto di `up-ch1` e' la **struttura dei blocchi**, non una percentuale: un blocco
-che si accorcia e' una regressione anche se il totale sale.
+Per-phase regions were tried and removed, and it is not an aesthetic second
+thought: **a phase taken alone says nothing about what lands on it from
+before**. The `chanswitch-ch6` window says 33/39 and "no missing op", and the
+whole phase is at **14%**, because 62% of it is a measurement loop the port does
+not do at all. The verdict of `up-ch1` is the **structure of the blocks**, not a
+percentage: a block that gets shorter is a regression even if the total goes up.
 
-Due cose sulla lettura del report:
+Two things on reading the report:
 
-- **`minsize` filtra la stampa, non il conteggio.** Filtrarlo anche nel totale
-  toglie ~630 op vere in run piu' corte di 16. Un buco stampato puo' contenere run
-  brevi.
-- **"Zero occorrenze" non prova niente.** Puo' voler dire che il tracer non guarda o
-  che `wl` non lo fa, e le due hanno conseguenze opposte sul port. Si risolve
-  guardando **dove l'accesso passa**:
-  - `PMU.`: `wl-diag` aggancia `si_pmu_spuravoid` (il decoder lo stampa `PMU.SPUR`)
-    e la funzione e' quella che mainline chiama `bcma_pmu_spuravoid_pllupdate`
-    (`drivers/bcma/driver_chipcommon_pmu.c:493`), cioe' esiste ed e' agganciabile:
-    zero occorrenze vuol dire che **wl non la chiama**, e il `PMU.SPUR` del port e'
-    una divergenza vera.
-  - `MMIO.` e' in deroga, ma la motivazione giusta e' il **livello**, non il
-    conteggio: quegli accessi il vendore li registra come **`SI.COREREG`** (54 nella
-    cattura, `core=0x0`, `off=0x64` e `0x6c`), quindi cercare `MMIO.` non prova
-    niente. `0x492` e' `psm_phy_hdr_param`, e in brcmsmac ci si arriva con un
-    `bcma_write16` **diretto**, non con un accessor (in
-    `wlc_phy_chanspec_nphy_setup`, bit in `d11.h:978`): un tracer che aggancia
-    funzioni non lo vede.
-  - `PHY.CLK`: la deroga regge, ma **era valutata contro l'accessor sbagliato**.
-    `b43_phy_force_clock()` corrisponde a `wlapi_bmac_phyclk_fgc` →
-    `brcms_b_phyclk_fgc` (`main.c:1716`), non a `brcms_b_core_phy_clk`. `wl-diag`
-    aggancia `wlc_bmac_core_phy_clk`, che e' un'altra funzione: quindi
-    `phyclk_fgc` **non e' agganciato** e le sue op non sono osservabili in queste
-    catture. E il port fa la cosa giusta — `b43_nphy_reset_cca()` e
-    `wlc_phy_resetcca_nphy()` sono identiche, `fgc(ON)`, BBCFG, `fgc(OFF)`,
-    `RESET2RX` — quindi le `PHY.CLK` che il vendore non ha sono un buco del
-    tracer, non del port, e `PORT_UNSHOWABLE` le toglie dal flusso del port perche'
-    un'op non osservabile sfasa il confronto posizionale. Per chiuderla del tutto:
-    un hook su `phyclk_fgc` e una cattura nuova. `MAC.FREQ` resta in deroga non dimostrata come prima
-    (`brcms_b_switch_macfreq`, agganciato in `wl-diag`, quindi zero occorrenze
-    vorrebbe dire che wl non lo chiama: da riverificare su una cattura nuova).
+- **`minsize` filters the printing, not the count.** Filtering it in the total
+  too removes ~630 real ops in runs shorter than 16. A printed hole can contain
+  short runs.
+- **"Zero occurrences" proves nothing.** It can mean the tracer does not look or
+  that `wl` does not do it, and the two have opposite consequences for the port.
+  It is settled by looking at **where the access goes through**:
+  - `PMU.`: `wl-diag` hooks `si_pmu_spuravoid` (the decoder prints it `PMU.SPUR`)
+    and the function is the one mainline calls `bcma_pmu_spuravoid_pllupdate`
+    (`drivers/bcma/driver_chipcommon_pmu.c:493`), i.e. it exists and can be hooked:
+    zero occurrences means **wl does not call it**, and the port's `PMU.SPUR` is a
+    real divergence.
+  - `MMIO.` has an exception, but the right motivation is the **level**, not the
+    count: the vendor records those accesses as **`SI.COREREG`** (54 in the
+    capture, `core=0x0`, `off=0x64` and `0x6c`), so looking for `MMIO.` proves
+    nothing. `0x492` is `psm_phy_hdr_param`, and in brcmsmac it is reached with a
+    **direct** `bcma_write16`, not with an accessor (in
+    `wlc_phy_chanspec_nphy_setup`, bit in `d11.h:978`): a tracer that hooks
+    functions does not see it.
+  - `PHY.CLK`: the exception holds, but **it was evaluated against the wrong
+    accessor**. `b43_phy_force_clock()` corresponds to `wlapi_bmac_phyclk_fgc` →
+    `brcms_b_phyclk_fgc` (`main.c:1716`), not to `brcms_b_core_phy_clk`.
+    `wl-diag` hooks `wlc_bmac_core_phy_clk`, which is another function: so
+    `phyclk_fgc` **is not hooked** and its ops are not observable in these
+    captures. And the port does the right thing — `b43_nphy_reset_cca()` and
+    `wlc_phy_resetcca_nphy()` are identical, `fgc(ON)`, BBCFG, `fgc(OFF)`,
+    `RESET2RX` — so the `PHY.CLK`s the vendor does not have are a hole of the
+    tracer, not of the port, and `PORT_UNSHOWABLE` removes them from the port's
+    flow because an unobservable op shifts the positional comparison. To close it
+    fully: a hook on `phyclk_fgc` and a new capture. `MAC.FREQ` stays an
+    undemonstrated exception as before (`brcms_b_switch_macfreq`, hooked in
+    `wl-diag/3-4/`, so zero occurrences would mean wl does not call it: to be
+    checked again on a new capture).
 
-  Regola: una deroga si dichiara **contro un hook mancante**, mai contro un
-  conteggio a zero, e **mai su una famiglia intera quando dentro c'e' un'op che il
-  driver dovrebbe fare**: la deroga `OBJ.WR` dice che l'harness non puo' emettere
-  object memory in modo confrontabile, non che b43 possa non scrivere la SHM. Ci sono
-  cascato su `M_CTS_DURATION` — e prima di dichiararla si guarda se **l'accessor esiste**. E
-  non basta che *un* accessor della famiglia sia agganciato: **si guarda da che
-  accessor passa quell'accesso.** La object memory lo insegna: `write_objmem16` era
-  agganciata, ma una regione letta 192 volte e mai scritta la scrive
-  `copyto_objmem`, che dentro chiama `write_objmem` e non la variante `*16`, che non
-  era agganciata (`gap-inventory.md` 4i). La famiglia e' grande — in brcmsmac sono
-  **66 `brcms_b_*`** — e `wl-diag` ne agganciava **dieci**: le mancanti erano la
-  ragione di tutte e tre le deroghe. Aggiunte `read_shm`, `write_shm`, `set_shm`
-  (offset in **byte**, lo stesso livello di `b43_shm_*16`: e' cio' che rende
-  confrontabili i **677 offset SHM** che prima erano rumore), `core_phy_clk`,
-  `switch_macfreq`, e `suspend_mac_and_wait`/`enable_mac`, che danno il confine **MAC
-  abilitato** su cui finisce `up-ch1`.
+  Rule: an exception is declared **against a missing hook**, never against a zero
+  count, and **never on a whole family when inside it there is an op the driver
+  should do**: the `OBJ.WR` exception says the harness cannot emit object memory
+  in a comparable way, not that b43 may skip writing the SHM. That was fallen into
+  with `M_CTS_DURATION` — and before declaring it one looks at whether **the
+  accessor exists**. And it is not enough that *an* accessor of the family is
+  hooked: **one looks at which accessor that access goes through.** Object memory
+  teaches it: `write_objmem16` was hooked, but a region read 192 times and never
+  written is written by `copyto_objmem`, which internally calls `write_objmem` and
+  not the `*16` variant, which was not hooked (`gap-inventory.md` 4i). The family
+  is large — in brcmsmac there are **66 `brcms_b_*`** — and `wl-diag` hooked **ten**:
+  the missing ones were the reason for all three exceptions. Added (in `3-4/`
+  only) `read_shm`, `write_shm`, `set_shm` (offset in **bytes**, the same level as
+  `b43_shm_*16`: that is what makes the **677 SHM offsets** comparable, which
+  before were noise), `core_phy_clk`, `switch_macfreq`, and
+  `suspend_mac_and_wait`/`enable_mac`, which give the **MAC enabled** boundary
+  `up-ch1` ends on.
 
-  Gli accessi che **non** passano da un accessor restano non osservabili, e la deroga
-  si dichiara contro quello. Una variante che marcava l'ingresso delle funzioni del
-  PHY e' stata provata e **togliere di proposito**: marcare le funzioni interne
-  produce una mappa della struttura del driver del vendore, che e' cosa diversa
-  dall'osservare l'hardware e molto piu' facile da contestare. Un confine di fase si
-  ricava dalle op degli accessor, e `MAC.SUSP`/`MAC.EN` ne danno uno esplicito. Vale
-  per le **catture nuove**.
+  Accesses that do **not** go through an accessor stay unobservable, and the
+  exception is declared against that. A variant that marked the entry of the
+  PHY's functions was tried and **removed on purpose**: marking internal functions
+  produces a map of the structure of the vendor's driver, which is something other
+  than observing the hardware and much easier to contest. A phase boundary is
+  derived from the accessors' ops, and `MAC.SUSP`/`MAC.EN` give an explicit one.
+  It holds for **new captures**.
 
-Il gate `!do_full_init` sulla coda della cal periodica **non va messo**, e il motivo
-e' istruttivo: la finestra fredda contiene le **prime nove op** di quella fase e poi
-finisce, perche' a #32769 comincia il buco da 65285 record. Gli ultimi record della
-cattura fredda, #32753-32769, sono le stesse op nello stesso ordine di #23761-23777
-nella cattura calda: il vendore la fase la comincia anche a freddo, e il buco la
-taglia. **Gatare la' vorrebbe dire gatare contro un buco**, che e' lo stesso errore
-di gatare contro un conteggio a zero.
+The `!do_full_init` gate on the tail of the periodic cal **is not to be added**,
+and the reason is instructive: the cold region contains the **first nine ops** of
+that phase and then ends, because at #32769 the 65285-record hole begins. The last
+records of the cold capture, #32753-32769, are the same ops in the same order as
+#23761-23777 in the hot capture: the vendor starts the phase cold too, and the
+hole cuts it. **Gating there would be gating against a hole**, which is the same
+mistake as gating against a zero count.
 
-## I seed, e quanto valgono
+## The seeds, and what they are worth
 
-`reverse-tools/gen_seed.py --before 132` guarda **solo i record che precedono la
-finestra** ed emette `test/unit/seed_up.h`, che `main.c` applica dopo l'init a freddo e
-prima di quello tracciato. Due categorie:
+`reverse-tools/gen_seed.py --before 132` looks **only at the records that precede
+the region** and emits `test/unit/seed_up.h`, which `main.c` applies after the
+cold init and before the traced one. Two categories:
 
-1. cio' che `op_init` e `rfkill` hanno programmato;
-2. cio' il cui **primo accesso nella cattura e' una read**: nessuno l'ha scritto,
-   quindi e' il default del chip. Il criterio non e' "mai scritto" — `0x17d` la cal
-   la scrive, ma **dopo** averla letta. Con questo entrano le due `atten` del
-   coupler a `0xaa`, che erano l'ultimo buco di valore della cal PAPD.
+1. what `op_init` and `rfkill` programmed;
+2. what is **first accessed in the capture by a read**: nobody wrote it, so it is
+   the chip's default. The criterion is not "never written" — the cal writes
+   `0x17d`, but **after** reading it. This brings in the coupler's two `atten` at
+   `0xaa`, which were the last value hole of the PAPD cal.
 
-Totale 68 phy e 70 radio, di cui 91 default. **Misurato: valgono 32 op su 23068**,
-quindi cio' che non combacia **non e' stato mancante, e' codice**. Il meccanismo
-resta perche' e' corretto e servira' quando i buchi si chiudono, non perche' sia la
-leva. Non farlo sembrare la leva.
+68 phy and 70 radio in all, of which 91 defaults. **Measured: they are worth 32
+ops out of 23068**, so what does not match **is not missing state, it is code**.
+The mechanism stays because it is correct and will be needed when the holes
+close, not because it is the lever. Do not make it look like the lever.
 
-Per le **celle di tabella** il confine del seme e' per forza diverso da quello dei
-registri. Per i registri si guarda solo prima della finestra; una cella come
-`15/0x50` non e' scritta da nessuna parte nella cattura, perche' il download statico
-che l'ha riempita e' di un boot precedente. Il suo stato all'ingresso e' osservabile
-**solo dalla prima read dentro la finestra**, e due condizioni tengono onesta la
-regola: si semina la cella che nessuna write per porta ha toccato prima di quella
-read — se la finestra ci ha scritto, il valore e' cio' che la finestra deve
-calcolare — e il cui valore **non cambia** fra le read, perche' se cambia e'
-l'hardware che ci scrive dentro la finestra ed e' lavoro di un piano. Sono **39
-celle**; le 5 che restano fuori dalle 44 a valore fisso sono quelle che una write per
-porta aveva toccato.
+For **table cells** the boundary of the seed is necessarily different from the
+registers'. For registers one looks only before the region; a cell like
+`15/0x50` is written nowhere in the capture, because the static download that
+filled it belongs to a previous boot. Its state at the entry is observable **only
+from the first read inside the region**, and two conditions keep the rule honest:
+the cell is seeded only if no port write touched it before that read — if the
+region wrote it, the value is what the region has to compute — and only if its
+value **does not change** between the reads, because if it changes it is the
+hardware writing into it inside the region, and that is a plan's job. They are
+**39 cells**; the 5 left out of the 44 with a fixed value are those a port write
+had touched.
 
-## Regole
+## Rules
 
-- **Le misure stanno negli strumenti**, non in script usa-e-getta: vanno rifatte.
-- **La doc può essere stale.** Ne ho corretta parecchia; non fidarsi, riverificare.
-- I riferimenti `file:riga` vanno controllati sul tree **pristine**, non su quello
-  con le patch applicate.
-- **Delimitare la fase** prima di contare, con un'op che la chiuda (es. il primo
-  `CHANSPEC` per l'init del radio), non a occhio su un intervallo di record.
-- **`Op.ep` è l'unico modo** di sapere da che record viene un'op: `load_vendor`
-  scarta bookkeeping e ombre, quindi indice ≠ numero di record.
-- **Quando una fase fa zero e le op ci sono, sospettare il valore prima del punto di
-  chiamata.** `coeff-setup` ha detto zero per tre sessioni e la colpa era di
-  `tbl_port_get()` in `wrap.c`, che non faceva avanzare l'indirizzo in lettura.
-- **Quando una cella di tabella diverge, guardare la sua storia prima del flusso del
-  riferimento**: `trace_tables.py --cell ID:OFF` la stampa, letture comprese, e
-  distingue le write che cambiano il valore da quelle idempotenti.
-- **Un conteggio che torna non prova che il comportamento sia giusto.** 35 write
-  uguali a 35 con la sequenza ancora sbagliata e' successo, e ha costato 151 op
-  contigue.
-- **Contare occorrenze di un'op senza verificare cosa quell'op significhi** e' la
-  fonte di tutte e tre le ritrattazioni di questo file: i due versi di
-  `b43_nphy_tx_power_ctrl()` si distinguono solo dal **payload** (84 zeri =
-  spegnimento), e in b43 hanno perfino forme d'op diverse — l'accensione emette
-  `TBL.WR`, lo spegnimento scrive a mano la porta e non ne emette. Il tracer del
-  vendore aggancia la funzione di tabella e vede i due versi allo stesso modo,
-  quindi i suoi conteggi **non sono confrontabili** con i nostri per op.
-- **Un marcatore va verificato che marchi una cosa sola.** `TBL.RD 7/0x110 len=2`
-  non e' della parentesi: lo legge anche `b43_nphy_get_tx_gains()`, con la condizione
-  **opposta**.
-- **Quando un numero scende, misurare la regione da sola prima di chiamarla
-  regressione**: l'assegnazione dei blocchi e' esclusiva e golosa, e un blocco puo'
-  cambiare mano senza che niente sia peggiorato.
-- **Prima di dire che un cambiamento non serve perche' la fase non si muove,
-  guardare i blocchi**: la metrica per fase ignora i frammenti di proposito, e
-  sotto-riporta un fix giusto.
-- **Prima di dire che il port fa qualcosa in piu', guardare se il riferimento GPL lo
-  fa** — e se lo fa, la domanda e' se il tracer possa vederlo.
-- **La precedenza e': la cattura, poi brcmsmac.** brcmsmac serve a capire la forma e a
-  dare i nomi, e per quello e' insostituibile; ma e' molto piu' vecchio del driver che
-  ha prodotto queste catture, e ogni volta che i due hanno litigato aveva torto lui
-  (indice di precal, raggruppamento dell'rccal, indice riforzato in coda). Un
-  cambiamento **non** si giustifica con brcmsmac contro una misura: si va a cercare
-  nella cattura la prova diretta, che di solito c'e'.
-- **Un difetto che sembra tale va misurato prima di crederci.** Il degrado
-  `type = 2 -> 0` in `b43_nphy_cal_rx_iq()` era dato per difetto da sempre;
-  togliendolo il port peggiorava di 476 op, perche' il difetto vero era a monte
-  (`bool` invece del modo del test DAC).
-- **Il controllo di un build e' lo stato di uscita, non un grep.** La riga di
-  compilazione contiene `-Werror`, quindi `grep error` matcha sempre:
+- **Measurements live in the tools**, not in throwaway scripts: they have to be
+  redone.
+- **The documentation can be stale.** A lot of it has been corrected; do not
+  trust it, check again.
+- `file:line` references to mainline are checked on the **pinned** tree, not on
+  `b43/`; references to `b43/` say so.
+- **Delimit the phase** before counting, with an op that closes it (e.g. the
+  first `CHANSPEC` for the radio init), not by eye on a range of records.
+- **`Op.ep` is the only way** to know which record an op comes from:
+  `load_vendor` drops bookkeeping and shadows, so index ≠ record number.
+- **When a phase scores zero and the ops are there, suspect the value before the
+  call site.** `coeff-setup` said zero for three sessions and the fault was in
+  `tbl_port_get()` in `wrap.c`, which did not advance the address on reads.
+- **When a table cell diverges, look at its history before the reference's
+  flow**: `trace_tables.py --cell ID:OFF` prints it, reads included, and tells the
+  writes that change the value from the idempotent ones.
+- **A count that adds up does not prove the behaviour is right.** 35 writes equal
+  to 35 with the sequence still wrong has happened, and it cost 151 contiguous
+  ops.
+- **Counting occurrences of an op without checking what that op means** is the
+  source of all three retractions in this file: the two directions of
+  `b43_nphy_tx_power_ctrl()` are told apart only by the **payload** (84 zeros =
+  turning off), and in b43 they even had different op shapes. The vendor's tracer
+  hooks the table function and sees both directions the same way, so its counts
+  **are not comparable** with ours op by op unless the shapes match.
+- **A marker has to be checked to mark one thing only.** `TBL.RD 7/0x110 len=2`
+  does not belong to the bracket: `b43_nphy_get_tx_gains()` reads it too, with the
+  **opposite** condition.
+- **When a number goes down, measure the region alone before calling it a
+  regression**: the assignment of blocks is exclusive and greedy, and a block can
+  change hands without anything getting worse.
+- **Before saying a change is not needed because the phase does not move, look at
+  the blocks**: the per-phase metric ignores fragments on purpose, and
+  under-reports a right fix.
+- **Before saying the port does something extra, look at whether the GPL
+  reference does it** — and if it does, the question is whether the tracer can see
+  it.
+- **The precedence is: the capture, then brcmsmac.** brcmsmac serves to
+  understand the shape and to give the names, and for that it is irreplaceable;
+  but it is much older than the driver that produced these captures, and every
+  time the two disagreed it was wrong (precal index, rccal grouping, index forced
+  again at the tail). A change is **not** justified by brcmsmac against a
+  measurement: one goes looking in the capture for the direct proof, which is
+  usually there.
+- **A defect that looks like one has to be measured before believing it.** The
+  `type = 2 -> 0` downgrade in `b43_nphy_cal_rx_iq()` had always been taken for a
+  defect; removing it the port got worse by 476 ops, because the real defect was
+  upstream (`bool` instead of the DAC test mode).
+- **The check of a build is the exit status, not a grep.** The compile line
+  contains `-Werror`, so `grep error` always matches:
   `if make KDIR=... >/tmp/b.log 2>&1; then echo OK; else grep -E 'error:' /tmp/b.log; fi`
-- **La riga `N finestre: X da guardare` va letta a ogni giro**, non solo il totale:
-  e' l'unica cosa che dice se un cambiamento ha rotto un'ancora, e le due misure
-  grandi non se ne accorgono.
-- Ogni patch dietro un gate di revisione, verificato con `check_patch_gating.py`.
-  Eccezioni dichiarate, tutte e sole per refusi di trascrizione da brcmsmac in
-  codice condiviso: `b43/MESSAGES.md#0010` e la mainline
-  `b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7`. Un refuso non e'
-  una feature di questo hardware e dietro un gate non ci va.
-- Niente commenti "prima era così": quelli vanno nel messaggio di commit. Vale anche
-  per i delta di misura — `da X a Y` in un commento e' storia.
-- **Provenienza in trailer**: `Link:` per ogni URL, uno per riga — e' il nome che
-  il kernel conosce, non `Reference:`/`Capture:`/`Tool:`. Il sorgente del kernel si
-  cita su **git.kernel.org** pinnato allo sha: `...phy_n.c?id=848acc8ffe1b#n23018`,
-  o la riga scivola. La cattura ha un `Link:` al file e, **nel corpo**, l'intervallo
-  di record e la prima op con la spaziatura del file, che si ritrova con `grep -F`:
-  4,4 MB e 70796 righe, GitHub non la rende e un'ancora di riga non porta da nessuna
-  parte. `From:` e `Signed-off-by` vanno **entrambi** su
-  `alessio.ferri@mythread.it`, che e' l'indirizzo da cui le patch partono e quello
-  dei sette commit gia' merged; il gmail non si usa. Corpo a 75 colonne.
-- **SALAME** in grassetto sulle ipotesi non verificate sul comportamento del
-  codice, **TONNO** sulle risposte infondate.
+- **The `N finestre: X da guardare` line has to be read at every round**, not only
+  the total: it is the only thing that says whether a change broke an anchor, and
+  the two big measures do not notice.
+- Every patch behind a revision gate, checked with `check_patch_gating.py`.
+  Declared exceptions, all and only for transcription typos from brcmsmac in
+  shared code: `b43/MESSAGES.md#0010` and the mainline
+  `b43-program-the-fifth-tx-power-up-override-on-n-phy-rev-7`. A typo is not a
+  feature of this hardware and does not go behind a gate. The list of the six
+  points the tool flags is in `patches/b43/NOTES.md`.
+- No "it used to be like this" comments: those go in the commit message. It also
+  holds for measurement deltas — `from X to Y` in a comment is history.
+- **Provenance in trailers**: `Link:` for every URL, one per line — it is the name
+  the kernel knows, not `Reference:`/`Capture:`/`Tool:`. Kernel sources are cited
+  on **git.kernel.org** pinned to the sha: `...phy_n.c?id=848acc8ffe1b#n23018`, or
+  the line slips. A link into this repository is pinned to a sha too, because
+  paths here move. The capture has a `Link:` to the file and, **in the body**, the
+  record range and the first op with the file's spacing, which `grep -F` finds:
+  4.4 MB and 70796 lines, GitHub does not render it and a line anchor leads
+  nowhere. `From:` and `Signed-off-by` both go on `alessio.ferri@mythread.it`,
+  which is the address the patches leave from and the one of the seven commits
+  already merged; the gmail one is not used. Body at 75 columns.
+- **SALAME** in bold on unverified hypotheses about the behaviour of the code,
+  **TONNO** on unfounded answers.
 
-## Trappole in cui sono già caduto
+## Traps already fallen into
 
-1. **Usato il blob fuori dal perimetro che `PROVENANCE.md` dichiara.** Quel file
-   dice da sempre che del blob servono i **simboli con le size** (per le tabelle) e
-   i **prologhi degli accessor** (per sapere se il detour tiene), perche' il
-   prodotto di quell'analisi e' il tracer. Per attribuire il ciclo di misura ho
-   disassemblato corpi di funzione ed elencato chiamanti: conclusioni giuste, fonte
-   sbagliata, rifatte su `brcmsmac` che le aveva tutte. **Le domande sul
-   comportamento vanno a `brcmsmac` prima**, e `PROVENANCE.md` si legge prima di
-   aprire il blob, non dopo.
-2. Costruito l'harness contro un albero diverso da quello che credevo, e letto i
-   risultati come regressioni. I file del port ora vengono sempre da `b43/`, e
-   `KDIR` conta solo per cio' che il port non tocca: deve essere l'albero pinnato,
-   e `git -C ~/src/pin status` deve essere vuoto prima di credere a un numero.
-3. Citato numeri di riga di `b43/` come se fossero del pinnato: `phy_n.c:4021`
-   invece di `3950`.
-4. Contata una fase su una finestra a occhio che ne mescolava tre, e concluso il
-   falso ("70 registri sottoinsieme dei 412" — 32 su 70 avevano valore diverso).
-5. Ricostruito a mano la corrispondenza op→record: deriva fino a 230 op.
-6. Attribuito al "core non compilato" op che erano in codice compilato e non
-   chiamato (`b43_software_rfkill` era uno stub vuoto in `wrap.c`).
-7. Creduto a un'ancora di `phase_compare.py` mai trovata (`0x186 val=0x100`, che
-   nella cattura non esiste): una finestra `pending` con ancora impossibile non
-   fallisce mai e non dice niente.
-8. Scritto "serve una lettura su hardware" quando il valore era nella cattura.
-9. **Creduto a una finestra che si e' rotta, invece di guardare su cosa era
-   agganciata.** `recalc-txpower` e' passata da 519/519 a 432/519 aggiungendo la coda
-   della cal periodica, e sembrava una regressione del driver. Era l'ancora: la
-   finestra prendeva la **terza** apertura di `26/0x0`, che era la recalc del port
-   finche' la sequenza girava altrove, e che con la sequenza in coda a recalc e'
-   diventata il power setup della coda della cal. Confrontava la recalc del vendore
-   con la coda del port. Corretta l'ancora alla seconda, la finestra torna 519/519
-   **con** la modifica dentro. Un'ancora ordinale si sposta quando il codice si
-   sposta: quando una finestra si rompe, prima si guarda dove e' atterrata.
-10. **Creduto a una misura per regione non ancorata.** Una fetta di 1402 op del
-    vendore confrontata contro le 24000 del port dava 92% in 31 blocchi, e da quei
-    31 blocchi ho dedotto una frammentazione dentro `b43_nphy_txpwr_index()`. Non
-    c'era: i blocchi si spargevano su 14065 op di traccia, cioe' erano le dieci
-    scritture da 84 zeri identiche fra loro, prese ognuna da un punto diverso. Il
-    totale della finestra intera non ha questo problema, perche' la fetta e'
-    l'intera run. Regola: **prima di leggere un numero per regione, guardare dove
-    atterrano i blocchi.** `phase_compare.py --global-run` ora lo stampa da solo.
-11. Misurato su un flow diverso da quello che la regione dichiara: `up-ch1` dichiara
-   `flow=('txpower', '1')`, che e' init **piu'** `recalc_txpower`. Il commento
-   accanto alla regione lo spiega.
-12. I **bit di esecuzione** si perdono a ogni merge fatto applicando il diff
-    (`git apply` senza `--index` non li mette nell'indice). Sette volte finora:
-    `sh scripts/check-exec-bits.sh`.
-13. **Tagliato un testo misto di note e diff per numero di righe**, e prima ancora
-    sul primo `---`: ma le note usano `---` anche fra un incremento e l'altro, e
-    sono sparite 73 righe di incrementi, due volte (la testa del vecchio rollup,
-    oggi `patches/b43/NOTES.md`). Si taglia sul primo `diff --git`, e si
-    controlla che il pezzo sopravvissuto combaci col sorgente prima di ricucire.
+1. **Used the blob outside the perimeter `PROVENANCE.md` declares.** That file has
+   always said that what is needed from the blob is the **symbols with their
+   sizes** (for the tables) and the **prologues of the accessors** (to know whether
+   the detour holds), because the product of that analysis is the tracer. To
+   attribute the measurement loop, function bodies were disassembled and callers
+   listed: right conclusions, wrong source, redone on `brcmsmac`, which had them
+   all. **Questions about behaviour go to `brcmsmac` first**, and `PROVENANCE.md` is
+   read before opening the blob, not after.
+2. Built the harness against a tree other than the one believed, and read the
+   results as regressions. The port's files now always come from `b43/`, and
+   `KDIR` matters only for what the port does not touch: it has to be the pinned
+   tree, and `git -C ~/src/pin status` has to be empty before believing a number.
+3. Quoted line numbers of `b43/` as if they were the pinned tree's:
+   `phy_n.c:4021` instead of `3950`.
+4. Counted a phase on a window by eye that mixed three, and concluded something
+   false ("70 registers, a subset of the 412" — 32 of 70 had a different value).
+5. Rebuilt the op→record correspondence by hand: it drifts by up to 230 ops.
+6. Attributed to the "core not built" ops that were in code built and not called
+   (`b43_software_rfkill` was an empty stub in `wrap.c`).
+7. Believed an anchor of `phase_compare.py` never found (`0x186 val=0x100`, which
+   does not exist in the capture): a `pending` window with an impossible anchor
+   never fails and never says anything.
+8. Wrote "a read on hardware is needed" when the value was in the capture.
+9. **Believed a window that broke, instead of looking at what it was latched
+   onto.** `recalc-txpower` went from 519/519 to 432/519 when the tail of the
+   periodic cal was added, and it looked like a driver regression. It was the
+   anchor: the window took the **third** opening of `26/0x0`, which was the port's
+   recalc as long as the sequence ran elsewhere, and which with the sequence at the
+   end of recalc became the power setup of the cal's tail. It compared the
+   vendor's recalc with the port's tail. With the anchor corrected to the second,
+   the window is back to 519/519 **with** the change in. An ordinal anchor moves
+   when the code moves: when a window breaks, first look at where it landed.
+10. **Believed an unanchored per-region measure.** A slice of 1402 vendor ops
+    compared against the port's 24000 gave 92% in 31 blocks, and from those 31
+    blocks a fragmentation inside `b43_nphy_txpwr_index()` was deduced. It was not
+    there: the blocks were spread over 14065 ops of trace, i.e. they were the ten
+    identical writes of 84 zeros, each taken from a different point. The total of
+    the whole window does not have this problem, because the slice is the whole
+    run. Rule: **before reading a per-region number, look at where the blocks
+    land.** `phase_compare.py --global-run` now prints it by itself.
+11. Measured on a flow other than the one the region declares: `up-ch1` declares
+    `flow=('txpower', '1')`, which is init **plus** `recalc_txpower`. The comment
+    next to the region explains it.
+12. **Exec bits** get lost at every merge done by applying a diff (`git apply`
+    without `--index` does not put them in the index). Seven times so far:
+    `sh scripts/check-exec-bits.sh`. (`scripts/patch-from-commit.sh` was the
+    eighth.)
+13. **Cut a text mixing notes and diff by line count**, and before that on the
+    first `---`: but the notes use `---` between one increment and the next too,
+    and 73 lines of increments disappeared, twice (the head of the old rollup,
+    today `patches/b43/NOTES.md`). Cut on the first `diff --git`, and check that
+    the surviving piece matches the source before stitching back.
 
-## Difetti trovati in mainline, per ricordare cosa cercare
+## Defects found in mainline, to remember what to look for
 
-`patches/mainline/` sono i **dodici** indipendenti da questo hardware, da mandare
-per primi e come **dodici `[PATCH]` separate in altrettanti thread**, non come serie: non
-dipendono l'una dall'altra, e legarle vuol dire che una review lunga su una blocca il
-merge delle altre. L'elenco con una riga a testa sta in `patches/mainline/README.md`,
-che e' la fonte. Con la sola `sample-table-logic`, `sampleplay-tssi` e
-`sampleplay-iqlo` fanno 322/322.
+`patches/mainline/` holds the **twelve** independent of this hardware, to be sent
+first and as **twelve separate `[PATCH]`es in as many threads**, not as a series:
+they do not depend on each other, and tying them means a long review on one
+blocks the merge of the others. The list with one line each is in
+`patches/mainline/README.md`, which is the source. With `sample-table-logic`
+alone, `sampleplay-tssi` and `sampleplay-iqlo` do 322/322.
 
-Due cose non sono pronte per la spedizione, e stanno in quel README: `treat-the-n-phy-
-dac-test` non applica sul pulito senza `sample-table-logic` davanti (dipendenza di
-contesto, non logica), e `fill-the-per-rate` porta dentro uno spostamento di
-`b43_nphy_tx_pwr_ctrl_coef_setup()` che va scorporato, perche' la sua ragione e' la
-cattura e non un difetto di mainline.
+Two things are not ready to ship, and they are in that README:
+`treat-the-n-phy-dac-test` does not apply on the clean tree without
+`sample-table-logic` before it (a context dependency, not a logical one), and
+`fill-the-per-rate` carries a move of `b43_nphy_tx_pwr_ctrl_coef_setup()` that has
+to be split off, because its reason is the capture and not a mainline defect.
 
-Il piu' grosso e' il **campo** dell'indice di potenza: spegnendo il controllo
-acceso, b43 salva i sette bit bassi dello stato per catena invece dei bit 8..14, e
-il ripristino rimette quel campo nell'indice. Gira su ogni N-PHY rev 3 e su, su
-ogni percorso che parentesizza del lavoro col controllo spento — le calibrazioni e
-il cambio canale. Su questa cattura l'indice e' 25 e i sette bit bassi sono zero,
-cioe' il fondo della tabella. Lo dice il define di questo stesso driver,
-`B43_NPHY_TXPCTL_STAT_BIDX`, e venti righe sotto `b43_nphy_get_tx_gains()` legge lo
-stesso campo giusto.
+The biggest is the **field** of the power index: turning off the power control
+when it is on, b43 saves the seven low bits of the per-chain status instead of
+bits 8..14, and the restore puts that field back into the index. It runs on every
+N-PHY rev 3 and up, on every path that brackets work with the control off — the
+calibrations and the channel change. On this capture the index is 25 and the
+seven low bits are zero, i.e. the bottom of the table. The define of this same
+driver, `B43_NPHY_TXPCTL_STAT_BIDX`, says so, and twenty lines below
+`b43_nphy_get_tx_gains()` reads the same field right.
 
-Refusi di trascrizione da brcmsmac e di precedenza C, non buchi di feature: i due
-della cal PAPD sono `tbl_rf_control_override_rev7_over1` con due `val_mask` che non
-coprono il campo del proprio shift, e `one_to_many` `TX_PU` con quattro chiamate su
-cinque (dimostrati a tre voci: brcmsmac e la cattura concordano contro b43). Poi, in
-ordine: `0005` registro sbagliato, `0010` `<<` che lega più forte di `&` più un passo
-di fase troncato in una `u16`, `0011` dieci campi persi con la tabella "solo 2 GHz",
-`0012` tabelle inizializzate nel posto sbagliato. Vale sempre la pena confrontare il
-**gate** oltre al corpo: b43 ha `phy->rev != 5` dove brcmsmac ha `radiorev != 5`
+Transcription typos from brcmsmac and C precedence, not feature holes: the two
+of the PAPD cal are `tbl_rf_control_override_rev7_over1` with two `val_mask`s that
+do not cover their own shift's field, and `one_to_many` `TX_PU` with four calls out
+of five (proved three ways: brcmsmac and the capture agree against b43). Then, in
+order: `0005` wrong register, `0010` `<<` binding tighter than `&` plus a phase step
+truncated in a `u16`, `0011` ten fields lost with the "2 GHz only" table, `0012`
+tables initialised in the wrong place. It is always worth comparing the **gate**
+besides the body: b43 had `phy->rev != 5` where brcmsmac has `radiorev != 5`
 (`docs/todo-nphy.md` 3d bis).
 
-## L'init del radio, chiuso
+Two more candidates are not in `patches/mainline/` yet: `nphy->txcal_bbmult`, read
+and never written ("Things worth as much as a defect"), and `hang_avoid` covering
+revs 3-4 where brcmsmac covers 3-5 ("What remains open").
 
-Il record del blob e' `{u16 address; u16 init; u8 do_init; u8 pad}`, sei byte, e **39
-voci su 412 hanno il flag**. b43 aveva ereditato indirizzo e valore (412 su 412
-identici) e perso la colonna. La cattura combacia col flag esattamente: 39 su 39, e i
-4 registri in piu' vengono da altro codice. Lo stub da 54 che impianta il radio e' il
-set `do_init` di **brcmsmac**, che e' piu' vecchio. `patches/b43/MESSAGES.md#0013`,
-non provata su hardware. Vedi `docs/gap-inventory.md` 4h.
+## The radio init, closed
 
-## Due blob, e quale usare
+The blob's record is `{u16 address; u16 init; u8 do_init; u8 pad}`, six bytes, and
+**39 entries of 412 have the flag**. b43 had inherited address and value (412 of
+412 identical) and lost the column. The capture matches the flag exactly: 39 of
+39, and the 4 extra registers come from other code. The 54-entry stub that hangs
+the radio is **brcmsmac**'s `do_init` set, which is older.
+`patches/b43/MESSAGES.md#0013`, not tried on hardware. See
+`docs/gap-inventory.md` 4h.
 
-`wlDSL-3580_EU.o_save` e' wl 6.30.102.7 (DSL-3580L, da cui viene la cattura),
-`wlD6220.o_save` e' wl 7.14.89.14. Tutti e 33 i simboli **dati** del 2057 rev5-8 hanno
-size identica fra i due, `regs_2057_rev8` e' identica byte per byte. Differiscono tre
-funzioni `wlc_phy_workarounds_nphy_gainctrl_2057_rev5/6/7`, e la `rev6` e' il corpo che
-manca allo stub di b43: per quella **si legge il 6.30**, che e' il blob della cattura.
-Il blob da' i nomi veri di brcmsmac: `a3` = `wlc_phy_papd_cal_gctrl_nphy` (2444 byte,
-147 righe, il rapporto torna). `wlc_phy_papd_cal_nphy` (6088) e' `a2` **o** `a4`: hanno
-279 e 276 righe, la size non le distingue, e `a2` per size non si trova. Vedi
+## Two blobs, and which to use
+
+`wlDSL-3580_EU.o_save` is wl 6.30.102.7 (DSL-3580L, where the capture comes
+from), `wlD6220.o_save` is wl 7.14.89.14. All 33 **data** symbols of 2057 rev5-8
+have identical sizes in the two, `regs_2057_rev8` is identical byte for byte.
+Three functions differ, `wlc_phy_workarounds_nphy_gainctrl_2057_rev5/6/7`, and
+`rev6` is the body the b43 stub lacks: for that one **6.30 is read**, which is the
+capture's blob. The blob gives brcmsmac's real names: `a3` =
+`wlc_phy_papd_cal_gctrl_nphy` (2444 bytes, 147 lines, the ratio adds up).
+`wlc_phy_papd_cal_nphy` (6088) is `a2` **or** `a4`: they have 279 and 276 lines,
+the size does not tell them apart, and `a2` cannot be found by size. See
 `docs/blob-inventory.md`.
 
-## Prossimo passo
+The same `wl 7.14.89.14` drives a second instance of this core on the TG789vac
+v2, and the D6220's `wl0` attach under it is in `router-data/d6220/`
+(`docs/ac-wip-xref.md`).
 
-1. **I valori degli indici di potenza**: b43 ha `0x19` dove il device scrive `0xa` e
-   `0xc`, e sono le due op che restano nei tratti a #4958 e #6330. Domanda su cosa
-   conserva il salvataggio dell'indice.
-2. **Il tratto a #10761**, 16 op spostate su 18, che e' il sito singolo piu' grosso
-   fra le 56 spostate che restano — la parentesi di carrier search, `0x2c`/`0x42`, il
-   reset del baseband e le due letture dell'indice. Poi #9727 (6), #9008 (5), #3732
-   (4), #24823 (4): stanno in sei siti, non spalmate.
-3. **Il tratto a #25823**, 17 assenti, che e' la stessa istantanea di #877 piu' gli
-   indici di potenza, letta alla fine di `up-ch1` prima del primo salto dell'ACI
-   scan: appartiene all'ACI scan come #5004.
-4. La cal PAPD ha ancora **una** scrittura di scarto della tabella di potenza,
-   2 contro 1: la parentesi unica ne apre una dove il device ne apre zero, cioe'
-   l'apertura cade dentro la regione invece che prima.
-5. **Chi chiama la ricalibrazione al cambio canale.** Che il codice sappia farlo e'
-   misurato su entrambe le catture, 91% su ch6 a caldo e 85% su ch11 a freddo; quello
-   che manca e' il watchdog del riferimento, e senza di lui sull'hardware b43 usa sul
-   canale nuovo la calibrazione del canale vecchio.
-6. L'ACI scan, che e' una politica sopra il PHY e non una funzione da agganciare.
+## Next step
+
+1. **The values of the power indices**: b43 has `0x19` where the device writes
+   `0xa` and `0xc`, and they are the two ops left in the stretches at #4958 and
+   #6330. A question about what the save of the index keeps.
+2. **The stretch at #10761**, 16 moved ops of 18, which is the biggest single site
+   among the 56 moved that remain — the carrier search bracket, `0x2c`/`0x42`, the
+   baseband reset and the two reads of the index. Then #9727 (6), #9008 (5),
+   #3732 (4), #24823 (4): they are in a few sites, not spread out.
+3. **The stretch at #25823**, 17 absent, which is the same snapshot as #877 plus
+   the power indices, read at the end of `up-ch1` before the first hop of the ACI
+   scan: it belongs to the ACI scan like #5004.
+4. The PAPD cal still has **one** extra write of the power table, 2 against 1:
+   the single bracket opens one where the device opens none, i.e. the opening
+   falls inside the region instead of before it.
+5. **Who calls the recalibration on channel change.** That the code can do it is
+   measured on both captures, 91% on ch6 hot and 85% on ch11 cold; what is missing
+   is the reference's watchdog, and without it on hardware b43 uses on the new
+   channel the calibration of the old one.
+6. The ACI scan, which is a policy above the PHY and not a function to hook.
+7. **Bring the per-patch history into the published repository**, if it exists
+   in a local clone (`patches/b43/SPLIT.md`): without it, splitting `0027`-`0036`
+   is not a command.
