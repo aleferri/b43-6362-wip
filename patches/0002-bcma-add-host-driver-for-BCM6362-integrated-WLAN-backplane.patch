@@ -38,9 +38,16 @@ driver is unchanged and continues to serve the BCM47xx family.
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 Assisted-by: Claude:claude-4.7-opus
 ---
+ drivers/bcma/Kconfig                  |  13 +
+ drivers/bcma/Makefile                 |   1 +
+ drivers/bcma/host_soc_brcm6362_wlan.c | 433 ++++++++++++++++++++++++++
+ 3 files changed, 447 insertions(+)
+
+diff --git a/drivers/bcma/Kconfig b/drivers/bcma/Kconfig
+index b9558ff..2b67381 100644
 --- a/drivers/bcma/Kconfig
 +++ b/drivers/bcma/Kconfig
-@@ -43,6 +43,19 @@ config BCMA_HOST_SOC
+@@ -38,6 +38,19 @@ config BCMA_HOST_SOC
  
  	  If unsure, say N
  
@@ -60,16 +67,21 @@ Assisted-by: Claude:claude-4.7-opus
  config BCMA_DRIVER_PCI
  	bool "BCMA Broadcom PCI core driver"
  	depends on PCI
+diff --git a/drivers/bcma/Makefile b/drivers/bcma/Makefile
+index f8c37de..755ab7c 100644
 --- a/drivers/bcma/Makefile
 +++ b/drivers/bcma/Makefile
-@@ -14,6 +14,7 @@ bcma-$(CONFIG_BCMA_DRIVER_GPIO)		+= driv
- bcma-$(CONFIG_BCMA_FALLBACK_SPROM)	+= fallback-sprom.o
+@@ -13,6 +13,7 @@ bcma-$(CONFIG_BCMA_DRIVER_GMAC_CMN)	+= driver_gmac_cmn.o
+ bcma-$(CONFIG_BCMA_DRIVER_GPIO)		+= driver_gpio.o
  bcma-$(CONFIG_BCMA_HOST_PCI)		+= host_pci.o
  bcma-$(CONFIG_BCMA_HOST_SOC)		+= host_soc.o
 +bcma-$(CONFIG_BCMA_HOST_SOC_BRCM6362_WLAN) += host_soc_brcm6362_wlan.o
  obj-$(CONFIG_BCMA)			+= bcma.o
  
  ccflags-$(CONFIG_BCMA_DEBUG)		:= -DDEBUG
+diff --git a/drivers/bcma/host_soc_brcm6362_wlan.c b/drivers/bcma/host_soc_brcm6362_wlan.c
+new file mode 100644
+index 0000000..274bd1e
 --- /dev/null
 +++ b/drivers/bcma/host_soc_brcm6362_wlan.c
 @@ -0,0 +1,433 @@

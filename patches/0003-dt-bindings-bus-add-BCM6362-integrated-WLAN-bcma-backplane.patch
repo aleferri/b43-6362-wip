@@ -18,12 +18,15 @@ interrupt controller.
 
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 ---
- .../bus/brcm,bcm6362-wlan-bus-axi.yaml        | 97 +++++++++++++++++++
- 1 file changed, 97 insertions(+)
+ .../bus/brcm,bcm6362-wlan-bus-axi.yaml        | 100 ++++++++++++++++++
+ 1 file changed, 100 insertions(+)
 
+diff --git a/Documentation/devicetree/bindings/bus/brcm,bcm6362-wlan-bus-axi.yaml b/Documentation/devicetree/bindings/bus/brcm,bcm6362-wlan-bus-axi.yaml
+new file mode 100644
+index 0000000..bea57bc
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/bus/brcm,bcm6362-wlan-bus-axi.yaml
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,100 @@
 +# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 +%YAML 1.2
 +---

@@ -35,62 +35,17 @@ backplanes:
 Signed-off-by: Alessio Ferri <alessio.ferri@mythread.it>
 Assisted-by: Claude:claude-4.7-opus
 ---
---- a/include/linux/bcma/bcma.h
-+++ b/include/linux/bcma/bcma.h
-@@ -362,6 +362,13 @@ struct bcma_bus {
- 	/* We decided to share SPROM struct with SSB as long as we do not need
- 	 * any hacks for BCMA. This simplifies drivers code. */
- 	struct ssb_sprom sprom;
-+
-+	/* Set by the host driver before bcma_init_bus() to support
-+	 * backplanes whose registers are big-endian peripherals and
-+	 * whose cores publish no DMP wrapper (NMW=NSW=0 in the EROM).
-+	 */
-+	bool big_endian;
-+	bool wrapperless;
- };
- 
- static inline u32 bcma_read8(struct bcma_device *core, u16 offset)
---- a/drivers/bcma/scan.c
-+++ b/drivers/bcma/scan.c
-@@ -143,6 +143,8 @@ static const char *bcma_device_name(cons
- 
- static u32 bcma_scan_read32(struct bcma_bus *bus, u16 offset)
- {
-+	if (bus->big_endian)
-+		return ioread32be(bus->mmio + offset);
- 	return readl(bus->mmio + offset);
- }
- 
-@@ -155,7 +157,7 @@ static void bcma_scan_switch_core(struct
- 
- static u32 bcma_erom_get_ent(struct bcma_bus *bus, u32 __iomem **eromptr)
- {
--	u32 ent = readl(*eromptr);
-+	u32 ent = bus->big_endian ? ioread32be(*eromptr) : readl(*eromptr);
- 	(*eromptr)++;
- 	return ent;
- }
-@@ -316,6 +318,16 @@ static int bcma_get_next_core(struct bcm
- 		case BCMA_CORE_GCI:
- 		/* Not used yet: case BCMA_CORE_OOB_ROUTER: */
- 			break;
-+		case BCMA_CORE_CHIPCOMMON:
-+		case BCMA_CORE_80211:
-+		case BCMA_CORE_SHIM:
-+			/* Wrapperless backplanes (e.g. the BCM6362
-+			 * integrated WLAN) gate these cores via a
-+			 * SoC-level register window rather than DMP.
-+			 */
-+			if (bus->wrapperless)
-+				break;
-+			fallthrough;
- 		default:
- 			bcma_erom_skip_component(bus, eromptr);
- 			return -ENXIO;
+ drivers/bcma/bcma_private.h | 14 ++++++++++++++
+ drivers/bcma/main.c         |  6 ++++++
+ drivers/bcma/scan.c         | 14 +++++++++++++-
+ include/linux/bcma/bcma.h   |  7 +++++++
+ 4 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/bcma/bcma_private.h b/drivers/bcma/bcma_private.h
+index 6eded32..4377bfb 100644
 --- a/drivers/bcma/bcma_private.h
 +++ b/drivers/bcma/bcma_private.h
-@@ -119,6 +119,20 @@ static inline void __exit bcma_host_soc_
+@@ -118,6 +118,20 @@ static inline void __exit bcma_host_soc_unregister_driver(void)
  }
  #endif /* CONFIG_BCMA_HOST_SOC && CONFIG_OF */
  
@@ -111,9 +66,11 @@ Assisted-by: Claude:claude-4.7-opus
  /* driver_pci.c */
  #ifdef CONFIG_BCMA_DRIVER_PCI
  u32 bcma_pcie_read(struct bcma_drv_pci *pc, u32 address);
+diff --git a/drivers/bcma/main.c b/drivers/bcma/main.c
+index 72f045e..1c932d6 100644
 --- a/drivers/bcma/main.c
 +++ b/drivers/bcma/main.c
-@@ -694,6 +694,11 @@ static int __init bcma_modinit(void)
+@@ -682,6 +682,11 @@ static int __init bcma_modinit(void)
  		pr_err("SoC host initialization failed\n");
  		err = 0;
  	}
@@ -125,7 +82,7 @@ Assisted-by: Claude:claude-4.7-opus
  #ifdef CONFIG_BCMA_HOST_PCI
  	err = bcma_host_pci_init();
  	if (err) {
-@@ -711,6 +716,7 @@ static void __exit bcma_modexit(void)
+@@ -699,6 +704,7 @@ static void __exit bcma_modexit(void)
  #ifdef CONFIG_BCMA_HOST_PCI
  	bcma_host_pci_exit();
  #endif
@@ -133,3 +90,60 @@ Assisted-by: Claude:claude-4.7-opus
  	bcma_host_soc_unregister_driver();
  	bus_unregister(&bcma_bus_type);
  }
+diff --git a/drivers/bcma/scan.c b/drivers/bcma/scan.c
+index 8474240..13295bd 100644
+--- a/drivers/bcma/scan.c
++++ b/drivers/bcma/scan.c
+@@ -143,6 +143,8 @@ static const char *bcma_device_name(const struct bcma_device_id *id)
+ 
+ static u32 bcma_scan_read32(struct bcma_bus *bus, u16 offset)
+ {
++	if (bus->big_endian)
++		return ioread32be(bus->mmio + offset);
+ 	return readl(bus->mmio + offset);
+ }
+ 
+@@ -155,7 +157,7 @@ static void bcma_scan_switch_core(struct bcma_bus *bus, u32 addr)
+ 
+ static u32 bcma_erom_get_ent(struct bcma_bus *bus, u32 __iomem **eromptr)
+ {
+-	u32 ent = readl(*eromptr);
++	u32 ent = bus->big_endian ? ioread32be(*eromptr) : readl(*eromptr);
+ 	(*eromptr)++;
+ 	return ent;
+ }
+@@ -316,6 +318,16 @@ static int bcma_get_next_core(struct bcma_bus *bus, u32 __iomem **eromptr,
+ 		case BCMA_CORE_GCI:
+ 		/* Not used yet: case BCMA_CORE_OOB_ROUTER: */
+ 			break;
++		case BCMA_CORE_CHIPCOMMON:
++		case BCMA_CORE_80211:
++		case BCMA_CORE_SHIM:
++			/* Wrapperless backplanes (e.g. the BCM6362
++			 * integrated WLAN) gate these cores via a
++			 * SoC-level register window rather than DMP.
++			 */
++			if (bus->wrapperless)
++				break;
++			fallthrough;
+ 		default:
+ 			bcma_erom_skip_component(bus, eromptr);
+ 			return -ENXIO;
+diff --git a/include/linux/bcma/bcma.h b/include/linux/bcma/bcma.h
+index f02cb39..60d9787 100644
+--- a/include/linux/bcma/bcma.h
++++ b/include/linux/bcma/bcma.h
+@@ -362,6 +362,13 @@ struct bcma_bus {
+ 	/* We decided to share SPROM struct with SSB as long as we do not need
+ 	 * any hacks for BCMA. This simplifies drivers code. */
+ 	struct ssb_sprom sprom;
++
++	/* Set by the host driver before bcma_init_bus() to support
++	 * backplanes whose registers are big-endian peripherals and
++	 * whose cores publish no DMP wrapper (NMW=NSW=0 in the EROM).
++	 */
++	bool big_endian;
++	bool wrapperless;
+ };
+ 
+ static inline u32 bcma_read8(struct bcma_device *core, u16 offset)
