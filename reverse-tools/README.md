@@ -1,99 +1,106 @@
 # reverse-tools
 
-Strumenti per lavorare sul supporto N-PHY rev 8 / radio 2057 rev 8 del BCM6362.
-Tre famiglie: analisi del tree kernel, estrazione dal blob OEM, cattura e
-decodifica delle tracce del driver `wl`.
+Tools for the N-PHY rev 8 / radio 2057 rev 8 support of the BCM6362. Three
+families: analysis of the kernel tree, extraction from the OEM blob, decoding
+and analysis of the `wl` driver's traces. The tracer itself is in
+`../wl-diag/`. Each script's header says more.
 
-## Analisi del tree kernel
+## Analysis of the kernel tree
 
-- **check_gaps.py** — per ogni funzione b43 che discrimina su `phy->radio_rev` o
-  `phy->rev`, dice se la revisione target è coperta, trattando `>=`/`<=` come
-  copertura e segnalando gli stub (corpo di soli commenti). Genera la tabella di
-  `docs/gap-inventory.md`. Dà indizi: una voce `assente` può essere legittima,
-  va letta a mano.
-- **brcmsmac_xref.py** — elenca le funzioni brcmsmac che discriminano radiorev 8
-  o `NREV_IS(phy_rev, 8)`, con la riga del primo match dentro la funzione (non
-  quella in cui la funzione comincia). Genera
+- **check_gaps.py** — for every b43 function that discriminates on
+  `phy->radio_rev` or `phy->rev`, says whether the target revision is covered,
+  treating `>=`/`<=` as coverage and flagging stubs (a body of comments only).
+  Generates the table of `docs/gap-inventory.md`. It gives hints: an `assente`
+  entry can be legitimate and has to be read by hand.
+- **brcmsmac_xref.py** — lists the brcmsmac functions that discriminate on
+  radiorev 8 or `NREV_IS(phy_rev, 8)`, with the line of the first match inside
+  the function (not the line where the function starts). Generates
   `docs/brcmsmac-xref.md`.
-- **cfuncs.py** — localizzazione riga→funzione per sorgenti in stile kernel,
-  usata dai due sopra. Non è un parser C: euristica a profondità di graffe.
+- **cfuncs.py** — line→function lookup for kernel-style sources, used by the
+  two above. Not a C parser: a brace-depth heuristic. **test_cfuncs.py** is its
+  self-test, because the tools that rely on it fail silently when it
+  attributes a line to the wrong function.
+- **phy_type_audit.py** — lists the constructs where b43 discriminates on the
+  PHY type and names G without N. Generates `docs/phy-g-only.md`. Textual
+  heuristic: it sees whether the N case is there, not whether it is right.
+- **check_patch_gating.py** — for every line a patch adds, looks for a revision
+  gate that dominates it. Needed because nearly everything in b43's PHY is
+  shared among all N-PHYs, and an ungated change alters hardware that cannot
+  be tested. A heuristic, not a parser: a `NON GATEATA` has to be looked at.
+  `docs/upstreaming.md` lists the shared functions and the gate each one
+  wants. It tells a revision gate from a gate on the PHY **type**, which is
+  legitimate but touches every rev of that type. It wants the tree at the
+  patch's base: for the b43 series, `../scripts/series-diff.sh` writes it.
+- **csanity.py** — minimal lexical check of a C file without a compiler: `*/`
+  inside the prose of a comment, unterminated comments and literals,
+  unbalanced brackets. The class of mistakes that hand-edited comments make and
+  the compiler reports dozens of lines later.
 
-- **phy_type_audit.py** — elenca i costrutti dove b43 discrimina sul tipo di PHY
-  e cita la G senza la N. Genera `docs/phy-g-only.md`. Euristica testuale: vede la
-  presenza del caso N, non la sua correttezza.
-- **check_patch_gating.py** — per ogni riga aggiunta da una patch cerca un gate di
-  revisione che la domini. Serve perché nel PHY di b43 quasi tutto è condiviso fra
-  tutte le N-PHY, e una modifica non iffata cambia hardware che non possiamo
-  provare. Euristica, non parser: un `NON GATEATA` va guardato. Vedi
-  `docs/upstreaming.md` per l'elenco delle funzioni condivise e il gate che
-  ciascuna vuole. Distingue il gate sulla revisione da quello sul **tipo** di PHY,
-  che è legittimo ma tocca tutte le rev di quel tipo. Vuole un albero **pulito**:
-  se la patch è già applicata lo dice invece di fallire in modo oscuro.
+## Extraction from the OEM blob
 
-## Estrazione dal blob OEM
+- **blob_tables.py** — dependency-free big-endian ELF32 reader. `--list` for the
+  symbol lists, `--dump` for the hexdump, `--verify SYM --against FILE:ARRAY`
+  to compare a kernel table with the blob's symbol, deducing the stride of the
+  vendor record from matching the address column. It answers the question "is
+  this merged table really the vendor's?": see `PROVENANCE.md` for the results.
+- **chantab_from_blob.py** — the chantab is not a flat array but an array of
+  structs: this tool maps the 44-byte records of
+  `chan_info_nphyrev8_2057_rev8` onto the fields of
+  `b43_nphy_chantabent_rev7`, compares the 2.4 GHz subset with the array in
+  `radio_2057.c` (`--verify`), lists the coverage per band (`--list`) and emits C
+  entries for the requested band (`--emit-c --band 5g`).
 
-- **blob_tables.py** — lettore ELF32 big-endian senza dipendenze. `--list` per
-  gli elenchi di simboli, `--dump` per l'hexdump, `--verify SYM --against
-  FILE:ARRAY` per confrontare una tabella del kernel col simbolo del blob
-  deducendo lo stride del record vendor dal matching della colonna indirizzi.
-  È il modo di rispondere alla domanda "questa tabella merged è davvero quella
-  del vendor?": vedi `PROVENANCE.md` per gli esiti.
-- **chantab_from_blob.py** — la chantab non è un array piatto, è un array di
-  struct: questo strumento mappa i record da 44 byte di
-  `chan_info_nphyrev8_2057_rev8` sui campi di `b43_nphy_chantabent_rev7`,
-  confronta il sottoinsieme 2.4 GHz con l'array in `radio_2057.c` (`--verify`),
-  elenca la copertura per banda (`--list`) ed emette entry C per la banda
-  richiesta (`--emit-c --band 5g`).
+## Decoding pipeline
 
-## Tracer sul device
+Order: decoding → fold RETVAL → fold MOD → (collapse) → comparison.
 
-- **wl-diag/** — modulo tracer a detour inline (niente kprobe) per un host con
-  kernel 3.4-rt.
-- **wl-diag-2630/** — stesso sorgente per il kernel 2.6.30 dello stock firmware
-  della DSL-3580L. **È questa la variante per il radio integrato**, perché gira
-  sul SoC stesso.
+- **../wl-diag/decode-wl-diag.py** — binary records (28 B BE) → text lines.
+- **verify_decode.py** — rebuilds the fields from the decoded text and compares
+  them with the binary, record by record. It is the condition for throwing the
+  binary away: if it says "nessuna perdita", the text replaces it; if it lists
+  fields, the decoder needs fixing. It has found two holes so far: the space
+  selector of `OBJ.RD`/`OBJ.WR` and the buffer pointer of `TPL.RAMW`, which the
+  decoder's generic branch did not print.
+- **merge_retvals.py** — folds the `RETVAL`s into the read that precedes them.
+- **fold_mod_reads.py** — folds the implicit read of every `MOD`.
+- **collapse_trace.py** — compacts the table ops (N-PHY ports 0x72/0x73/0x74).
+  For the op-by-op comparison with the port use the **raw** trace, not the
+  collapsed one.
+- **gen_readplans.py** — pairs every read of the capture with its `RETVAL` and
+  emits the harness's read plans as a C header, per address. Excludes
+  0x72/0x73/0x74, which are the table port and not a status register.
+  Measured: they do not move the coverage, see `test/unit/README.md`.
+- **gen_seed.py** — the hardware state at the entry of the measured window,
+  taken from the records that precede it (`test/unit/seed_up.h`): writes, mods
+  and `RETVAL`s, register by register. Only what the window cannot know is
+  seeded, never what it has to compute, or a register the port programs wrong
+  would come back right by magic.
+- **trace_tables.py** — reassociates every `TBL.WR` with the `PHY.WR`s on
+  0x72/0x73/0x74 that implement it and prints the values, checking that header
+  and data agree (address = `(id << 10) | off`, count = `len`). With
+  `--c-array` it emits them as a C array. That is how the numbers of
+  `patches/b43/MESSAGES.md#0001` were obtained. `--cell ID:OFF` gives the
+  history of one table cell.
+- **segment_marker.py** — cuts two traces on a marker, which may be a
+  **sequence** of ops, and compares the segments one by one: how many, how long,
+  made of which ops. It does not pair ops or compute percentages, that is
+  `test/unit/phase_compare.py`'s job.
+- **verify_chantab_trace.py** — for every `CHANSPEC` in the trace, compares the
+  18 fields of b43's 2.4 GHz chantab with the radio writes that follow, value
+  and order. It checks every channel the capture touches instead of one picked
+  by hand, and lists separately the 5 GHz registers the vendor zeroes.
+- **diff_traces.py** — differential between two captures, to isolate
+  dependencies on board or channel.
+- **mempeek.c** — 32-bit `/dev/mem` reader to inspect a backplane window from
+  the device.
 
-Entrambe sono tarate su N-PHY: vedi la sezione "Riposizionamento su N-PHY" nella
-loro README per l'elenco delle differenze rispetto alla copia AC-PHY di
-`b43-ac-wip`, tutte verificate sul blob di questa board.
+`test/unit/coverage.py` belongs to the same pipeline: coverage per class, and
+with `--values` it compares the first value written to every register both
+sides touch. It is the class of difference that presence alone does not see,
+and it found the TSSI. It wants the port on the same channel as the capture,
+or the chantab produces false positives.
 
-## Pipeline di decodifica
-
-Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
-
-- **decode-wl-diag.py** — record binari (28 B BE) → righe testuali.
-- **gen_readplans.py** — appaia ogni read della cattura col suo `RETVAL` ed emette
-  i piani di lettura dell'harness come header C, per indirizzo. Esclude 0x72/0x73/
-  0x74, che sono la porta delle tabelle e non un registro di stato. Misurato: non
-  spostano la copertura, vedi `test/unit/README.md`.
-- **verify_decode.py** — ricostruisce i campi dal testo decodificato e li
-  confronta col binario record per record. È la condizione per buttare il
-  binario: se dice "nessuna perdita", il testo lo sostituisce; se elenca campi,
-  il decoder va sistemato. Ha già trovato due buchi: il selettore di spazio
-  delle `OBJ.RD`/`OBJ.WR` e il puntatore al buffer delle `TPL.RAMW`, che la
-  branch generica del decoder non stampava.
-- **merge_retvals.py** — ripiega i `RETVAL` nella lettura che li precede.
-- **fold_mod_reads.py** — ripiega la read implicita di ogni `MOD`.
-- **collapse_trace.py** — compatta le table-op (porte N-PHY 0x72/0x73/0x74). Per
-  il confronto op-per-op col port usare il trace **grezzo**, non il collassato.
-- **test/unit/coverage.py** — copertura per classe, e con `--values` confronta il primo
-  valore scritto su ogni registro toccato da entrambi: è la classe di differenza
-  che la sola presenza non vede, e ha trovato il TSSI. Vuole il port sullo stesso
-  canale della cattura, altrimenti la chantab produce falsi positivi.
-- **trace_tables.py** — riassocia ogni `TBL.WR` alle `PHY.WR` su 0x72/0x73/0x74
-  che la implementano e stampa i valori, con controllo di coerenza fra
-  intestazione e dati (indirizzo = `(id << 10) | off`, conteggio = `len`). Con
-  `--c-array` li emette come array C. È così che sono stati ricavati i numeri di
-  `patches/b43/MESSAGES.md#0001`.
-- **verify_chantab_trace.py** — per ogni `CHANSPEC` del trace confronta i 18
-  campi della chantab 2.4 GHz di b43 con le scritture radio che seguono, valore
-  e ordine. Verifica su tutti i canali che la cattura tocca invece che su uno
-  scelto a mano, ed elenca a parte i registri 5 GHz che il vendore azzera.
-- **diff_traces.py** — differenziale fra due catture, per isolare le dipendenze
-  da board o da canale.
-- **mempeek.c** — lettore `/dev/mem` a 32 bit per ispezionare una finestra del
-  backplane dal device.
-
-Il resto della pipeline AC (localizzazione funzioni, copertura, decorrelazione
-canale/BW, estrattori AC-PHY) sta in `b43-ac-wip` e si riusa da lì senza
-modifiche: non è stato duplicato qui.
+The rest of the AC pipeline (function location, coverage, channel/BW
+decorrelation, AC-PHY extractors) is in `b43-ac-wip` and is reused from there
+unchanged: it was not duplicated here. `docs/ac-wip-xref.md` says which of
+those tools apply to wl0.
