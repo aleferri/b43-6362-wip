@@ -65,7 +65,7 @@ Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
 - **gen_readplans.py** — appaia ogni read della cattura col suo `RETVAL` ed emette
   i piani di lettura dell'harness come header C, per indirizzo. Esclude 0x72/0x73/
   0x74, che sono la porta delle tabelle e non un registro di stato. Misurato: non
-  spostano la copertura, vedi `test/README.md`.
+  spostano la copertura, vedi `test/unit/README.md`.
 - **verify_decode.py** — ricostruisce i campi dal testo decodificato e li
   confronta col binario record per record. È la condizione per buttare il
   binario: se dice "nessuna perdita", il testo lo sostituisce; se elenca campi,
@@ -76,7 +76,7 @@ Ordine: decodifica → fold RETVAL → fold MOD → (collapse) → confronto.
 - **fold_mod_reads.py** — ripiega la read implicita di ogni `MOD`.
 - **collapse_trace.py** — compatta le table-op (porte N-PHY 0x72/0x73/0x74). Per
   il confronto op-per-op col port usare il trace **grezzo**, non il collassato.
-- **test/coverage.py** — copertura per classe, e con `--values` confronta il primo
+- **test/unit/coverage.py** — copertura per classe, e con `--values` confronta il primo
   valore scritto su ogni registro toccato da entrambi: è la classe di differenza
   che la sola presenza non vede, e ha trovato il TSSI. Vuole il port sullo stesso
   canale della cattura, altrimenti la chantab produce falsi positivi.

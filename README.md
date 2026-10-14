@@ -15,9 +15,9 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 |---|---|---|
 | radio 2057 rev 8: init table, chantab, IPA tx gain, rf pwr offset | **merged upstream** (7 patch, 10 giu 2026) | `docs/upstream-status.md` |
 | firmware rev22 (`ucode22_mimo`, `n0initvals22`, `n0bsinitvals22`) | mapping merged; disponibilità blob da verificare | `docs/firmware-rev22.md` |
-| enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/bcma/`, `docs/soc-glue.md` |
+| enumerazione bcma sul backplane del SoC | funzionante fuori albero, **da proporre** | `patches/`, `docs/soc-glue.md` |
 | SPROM fallback per il core su SoC | funzionante solo con l'estensione OpenWrt, **non upstreamabile così** | `docs/upstreaming.md` |
-| gain control N-PHY rev 7+ | stub vuoto in mainline, **nel rollup, `patches/b43/MESSAGES.md#0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/README.md` |
+| gain control N-PHY rev 7+ | stub vuoto in mainline, **in `b43/`, `patches/b43/MESSAGES.md#0001`**: riproduce la cattura op per op nell'harness, mai girata su hardware | `test/unit/README.md` |
 | chantab rev 8, campi 5 GHz | il vendore li azzera a ogni cambio canale, la tabella 2 GHz di b43 non li aveva: **patch `0011`**, 31 cambi canale su 31 nella cattura | `docs/gap-inventory.md` |
 | chantab rev 8, campi 2.4 GHz | **verificata sul silicio**: 31 cambi canale su 31, cinque canali | `docs/trace-init-2g.md` |
 | RF power offset rev 8 | valori sbagliati in mainline, **chiuso dalla cattura**: patch `0002` | `docs/rf-pwr-offset-rev8.md` |
@@ -37,48 +37,52 @@ conseguenza da gestire e non da ignorare (vedi `docs/gap-inventory.md`, voce
 
 ## Come è organizzato
 
-- `docs/` — stato, flusso di init dei due lati affiancato, inventario dei buchi,
-  piano HT20 2x2, questioni di upstreaming, protocollo di cattura, reportistica.
-- `patches/bcma/` — la serie per l'enumerazione (core wrapperless big-endian,
-  host driver, binding DT).
-- `patches/openwrt/` — fix minori sul target bmips.
-- `test/` — harness che compila i sorgenti N-PHY del tree in userspace e ne
-  emette il trace, per confrontarlo con la cattura vendor.
-- `reverse-tools/` — tracer `wl-diag` (due varianti, **tarate su N-PHY**),
-  pipeline di decodifica, estrattore/verificatore delle tabelle dal blob OEM,
-  analisi di copertura sul tree kernel.
-- `router-data/`, `bring-up-logs/`, `reports/` — dati e verbali per board. Di
-  catture ce ne sono due: `opinit-ch1-ch6-bw20` (70796 record, due cicli
-  down/up su canali operativi 1 e 6, zero perdite), che ha già corretto una
-  patch (`docs/trace-init-2g.md`) e trovato quattro difetti di mainline
-  (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`) piu' i due della ricerca
-  del VCM, e `full-init-ch1-bw20` (81397
-  record, init a freddo, con un buco da 65285 record per overflow della fifo),
-  la sola che contenga il download delle tabelle statiche.
+```
+b43/                 i file di b43 che il port cambia, interi, sull'albero
+                     pinnato con patches/mainline/ applicate
+bcma/                i file di bcma e la binding DT, ai loro percorsi nel kernel
+patches/             0001-0003 bcma generate da bcma/ (regen-base: l'albero
+                     pinnato), mainline/ (dodici patch separate), openwrt/,
+                     b43/ (messaggi, note e piano di divisione della serie)
+test/unit/           harness che compila i sorgenti N-PHY di b43/ in userspace e
+                     ne emette il trace, contro la cattura vendor
+docs/                stato, flusso di init affiancato, inventario dei buchi,
+                     piano HT20 2x2, upstreaming, protocollo di cattura
+docs/reports/        template dei report di bring-up su hardware
+reverse-tools/       pipeline di decodifica, estrattore/verificatore delle tabelle
+                     dal blob OEM, analisi di copertura sul tree kernel
+wl-diag/             tracer on-device per il driver wl (2-6-30/ e 3-4/), tarato su
+                     N-PHY, e il suo decoder
+router-data/         catture e dump statici per board
+scripts/             albero pinnato, rigenerazione patch, serie come diff
+bringup-log-*.txt    log di bring-up su hardware, per data (docs/reporting.md)
+```
+
+Di catture ce ne sono due, in `router-data/dsl3580l/`: `opinit-ch1-ch6-bw20`
+(70796 record, due cicli down/up su canali operativi 1 e 6, zero perdite), che ha
+già corretto una patch (`docs/trace-init-2g.md`) e trovato quattro difetti di
+mainline (`patches/b43/MESSAGES.md#0005`, `0010`, `0011`, `0012`) piu' i due della
+ricerca del VCM, e `full-init-ch1-bw20` (81397 record, init a freddo, con un buco
+da 65285 record per overflow della fifo), la sola che contenga il download delle
+tabelle statiche.
 
 ## Riproducibilità dello stato
 
 Tutto ciò che questo repo afferma sul kernel è verificato sull'albero, non sulla
 documentazione (che invecchia). Riferimento: `torvalds/linux` @ `848acc8ffe1b`,
-3 ago 2026. Per rifare la verifica:
+3 ago 2026, in `patches/regen-base`. Per rifare la verifica:
 
 ```sh
-./scripts/fetch-upstream-state.sh ~/src/linux      # sparse checkout, ma di master
-./reverse-tools/check_gaps.py --tree ~/src/linux --format md
-./reverse-tools/brcmsmac_xref.py --tree ~/src/linux --format md
+./scripts/fetch-upstream-state.sh ~/src/pin             # albero pinnato
+./scripts/fetch-upstream-state.sh ~/src/linux master    # upstream, con i due report
 ```
-
-Per l'albero **pinnato** quel comando non basta e non puo' bastare: uno sha
-abbreviato non si fetcha. La ricetta col tarball sta in testa a
-`scripts/fetch-upstream-state.sh`, ed e' quella con cui i numeri di `CLAUDE.md`
-sono stati rifatti.
 
 Per riverificare le tabelle merged contro il blob OEM:
 
 ```sh
 ./reverse-tools/blob_tables.py wlDSL-3580_EU.o_save \
     --verify regs_2057_rev8 \
-    --against ~/src/linux/drivers/net/wireless/broadcom/b43/radio_2057.c:r2057_rev8_init
+    --against ~/src/pin/drivers/net/wireless/broadcom/b43/radio_2057.c:r2057_rev8_init
 ```
 
 ## Convenzioni

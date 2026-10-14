@@ -250,7 +250,7 @@ l'unica strada verso la cal PAPD non è una coincidenza: è lo stesso ramo
 
 ## Quanto siamo lontani dalla run del vendore, per regione
 
-    ./phase_compare.py --vendor router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded \
+    ./phase_compare.py --vendor router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded \
                        --global-run 132 26100 --flow full --channel 6
 
 | regione | record | op | appaiate | |
@@ -295,7 +295,7 @@ totale non dipende da quella corrispondenza, la ripartizione si'.
 
 ## L'init a freddo, ora confrontabile
 
-`router-data/dsl-3580l/full-init-ch1-bw20.decoded` e' un init a freddo, quindi il
+`router-data/dsl3580l/full-init-ch1-bw20.decoded` e' un init a freddo, quindi il
 flow `initpor` dell'harness ha finalmente un riferimento. La parte utilizzabile della
 cattura sono i record **#2-#32769**, contigui, prima del buco da overflow.
 

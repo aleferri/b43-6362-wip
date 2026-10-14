@@ -62,7 +62,7 @@ coeff_setup_nphy` viene **dopo** (`19534`), cioè esattamente dove b43 la ha ade
 Solo il ramo mphase schedula. Quindi la giustificazione scritta contraddice il
 riferimento che cita; la ragione vera è la cattura, e una ragione che è la cattura non
 sta in `patches/mainline/`, che per definizione raccoglie difetti indipendenti da
-questo hardware. Va scorporato nel rollup, o gateato, prima di spedire il resto.
+questo hardware. Va scorporato nella serie, o gateato, prima di spedire il resto.
 
 Si dimostrano senza hardware: per precedenza C e aritmetica, perché un guard non può
 essere falso, o perché brcmsmac e la cattura concordano contro b43.
@@ -81,7 +81,7 @@ di `treat-`.
 
 `b43-fill-the-per-rate-transmit-power-offsets-on-n-phy` **applica** su
 `848acc8ffe1b`, e senza fuzz — `git apply` non ne concede — ma con offset **-643,
--643, -1027 e -1054**: e' stata generata sopra il rollup, che allunga `phy_n.c` di
+-643, -1027 e -1054**: e' stata generata sopra la serie, che allunga `phy_n.c` di
 ~1000 righe. Va comunque rigenerata sul baseline pulito prima di spedirla, perche'
 quattro offset da mille righe su un albero che si muove sono una patch che scade da
 sola, non perche' oggi non entri.
@@ -94,10 +94,10 @@ sola maschera corretta, 120 col solo passo di fase. Sono due righe di una stessa
 logica rotta, e separarle darebbe due patch che nessuno può verificare.
 
 Con la prima applicata, le finestre `sampleplay-tssi` e `sampleplay-iqlo` di
-`test/phase_compare.py` fanno **322/322** entrambe: le due tabelle dei campioni
+`test/unit/phase_compare.py` fanno **322/322** entrambe: le due tabelle dei campioni
 diventano identiche alla cattura, parola per parola, senza niente della serie in
-`patches/b43/`. Il rollup di `patches/b43/` non porta piu' quelle
-due modifiche: si applica sopra queste, che le hanno gia'.
+`patches/b43/`. La serie di `b43/` non porta piu' quelle
+due modifiche: sta sopra queste, che le hanno gia'.
 
 La seconda non è in `patches/b43/`: cambia cosa programmano un radio 2057 rev 5 e
 un phy rev 7 in 5 GHz, e non abbiamo né l'uno né l'altro. Il razionale sta in
@@ -107,7 +107,7 @@ un phy rev 7 in 5 GHz, e non abbiamo né l'uno né l'altro. Il razionale sta in
 tree passa un modo diverso da 0 o 1, quindi da sola non cambia niente. Morde il
 primo chiamante con un modo vero, che e' la cal RX IQ — e la misura c'e': col
 `bool`, un tipo 2 costruisce le 160 word del tono su una banda di 80 o 82 invece di
-20, e il port perde **476 op** su `up-ch1`. Il rollup di `patches/b43/` si applica sopra
+20, e il port perde **476 op** su `up-ch1`. La serie di `b43/` sta sopra
 questa e non la duplica.
 
 Nessuna ha girato su hardware.

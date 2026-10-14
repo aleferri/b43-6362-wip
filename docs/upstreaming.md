@@ -2,7 +2,7 @@
 
 ## Proponibile quasi così
 
-`patches/bcma/0001` e `0002`. Sono contenute, non toccano il comportamento
+`patches/0001` e `0002`. Sono contenute, non toccano il comportamento
 degli host esistenti (i due nuovi campi sono `false` per tutti gli altri) e la
 motivazione tecnica è verificabile sul silicio. Da fare prima dell'invio:
 
@@ -54,7 +54,7 @@ servirebbe:
 
 | funzione | chi la usa | gate necessario |
 |---|---|---|
-| `b43_nphy_op_prepare_structs` | **ogni** N-PHY | è dove sta `perical = 2`: non si tocca. Il knob per girare con la cal accesa vive nell'harness (`test/main.c`), non nel driver |
+| `b43_nphy_op_prepare_structs` | **ogni** N-PHY | è dove sta `perical = 2`: non si tocca. Il knob per girare con la cal accesa vive nell'harness (`test/unit/main.c`), non nel driver |
 | `b43_radio_2057_chantab_upload` | radio rev 5, 8, 9, 14 | i dieci registri 5 GHz azzerati (voce 5b) sono dietro `radio_rev == 8` in `0011`, per non cambiare il cambio canale di 43217, 43227 e dei rev 9/14 |
 | `b43_nphy_tx_pwr_ctl_init` | tutti i rev 7+ | togliere l'early return vale per rev 8 con radio rev 8, non per l'intero rev 7+: 16/17 con radio 9/14 non li abbiamo |
 | `b43_nphy_workarounds_rev7plus`, `b43_nphy_gain_ctl_workarounds` | dispatcher rev 7+ | qualsiasi aggiunta va in un ramo per revisione, non nel corpo comune |
@@ -68,20 +68,16 @@ sulla revisione. È un'euristica su brace depth e non un parser C, quindi un
 dentro `b43_nphy_op_prepare_structs` la becca.
 
 ```sh
-./reverse-tools/check_patch_gating.py --tree ~/src/linux patches/b43/*.patch
+./scripts/series-diff.sh ~/src/pin /tmp/base > /tmp/serie.diff
+./reverse-tools/check_patch_gating.py --tree /tmp/base /tmp/serie.diff
 ```
 
-Finche' la serie sta nel rollup il verdetto e' **uno per tutto il rollup**, e si
+Finche' la serie non e' divisa il verdetto e' **uno per tutta la serie**, e si
 prende sopra le mainline, non sull'albero pulito — sull'albero pulito lo strumento
 lo liquida con `(patch non applicabile)`, che il contatore finale non conta:
+`series-diff.sh` scrive in `/tmp/base` proprio quell'albero di partenza.
 
-```sh
-cd ~/src/linux && for p in .../patches/mainline/*.patch; do git apply "$p"; done
-check_patch_gating.py --tree ~/src/linux .../patches/b43/rollup.diff
-```
-
-Da' **tre** punti non gateati, tutti e tre dichiarati in testa a `rollup.diff`:
-`b43_radio_2057_setup`, `b43_nphy_op_prepare_structs`, `b43_ppr_add`. Il verdetto
+Da' **sei** punti non gateati, tutti dichiarati in `patches/b43/NOTES.md`. Il verdetto
 per patch torna con la ri-divisione; la catena di dipendenze che serve a rifarlo
 (`0002 -> 0004 -> 0009`, e `0012` dietro `0009`) sta in `CLAUDE.md`.
 

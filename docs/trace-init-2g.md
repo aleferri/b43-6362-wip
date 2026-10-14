@@ -8,7 +8,7 @@ canale operativo 1, il secondo con canale operativo 6. Fra i due, 15 s di radio
 giù. In entrambi i cicli il driver esce dal canale operativo ogni 2 s — a ch5 nel
 primo, a ch2 e ch10 nel secondo — e rientra subito.
 
-Il dato sta in `router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded`, decodificato;
+Il dato sta in `router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded`, decodificato;
 il binario non è nel repo (vedi il verbale accanto per sha256 e verifica di non
 perdita).
 

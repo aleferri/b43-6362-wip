@@ -23,7 +23,7 @@ gain control rev7, che è `patches/b43/MESSAGES.md#0001`, scritta sui valori del
 Le altre si sono rivelate non-buchi leggendo brcmsmac e il trace (loopfilter,
 rcal, rccal) o mal attribuite (tx cal radio setup).
 
-Criterio di uscita: `reports/30-rx-sensitivity.md` e `60-regression-legacy.md`
+Criterio di uscita: `docs/reports/30-rx-sensitivity.md` e `60-regression-legacy.md`
 compilati, con il legacy 2.4 GHz non peggiore di prima su tutti i canali e
 sensibilità RX misurata invece che sperata. Prima serve compilare la patch:
 oggi non lo è.
@@ -52,7 +52,7 @@ Criterio: iperf stabile a MCS 7, senza retry storm.
 ### M4 — TX HT 2 stream (MCS 8-15)
 
 Passaggio a SDM, `rx_mask` 0xFF 0xFF, tx power per-core, calibrazione su due
-catene. Criterio: `reports/50-throughput-ht20.md` con throughput per MCS e
+catene. Criterio: `docs/reports/50-throughput-ht20.md` con throughput per MCS e
 distribuzione dei retry.
 
 ### M5 — pulizia per l'upstream

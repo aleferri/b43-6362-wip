@@ -24,18 +24,22 @@ cattura non fa.
 indipendenti da questo hardware: vanno inviate per prime e in dodici thread distinti,
 vedi `patches/mainline/README.md`, che e' la fonte per l'elenco.
 
-`b43/` e' il lavoro di questo port, e finche' si costruisce sta in **un file solo**,
-`rollup.diff`: ventisei patch compresse, da applicare **dopo** `mainline/`. I loro
+La serie b43 non sta qui come patch: il codice sta in `../b43/`, file interi, e
+`scripts/series-diff.sh` la stampa come diff unico sopra `mainline/`. I suoi
 messaggi — razionale, misure, intervalli di record, trailer `Link:` — sono in
 `b43/MESSAGES.md`, che e' anche cio' da cui ripartire per ridividere. Le citazioni
-per numero sparse nei documenti e in `test/phase_compare.py` risolvono contro quel
+per numero sparse nei documenti e in `test/unit/phase_compare.py` risolvono contro quel
 file.
 
-Il rollup non contiene `0010` e `0022`, che erano duplicati di due delle mainline:
-niente conflitto atteso da gestire, e niente di perso, vedi la testa di
-`rollup.diff`. Il prezzo pagato e' che `check_patch_gating.py` non da' piu' un
-verdetto per patch ma uno per tutto il rollup, quindi le eccezioni dichiarate sono
-raccolte nella sua testa invece che una per messaggio.
+Quel diff non contiene `0010` e `0022`, che erano duplicati di due delle mainline:
+niente conflitto atteso da gestire, e niente di perso, vedi `b43/NOTES.md`. Il
+prezzo pagato e' che `check_patch_gating.py` non da' un verdetto per patch ma uno
+per tutta la serie, quindi le eccezioni dichiarate sono raccolte in `b43/NOTES.md`
+invece che una per messaggio.
+
+`0001`-`0003` sono la serie bcma, generata da `../bcma/` con
+`scripts/regen-patches.sh` sull'albero di `regen-base`: si edita `bcma/`, non le
+patch, tranne che per il messaggio.
 
 **Le mainline stanno anche nel baseline delle misure**: due di loro valgono 22 op
 sulla finestra `up-ch1`. Vedi `CLAUDE.md`, "Setup, ogni volta".

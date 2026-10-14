@@ -25,7 +25,8 @@ sul file dopo la patch. Un "NON GATEATA" va guardato;
 puo' essere legittimo (una funzione nuova chiamata solo da un ramo iffato) o
 puo' essere il nack.
 
-    ./check_patch_gating.py --tree ~/src/linux ../patches/b43/*.patch
+    ../scripts/series-diff.sh ~/src/pin /tmp/base > /tmp/serie.diff
+    ./check_patch_gating.py --tree /tmp/base /tmp/serie.diff
 """
 
 import argparse

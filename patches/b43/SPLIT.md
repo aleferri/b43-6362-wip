@@ -20,11 +20,13 @@ giri stanno solo nel rollup. I file c'erano e mentivano, che è peggio del non a
 **Un commit per patch, con la sua voce di `MESSAGES.md` nello stesso commit.**
 
 Il confine per patch sta lì, non in una directory, e `scripts/patch-from-commit.sh` lo
-tira fuori quando serve: applica il rollup di `<commit>^` e quello di `<commit>` a due
-alberi identici e diffa i risultati.
+tira fuori quando serve: per un commit su `b43/` è il diff del commit coi percorsi
+del kernel; per un commit della storia di prima, quando la serie stava in
+`rollup.diff`, applica il rollup di `<commit>^` e quello di `<commit>` a due copie
+dell'albero pinnato e diffa i risultati.
 
 ```sh
-sh scripts/patch-from-commit.sh 15599ec ~/src/linux > 0031.patch
+sh scripts/patch-from-commit.sh <commit> ~/src/pin > 00NN.patch
 ```
 
 Verificato: sui nove commit da `0027` a `0036` lo script dà esattamente le dieci patch,

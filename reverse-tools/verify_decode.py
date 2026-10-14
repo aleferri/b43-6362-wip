@@ -23,7 +23,7 @@ SZ = REC.size
 OPS = {}  # nome -> codice, ricavato dal decoder per non duplicare la tabella
 
 
-def load_ops(path='decode-wl-diag.py'):
+def load_ops(path='../wl-diag/decode-wl-diag.py'):
     import os
     here = os.path.dirname(os.path.abspath(__file__))
     src = open(os.path.join(here, path), encoding='utf-8').read()

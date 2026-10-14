@@ -1,30 +1,31 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 #
-# Estrae il diff di UNA patch della serie dal commit che ha rigenerato
-# patches/b43/rollup.diff.
+# Estrae il diff di UNA patch della serie b43 dal commit che la porta.
 #
-#   ./scripts/patch-from-commit.sh <commit> [<albero kernel>]
-#
-# Il rollup e' un file solo finche' la serie non si spedisce, e i file per patch
-# non si tengono: si sono gia' desincronizzati una volta (i ventisei di
-# 394c9e2^ sono 718 righe dietro il rollup, vedi patches/b43/SPLIT.md). Il
-# confine per patch sta nella storia, non in una directory, e questo script lo
-# tira fuori: applica il rollup di <commit>^ e quello di <commit> a due alberi
-# identici e diffa i due risultati.
+#   ./scripts/patch-from-commit.sh <commit> [<albero pinnato>]
 #
 # Vale a una condizione, che e' la regola: UN commit per patch, con la sua voce
-# di MESSAGES.md nello stesso commit. Se un commit ne porta due, il diff che
-# esce e' la somma e va diviso a mano (e' successo con 0033 e 0034).
+# di patches/b43/MESSAGES.md nello stesso commit. Se un commit ne porta due, il
+# diff che esce e' la somma e va diviso a mano (e' successo con 0033 e 0034).
+#
+# Due epoche, riconosciute dal commit:
+#
+#   - un commit che tocca b43/ (la serie sta li' come file interi): il diff
+#     e' quello del commit su b43/, coi percorsi del kernel. Non serve
+#     l'albero.
+#   - un commit che tocca patches/b43/rollup.diff (la serie compressa in un
+#     file, fino alla riorganizzazione): applica il rollup di <commit>^ e
+#     quello di <commit> a due copie dell'albero pinnato, con le mainline, e
+#     diffa i risultati. Le mainline sono quelle del working tree.
 #
 # Verifica finale della divisione, quando si fa: applicare in sequenza tutte le
-# patch estratte sopra il rollup di partenza e confrontare l'albero col rollup
-# di arrivo. Se una e' tagliata male quel confronto fallisce.
+# patch estratte sull'albero pinnato con le mainline e confrontare con b43/.
 
 set -e
 
 COMMIT=${1:?uso: $0 <commit> [<albero kernel>]}
-KTREE=${2:-$HOME/src/linux}
+KTREE=${2:-$HOME/src/pin}
 REPO=$(git rev-parse --show-toplevel)
 SUB=drivers/net/wireless/broadcom/b43
 
@@ -33,9 +34,18 @@ if ! git -C "$REPO" rev-parse --verify -q "$COMMIT" >/dev/null; then
 	exit 1
 fi
 
-if ! git -C "$REPO" show "$COMMIT" --name-only --pretty=format: |
-		grep -qx patches/b43/rollup.diff; then
-	echo "$COMMIT non tocca patches/b43/rollup.diff: non e' una patch della serie" >&2
+TOUCHED=$(git -C "$REPO" show "$COMMIT" --name-only --pretty=format:)
+
+if echo "$TOUCHED" | grep -q '^b43/'; then
+	git -C "$REPO" diff \
+		--src-prefix=a/drivers/net/wireless/broadcom/ \
+		--dst-prefix=b/drivers/net/wireless/broadcom/ \
+		"$COMMIT^" "$COMMIT" -- b43/
+	exit 0
+fi
+
+if ! echo "$TOUCHED" | grep -qx patches/b43/rollup.diff; then
+	echo "$COMMIT non tocca b43/ ne' patches/b43/rollup.diff: non e' una patch della serie" >&2
 	exit 1
 fi
 

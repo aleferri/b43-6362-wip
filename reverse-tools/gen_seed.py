@@ -27,8 +27,8 @@ Tre fonti, in ordine di quando si presentano:
   - i `RETVAL` di una read: dicono lo stato meglio di qualunque inferenza, e
     vincono su quello che si era dedotto.
 
-    ./reverse-tools/gen_seed.py router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded \\
-        --before 132 --until 26100 --name up > test/seed_up.h
+    ./reverse-tools/gen_seed.py router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded \\
+        --before 132 --until 26100 --name up > test/unit/seed_up.h
 """
 
 import argparse

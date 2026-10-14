@@ -204,13 +204,13 @@ della cal la contiene per intero solo nella **cattura a freddo**,
 3499 read appaiate su 3499, e i piani si generano con
 
 ```sh
-./reverse-tools/gen_readplans.py router-data/dsl-3580l/full-init-ch1-bw20.decoded \
-    --range 2 32769 --name full --max-len 512 > test/readplans_full.h
+./reverse-tools/gen_readplans.py router-data/dsl3580l/full-init-ch1-bw20.decoded \
+    --range 2 32769 --name full --max-len 512 > test/unit/readplans_full.h
 ```
 
 che da' **148 piani**. Il `--max-len 512` non e' opzionale: col default a 64 i
 piani degli indirizzi che una cal rilegge decine di volte si troncano e la cal
-media lo specchio (vedi `test/README.md`).
+media lo specchio (vedi `test/unit/README.md`).
 
 **Tolleranza sui valori che dipendono da rccal.** Fra un init completo e uno
 parziale i valori di rccal cambiano di poche unita', e si e' visto anche su altri

@@ -67,7 +67,7 @@ per confrontare la chantab di b43 con tutti i cambi canale della cattura, e
 `trace_tables.py` per tirare fuori i payload delle table-op.
 
 Il confronto col port si fa sul trace **grezzo** (non collassato), con
-`test/compare.py`. Il collassato serve per le analisi macro, non per il gate di
+`test/unit/compare.py`. Il collassato serve per le analisi macro, non per il gate di
 regressione.
 
 Ogni cattura va in `router-data/<board>/` con il verbale accanto: senza il

@@ -24,7 +24,7 @@ ls /tmp/fw/b43/ | grep -E 'ucode22|initvals22'
 Tre esiti possibili:
 
 1. escono i tre file → non c'è nulla da fare, va solo documentata la
-   provenienza in `router-data/dsl-3580l/`;
+   provenienza in `router-data/dsl3580l/`;
 2. fwcutter non riconosce il blob (md5 sconosciuto) → serve una voce nuova nel
    suo elenco, patch da mandare a monte del fwcutter;
 3. fwcutter riconosce il blob ma non estrae il rev22 → la descrizione del

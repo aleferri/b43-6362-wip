@@ -1,6 +1,6 @@
 # Reportistica
 
-I template stanno in `reports/`. Regole: un report si compila con numeri
+I template stanno in `docs/reports/`. Regole: un report si compila con numeri
 misurati; le celle non misurate restano `—`, non si riempiono con stime. Un
 report con stime spacciate per misure fa più danno di un report vuoto, perché
 qualcuno ci costruirà sopra.
@@ -17,6 +17,16 @@ qualcuno ci costruirà sopra.
 
 ## Cosa va nel verbale di bring-up
 
-`bring-up-logs/` tiene i log grezzi con il contesto: kernel, commit del tree,
-patch applicate, comandi dati, e l'esito atteso vs osservato. Un `dmesg` senza
-il commit a cui si riferisce non è riproducibile.
+I log grezzi stanno nella radice del repo, uno per sessione, nominati
+
+    bringup-log-<data>-<board>-<cosa>.txt
+
+e cominciano con quattro righe di intestazione:
+
+    kernel:  <versione>
+    tree:    <sha di questo repo>
+    patch:   <serie applicata>
+    atteso:  <cosa doveva succedere>
+
+Poi il log. In coda, una riga su cosa è effettivamente successo se diverge. Un
+`dmesg` senza il commit a cui si riferisce non è riproducibile.

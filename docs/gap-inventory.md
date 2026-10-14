@@ -53,7 +53,7 @@ per radiorev 3 e 8 — il ramo comincia a `15593` — chiama
 
 Impatto atteso: sensibilità RX e comportamento AGC. **SALAME**: che sia il
 primo collo di bottiglia sul 2x2 è la mia ipotesi di lettura, va misurato
-(vedi `reports/30-rx-sensitivity.md`) prima di trattarlo come tale.
+(vedi `docs/reports/30-rx-sensitivity.md`) prima di trattarlo come tale.
 
 Patch: `patches/b43/MESSAGES.md#0001`, scritta sui valori della cattura e non su brcmsmac,
 perché i due divergono: LNA1 `8, 13, 18, 25` invece di `9, 14, 19, 24`, W1 clip
@@ -322,7 +322,7 @@ valori veri: dà al motore uno stato definito invece di quello che capita.
 
 ### 4e. I registri di bias IPA 2 GHz sono sbagliati sul rev 8 — CHIUSA
 
-Trovata dalla lista **al contrario** di `test/coverage.py`, cioè i registri che il
+Trovata dalla lista **al contrario** di `test/unit/coverage.py`, cioè i registri che il
 port scrive e il vendore no. Era una riga sola, `r05f`.
 
 Il ramo rev 7/8 dei workaround IPA scrive `0x5F` e `0xE8`, che sono
@@ -370,7 +370,7 @@ decodifica RX sono buchi veri, gli altri legittimi.
 
 ### 4g. La tabella dei campioni non contiene un tono — CHIUSA
 
-Trovata dalle finestre `sampleplay-*` di `test/phase_compare.py`, confrontando le
+Trovata dalle finestre `sampleplay-*` di `test/unit/phase_compare.py`, confrontando le
 160 word della tabella 17 op per op con la cattura.
 
 La tabella SAMPLEPLAY è lo stimolo di ogni calibrazione che suona campioni: cal

@@ -1,0 +1,1 @@
+phy_n.c  warning: enumeration value 'B43_BUS_SSB' not handled in switch [-Wswitch]

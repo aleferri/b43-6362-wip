@@ -46,7 +46,7 @@ Note per il repo, non per la mailing list:
   - **Non gateata**, come `0010`: e' un refuso di precedenza in un'espressione
     condivisa da ogni N-PHY rev 3+, e gatearla su rev 8 lascerebbe il difetto
     dov'e' per tutti gli altri.
-  - Misura: harness in `test/`, flow `init`. I nove coefficienti passano da nove
+  - Misura: harness in `test/unit/`, flow `init`. I nove coefficienti passano da nove
     `0x3f` a `0x1b8 = 0x3f` piu' otto `0x3e`, identici alla cattura. Serve
     `readplans_init.h` rigenerato con `--max-len 512`: col troncamento a 64 la
     cal mediava lo specchio e il difetto non era visibile.

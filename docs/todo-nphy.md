@@ -4,7 +4,7 @@ Elenco di lavoro, non di lamentele: ogni voce ha come è stata trovata, cosa
 manca, e cosa serve per chiuderla. Le voci già chiuse stanno in
 `gap-inventory.md`; qui c'è quello che resta aperto dopo le sei patch.
 
-Misure con `test/coverage.py` contro il primo init della cattura, flow `init` sul
+Misure con `test/unit/coverage.py` contro il primo init della cattura, flow `init` sul
 **canale 1**, cioè lo stesso del vendore. Il canale conta: con il port su un
 canale diverso nove registri della chantab risultano "diversi" e non lo sono.
 
@@ -135,7 +135,7 @@ cattura. Il valore giusto è `0x02`, cioè quello che la tabella di init già me
 il difetto è la scrittura di `1` nel setup, che va tolta per il rev 8.
 
 Non è ancora una patch perché su quel registro passa la misura di potenza e la
-patch va accompagnata dalla misura corrispondente (`reports/40-tx-power.md`), come
+patch va accompagnata dalla misura corrispondente (`docs/reports/40-tx-power.md`), come
 `0001` e `0002`. Ma il valore non è più in discussione.
 
 ### 3d bis. E un refuso di trascrizione, nella riga accanto
@@ -191,7 +191,7 @@ inesistente, e la voce 5b gonfiata da 10 a 18.
 ## 3e. Nota di metodo: il confronto posizionale viene prima
 
 Le voci 3a-3d sono uscite da `coverage.py --values`, che confronta insiemi e
-primi valori. È la misura debole. Quella forte è `test/phase_compare.py`, che
+primi valori. È la misura debole. Quella forte è `test/unit/phase_compare.py`, che
 diffa op per op dentro una finestra allineata.
 
 Applicata al TSSI dice una cosa precisa: non è "un valore diverso su `0x17b`", è
@@ -302,7 +302,7 @@ e un piano che peggiora il risultato non va committato solo perché è più
 ```sh
 cd test
 ./nphy_trace init dsl3580l 1 > /tmp/port.out          # canale 1, come il vendore
-./coverage.py ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded \
+./coverage.py ../router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded \
     /tmp/port.out --range 132 26100 --values
 ```
 

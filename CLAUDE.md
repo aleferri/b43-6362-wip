@@ -13,41 +13,37 @@ misura e correggere la riga.
 Portare in b43 il supporto **BCM6362 / N-PHY rev 8 / radio 2057 rev 8**, guidati
 da una cattura MMIO del driver proprietario `wl 6.30.102.7`. Sette patch già
 merged in mainline (`docs/upstream-status.md`), dodici candidate in
-`patches/mainline/`, trentasei compresse nel rollup di `patches/b43/`. **Niente ha
+`patches/mainline/`, trentasei nella serie che sta in `b43/`. **Niente ha
 mai girato su hardware**: tutto è verificato riproducendo la cattura in un harness
 che compila il vero `phy_n.c`.
 
 ## Setup, ogni volta
 
 ```sh
-sh scripts/fetch-upstream-state.sh ~/src/linux      # sparse, ~60 MB, ATTENZIONE: master
-cd ~/src/linux
-for p in .../patches/mainline/*.patch; do git apply "$p"; done   # tutte e dodici
-git apply .../patches/b43/rollup.diff                            # applica pulito
-cd test && make KDIR=~/src/linux && make KDIR=~/src/linux warncheck
-./phase_compare.py --vendor ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+sh scripts/fetch-upstream-state.sh ~/src/pin        # albero pinnato, dal tarball
+cd test/unit && make KDIR=~/src/pin && make KDIR=~/src/pin warncheck
+./phase_compare.py --vendor ../../router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded
 ```
 
-**Quella prima riga senza secondo argomento prende `master`, non `848acc8ffe1b`**, e
-lo script non sa prendere uno sha: `git clone --branch` vuole un nome di ref, e
-`git fetch origin 848acc8ffe1b` **fallisce** perche' una want-line vuole 40 caratteri
-e non 12 (`couldn't find remote ref`). Per l'albero pinnato la strada che funziona e'
-il tarball, che l'abbreviato lo accetta, e la ricetta sta in testa allo script. Se si
-misura su `master` i numeri sotto non hanno nessun motivo di tornare, e i riferimenti
-`file:riga` sicuramente no.
+I file che il port cambia stanno **interi** in `b43/` (e quelli di bcma in
+`bcma/`, ai loro percorsi nel kernel), sull'albero `848acc8ffe1b` che
+`patches/regen-base` dichiara. L'harness prende quelli da `b43/` e il resto
+(header non toccati, `cordic.c`) da `KDIR`, che quindi resta **pulito**: non ci si
+applica niente. Lo script senza secondo argomento prende proprio quell'albero;
+con un ref (`master`) prende upstream, e su quello i numeri sotto non hanno
+nessun motivo di tornare, e i riferimenti `file:riga` sicuramente no.
 
-`patches/mainline/` fa parte del baseline delle misure: senza quelle patch i numeri
-sotto non tornano, e prima di cercare una regressione altrove si controlla che ci
-siano. Il rollup vuole `mainline/` **prima** e non applica da solo, perche' non
-contiene `0010` e `0022`: erano duplicati di due delle mainline. Il costo e' che
-`check_patch_gating.py` da' un verdetto unico per tutto il rollup invece di uno per
-patch; i tre punti non gateati e le loro dichiarazioni sono in testa a
-`rollup.diff`.
+`b43/` contiene anche le dodici di `patches/mainline/`: fanno parte del baseline
+delle misure, e senza i numeri sotto non tornano. Per la stessa ragione
+`scripts/series-diff.sh ~/src/pin` stampa la serie b43 come diff **dall'albero
+pinnato con le mainline applicate**: non contiene `0010` e `0022`, che erano
+duplicati di due delle mainline. `check_patch_gating.py` su quel diff da' un
+verdetto unico per tutta la serie; le dichiarazioni sui punti non gateati sono in
+`patches/b43/NOTES.md`.
 
-`patches/b43/` e' **un file solo** finche' si costruisce: la serie si ridivide prima
-di mandare qualunque cosa, e i messaggi delle trentasei patch stanno in
-`patches/b43/MESSAGES.md`. Le citazioni per numero nei documenti e in
-`phase_compare.py` risolvono contro quel file.
+La serie si ridivide prima di mandare qualunque cosa, e i messaggi delle
+trentasei patch stanno in `patches/b43/MESSAGES.md`. Le citazioni per numero nei
+documenti e in `phase_compare.py` risolvono contro quel file.
 
 **Come ridividerla sta in `patches/b43/SERIES.md`**: otto serie per competenza, non
 un thread da trentasei. L'ordine di `MESSAGES.md` e' quello di scoperta e non serve a
@@ -57,12 +53,13 @@ stessa funzione, misurati, e il peggiore e' `b43_nphy_txpwr_index` con quattro.
 **La regola che rende quella divisione possibile e' una sola: un commit per patch, con
 la sua voce di `MESSAGES.md` nello stesso commit.** Il confine per patch sta nella
 storia, non in una directory di file che si desincronizzano — i ventisei file che
-c'erano fino a `394c9e2` sono 718 righe dietro il rollup, ed e' peggio del non
-averli. `scripts/patch-from-commit.sh` estrae la patch di un commit quando serve, e
+c'erano fino a `394c9e2` sono 718 righe dietro la serie, ed e' peggio del non
+averli. `scripts/patch-from-commit.sh` estrae la patch di un commit quando serve
+(commit su `b43/`, o sul vecchio `rollup.diff` per la storia di prima), e
 `patches/b43/SPLIT.md` ha i numeri.
 
 La catena di dipendenze dentro la serie serve alla **ri-divisione**, non al build:
-misurata con `git apply` sull'albero pulito, 0004 dipende da **0002** (contesto in
+misurata con `git apply` sull'albero pinnato pulito, 0004 dipende da **0002** (contesto in
 `tables_nphy.c`), 0009 da 0004, 0012 da **0009**. 0003 non serve a nessuna delle
 tre.
 
@@ -70,14 +67,14 @@ tre.
 
 | cosa | dove |
 |---|---|
-| harness, flow `init initpor initcal full chanset rfkill txpower` | `test/nphy_trace` |
-| confronto per fase, 18 finestre | `test/phase_compare.py` |
-| confronto globale + per regione | `test/phase_compare.py --global-run DA A --flow F` |
-| copertura per insiemi di celle | `test/coverage.py` |
+| harness, flow `init initpor initcal full chanset rfkill txpower` | `test/unit/nphy_trace` |
+| confronto per fase, 18 finestre | `test/unit/phase_compare.py` |
+| confronto globale + per regione | `test/unit/phase_compare.py --global-run DA A --flow F` |
+| copertura per insiemi di celle | `test/unit/coverage.py` |
 | storia di una cella di tabella | `reverse-tools/trace_tables.py --cell ID:OFF` |
 | segmentazione su un marcatore | `reverse-tools/segment_marker.py` |
-| normalizzazione, `Op` con `.ep` | `test/compare.py` |
-| **seed**: lo stato che `op_init` e `rfkill` lasciano | `reverse-tools/gen_seed.py` → `test/seed_up.h` |
+| normalizzazione, `Op` con `.ep` | `test/unit/compare.py` |
+| **seed**: lo stato che `op_init` e `rfkill` lasciano | `reverse-tools/gen_seed.py` → `test/unit/seed_up.h` |
 | accessi SHM, clock PHY, macfreq, confini MAC (catture nuove) | hook `wlc_bmac_*` in `wl-diag/wl_diag.c` |
 | buchi di dispatch, xref brcmsmac, gating delle patch | `reverse-tools/*.py` |
 
@@ -284,8 +281,8 @@ La stessa regione ha fatto trovare il difetto del campo dell'indice: la cattura
 legge `0x1ed`/`0x1ee` a #7034 e #7036 e rende `0x1900`, quindi l'indice e' 25 e i
 sette bit bassi sono zero. Il port ne scriveva 0 dove il vendore scrive 25.
 
-Serve anche la lettura di `GPIO_SEL` fuori dal gate della scrittura (vedi la testa di
-`rollup.diff`): senza, la regione si spezza in 22 blocchi invece di 3. E' inerte
+Serve anche la lettura di `GPIO_SEL` fuori dal gate della scrittura (vedi
+`patches/b43/NOTES.md`): senza, la regione si spezza in 22 blocchi invece di 3. E' inerte
 sull'hardware e non e' un candidato mainline.
 
 ## Le cinque coppie di TXPCTL_STAT all'ingresso, attribuite
@@ -650,7 +647,7 @@ l'allineamento aveva slittato. L'init da 8297 a **8351** appaiate e le sue assen
 183 a **129**, il totale delle assenti da 261 a **207**, i blocchi da 21396 a
 **21450** e a freddo da 21257 a **21299**. `MESSAGES.md#0031`. Nota: `docs/gap-inventory.md`
 resta com'e', perche' quella tabella e' misurata sul tree **pristine** e lo stub la'
-c'e' ancora — e' il rollup che lo riempie.
+c'e' ancora — e' `b43/` che lo riempie.
 
 **Il tratto a #10714: b43 lascia acceso l'override lpf, una volta per init.** Non sono
 quattro op di trace, e' uno stato che resta nell'hardware. Contati sui due lati:
@@ -806,7 +803,7 @@ le letture appaiate di `0x20`/`0x2a7`, `0x21`/`0x2a8`, `0x22`/`0x2a9` e le quatt
 
 - **`M_CTS_DURATION`: messo.** La fase RXCAL ora lo scrive col MAC acceso, come il
   riferimento. Serviva una define nuova, `B43_SHM_SH_CTSDUR = 0x00B8`, e la stessa in
-  `test/stubs/b43_defs.h`, che il README dichiara generato dal `b43.h` del tree ma per
+  `test/unit/stubs/b43_defs.h`, che il README dichiara generato dal `b43.h` del tree ma per
   cui non c'e' uno script: aggiunta a mano, conteggio da 487 a 488.
 
   E ha fatto emergere due cose sul confronto. `MAC.EN`/`MAC.SUSP` **il port li
@@ -1087,7 +1084,7 @@ le letture appaiate di `0x20`/`0x2a7`, `0x21`/`0x2a8`, `0x22`/`0x2a9` e le quatt
   sample play. Le altre sei sono altri due siti che b43 ha gia'. Il valore buttato non
   autorizza a togliere la lettura: una read di un registro PHY non e' senza effetti.
 
-  Aggiunte (rollup, `MESSAGES.md#0027`): `rxiq-ingresso` da 57 divergenze a **37** e
+  Aggiunte (`MESSAGES.md#0027`): `rxiq-ingresso` da 57 divergenze a **37** e
   run da 510 a 532, `cal-rssi-2` a **960 su 960**, `idle-tssi` da 357 a 432, run per
   fase da 8779 a **8896**.
 
@@ -1585,7 +1582,7 @@ di gatare contro un conteggio a zero.
 ## I seed, e quanto valgono
 
 `reverse-tools/gen_seed.py --before 132` guarda **solo i record che precedono la
-finestra** ed emette `test/seed_up.h`, che `main.c` applica dopo l'init a freddo e
+finestra** ed emette `test/unit/seed_up.h`, che `main.c` applica dopo l'init a freddo e
 prima di quello tracciato. Due categorie:
 
 1. cio' che `op_init` e `rfkill` hanno programmato;
@@ -1693,10 +1690,12 @@ porta aveva toccato.
    sbagliata, rifatte su `brcmsmac` che le aveva tutte. **Le domande sul
    comportamento vanno a `brcmsmac` prima**, e `PROVENANCE.md` si legge prima di
    aprire il blob, non dopo.
-2. Costruito l'harness contro un tree **senza le patch** e letto i risultati come
-   regressioni. Controllare `git -C ~/src/linux diff --stat` prima di credere a un
-   numero. (Idea aperta: farlo fallire in `make`.)
-3. Citato numeri di riga presi dal tree patchato: `phy_n.c:4021` invece di `3950`.
+2. Costruito l'harness contro un albero diverso da quello che credevo, e letto i
+   risultati come regressioni. I file del port ora vengono sempre da `b43/`, e
+   `KDIR` conta solo per cio' che il port non tocca: deve essere l'albero pinnato,
+   e `git -C ~/src/pin status` deve essere vuoto prima di credere a un numero.
+3. Citato numeri di riga di `b43/` come se fossero del pinnato: `phy_n.c:4021`
+   invece di `3950`.
 4. Contata una fase su una finestra a occhio che ne mescolava tre, e concluso il
    falso ("70 registri sottoinsieme dei 412" — 32 su 70 avevano valore diverso).
 5. Ricostruito a mano la corrispondenza op→record: deriva fino a 230 op.
@@ -1729,11 +1728,11 @@ porta aveva toccato.
 12. I **bit di esecuzione** si perdono a ogni merge fatto applicando il diff
     (`git apply` senza `--index` non li mette nell'indice). Sette volte finora:
     `sh scripts/check-exec-bits.sh`.
-13. **Tagliata la testa di `rollup.diff` per numero di righe**, e prima ancora sul
-    primo `---`: ma la nota di copertura usa `---` anche fra un incremento e
-    l'altro, quindi sono spariti 73 righe di incrementi, due volte. Si taglia sul
-    primo `diff --git`, e si controlla che il pezzo sopravvissuto combaci con
-    `git show HEAD` prima di ricucire.
+13. **Tagliato un testo misto di note e diff per numero di righe**, e prima ancora
+    sul primo `---`: ma le note usano `---` anche fra un incremento e l'altro, e
+    sono sparite 73 righe di incrementi, due volte (la testa del vecchio rollup,
+    oggi `patches/b43/NOTES.md`). Si taglia sul primo `diff --git`, e si
+    controlla che il pezzo sopravvissuto combaci col sorgente prima di ricucire.
 
 ## Difetti trovati in mainline, per ricordare cosa cercare
 

@@ -20,7 +20,7 @@ apre lo svuotamento della tabella di potenza.
         --marker 'TBL\\.RD\\s+id=0x0007 off=0x0110 len=2' \\
         --marker 'PHY\\.WR\\s+addr=0x0072 val=0x6840' \\
         --within 12 --range 132 26100 \\
-        router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded /tmp/port.out
+        router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded /tmp/port.out
 
 Non appaia le op e non calcola percentuali: quello lo fa phase_compare.py. Qui si
 guarda solo quanti segmenti ci sono, quanto sono lunghi e di che op sono fatti,

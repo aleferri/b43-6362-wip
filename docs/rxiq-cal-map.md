@@ -142,7 +142,7 @@ Quello che questa mappa rende possibile e' l'ordine di lavoro: `physetup` e
 `radio_setup` per core sono scritture pure e verificabili per intero — sono la
 stessa categoria del punto 1 di `papd-cal-map.md` — mentre lo sweep vuole i piani
 di lettura in ordine, e i piani ora la posizione ce l'hanno
-(`test/README.md`, piani posizionali).
+(`test/unit/README.md`, piani posizionali).
 
 ## Anche questa sta nella cattura a freddo, ed e' contigua
 

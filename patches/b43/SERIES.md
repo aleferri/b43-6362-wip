@@ -1,7 +1,7 @@
 # patches/b43 — come dividere le trentasei
 
-Questo è un **piano per quando si spedirà**, non qualcosa da fare ora: il rollup resta
-un file solo finché la SPROM non ha una strada upstream, e il perché sta in `SPLIT.md`.
+Questo è un **piano per quando si spedirà**, non qualcosa da fare ora: la serie resta
+indivisa in `b43/` finché la SPROM non ha una strada upstream, e il perché sta in `SPLIT.md`.
 
 Trentasei patch in un thread non si leggono. `MESSAGES.md` le tiene in ordine di
 scoperta, che è l'ordine in cui sono state trovate e non l'ordine in cui hanno senso

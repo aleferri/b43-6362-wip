@@ -3,7 +3,7 @@
 Il core 802.11 del 6362 non è su PCI: sta su un backplane AXI/OCP interno al
 SoC, enumerabile da bcma. Mainline non lo tocca (`arch/mips/bcm63xx` non ha
 nulla di wireless, e il target `bmips` di OpenWrt non ha nodo DT per la
-wireless integrata). Il glue vive quindi qui, in `patches/bcma/`.
+wireless integrata). Il glue vive quindi qui, in `patches/`.
 
 ## Perché il `bcma_host_soc` generico non basta
 

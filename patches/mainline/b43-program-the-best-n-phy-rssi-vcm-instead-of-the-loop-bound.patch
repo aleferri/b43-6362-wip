@@ -24,7 +24,7 @@ writes on the second core, 3 on both sides, where before it wrote 8.
 Not tested on hardware.
 
 Link: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/broadcom/brcm80211/brcmsmac/phy/phy_n.c?id=848acc8ffe1b#n22498
-Link: https://github.com/aleferri/b43-6362-wip/blob/HEAD/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
+Link: https://github.com/aleferri/b43-6362-wip/blob/054601d/router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded
 
 Records #22377 to #23541 of that capture are the two VCM sweeps of the
 second RSSI calibration, one per core. The write that selects the winner for

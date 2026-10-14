@@ -13,8 +13,8 @@ lettura di 0x2a4 nella cattura. Non e' l'ordine globale, che il port non segue
 comunque perche' ordina le fasi in modo diverso; per i poll e i loop di cal, che
 leggono lo stesso registro piu' volte di fila, e' esattamente quello che serve.
 
-    ./gen_readplans.py ../router-data/dsl-3580l/opinit-ch1-ch6-bw20.decoded \\
-        --range 132 26100 --name init > ../test/readplans_init.h
+    ./gen_readplans.py ../router-data/dsl3580l/opinit-ch1-ch6-bw20.decoded \\
+        --range 132 26100 --name init > ../test/unit/readplans_init.h
 """
 
 import argparse

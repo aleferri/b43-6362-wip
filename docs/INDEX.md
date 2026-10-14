@@ -11,7 +11,7 @@
 | `brcmsmac-xref.md` | quali funzioni brcmsmac guardare per ogni buco |
 | `ht20-mimo-plan.md` | il piano per HT20 2x2, in milestone con criteri di uscita |
 | `upstreaming.md` | cosa è proponibile così com'è e cosa no |
-| `../patches/b43/SERIES.md` | come dividere le trentasei del rollup: otto serie per competenza, e i punti di conflitto |
+| `../patches/b43/SERIES.md` | come dividere le trentasei della serie: otto serie per competenza, e i punti di conflitto |
 | `../patches/b43/SPLIT.md` | perché la serie resta un file solo, la regola un commit una patch, e cosa è già costato |
 | `firmware-rev22.md` | ucode/initvals rev22: cosa serve e cosa è da verificare |
 | `blob-inventory.md` | inventario dei simboli N-PHY/2057 nel blob OEM |
