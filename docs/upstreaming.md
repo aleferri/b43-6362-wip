@@ -32,6 +32,11 @@ Tre strade, in ordine di costo crescente per chi le deve far accettare:
    con quelli di bcma/b43.
 3. **niente SPROM**: derivare tutto da default per chip. Non regge: i 38 fixup
    della DSL-3580L includono calibrazioni PA per catena, cioè roba per board.
+   Un secondo esemplare dello stesso core, wl0 della TG789vac v2, ha una SROM
+   che differisce da quella della DSL-3580L in 38 parole su 220, tutte di
+   potenza: antenna gain, maxpower e PA per catena, offset per rate 2.4 GHz. Le
+   altre 182, `boardtype` e `boardflags` compresi, coincidono
+   (`router-data/tg789vac-v2/README.md`).
 
 Da decidere prima di scrivere codice, perché cambia dove vive il parsing.
 

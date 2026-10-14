@@ -20,5 +20,6 @@
 | `papd-cal-map.md` | la cal PAPD nella cattura: fasi, intervalli di record, funzioni brcmsmac |
 | `rf-pwr-offset-rev8.md` | la tabella RF power offset del rev 8: perché i valori in tree sono sbagliati |
 | `phy-g-only.md` | i punti dove b43 ha un ramo per la G e non per la N |
+| `ac-wip-xref.md` | cosa c'e' in b43-ac-wip per il core N: dati, base comune, punti d'incontro nel codice, strumenti |
 | `capture-protocol.md` | come si cattura una traccia utile, e cosa la rende inutile |
 | `reporting.md` | l'insieme dei report e i criteri di accettazione |

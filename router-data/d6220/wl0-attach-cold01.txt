@@ -1,0 +1,49 @@
+    595.796000 #29       cpu1 OTP.RDR  addr=0x0001 val=0xffffffff
+    595.796000 #30       cpu1 OTP.INIT addr=0x0000 val=0x00000000
+    595.827000 #33       cpu1 SI.COREREG core=0x0000 off=0x0088 val=0x0000ffff a5=0x0000ffff a6=0x00000000
+    595.827000 #36       cpu1 MAC.MCTRL val=0x04000400 mask=0xffffffff
+    595.828000 #37       cpu1 OBJ.BULKR addr=0x0000 len=4 a5=0x00010000 a6=0x00000000
+    595.828000 #39       cpu1 OBJ.RD   addr=0x0000 val=0x000003a0 sel=0x10000
+    595.828000 #41       cpu1 OBJ.RD   addr=0x0002 val=0x00002715 sel=0x10000
+    595.828000 #43       cpu1 OBJ.BULKW addr=0x0000 len=4 a5=0x00010000 a6=0x00000000
+    595.828000 #45       cpu1 OBJ.WR   addr=0x0000 val=0x55aa sel=0x10000
+    595.828000 #46       cpu1 OBJ.WR   addr=0x0002 val=0xaa55 sel=0x10000
+    595.828000 #47       cpu1 OBJ.BULKR addr=0x0000 len=4 a5=0x00010000 a6=0x00000000
+    595.828000 #49       cpu1 OBJ.RD   addr=0x0000 val=0x000055aa sel=0x10000
+    595.828000 #51       cpu1 OBJ.RD   addr=0x0002 val=0x0000aa55 sel=0x10000
+    595.828000 #53       cpu1 OBJ.BULKW addr=0x0000 len=4 a5=0x00010000 a6=0x00000000
+    595.828000 #55       cpu1 OBJ.WR   addr=0x0000 val=0xaa55 sel=0x10000
+    595.828000 #56       cpu1 OBJ.WR   addr=0x0002 val=0x55aa sel=0x10000
+    595.828000 #57       cpu1 OBJ.BULKR addr=0x0000 len=4 a5=0x00010000 a6=0x00000000
+    595.828000 #59       cpu1 OBJ.RD   addr=0x0000 val=0x0000aa55 sel=0x10000
+    595.828000 #61       cpu1 OBJ.RD   addr=0x0002 val=0x000055aa sel=0x10000
+    595.829000 #63       cpu1 OBJ.BULKW addr=0x0000 len=4 a5=0x00010000 a6=0x00000000
+    595.829000 #65       cpu1 OBJ.WR   addr=0x0000 val=0x03a0 sel=0x10000
+    595.829000 #66       cpu1 OBJ.WR   addr=0x0002 val=0x2715 sel=0x10000
+    595.829000 #67       cpu1 MAC.MCTRL val=0x04000400 mask=0xffffffff
+    595.831000 #68       cpu1 PHY.WARR  n=12
+    595.831000 #69       cpu1 PHY.WR   addr=0x00a6 val=0x000d
+    595.831000 #70       cpu1 PHY.WR   addr=0x008f val=0x0000
+    595.832000 #71       cpu1 PHY.WR   addr=0x00a7 val=0x000d
+    595.832000 #72       cpu1 PHY.WR   addr=0x00a5 val=0x0000
+    595.832000 #73       cpu1 PHY.AND  addr=0x0078 val=0xfbff (clr 0x0400)
+    595.833000 #74       cpu1 MAC.MHF  addr=0x0000 val=0x0000 mask=0x0010 a5=0x00000002 a6=0x00000000
+    595.833000 #76       cpu1 MAC.MHF  addr=0x0001 val=0x0000 mask=0x0100 a5=0x00000002 a6=0x00000000
+    595.833000 #78       cpu1 MAC.MHF  addr=0x0002 val=0x0000 mask=0x2000 a5=0x00000002 a6=0x00000000
+    595.833000 #80       cpu1 MAC.MHF  addr=0x0001 val=0x0000 mask=0x0200 a5=0x00000002 a6=0x00000000
+    595.833000 #82       cpu1 MAC.MHF  addr=0x0002 val=0x0000 mask=0x1504 a5=0x00000002 a6=0x00000000
+    595.833000 #84       cpu1 MAC.MHF  addr=0x0002 val=0x0000 mask=0x1000 a5=0x00000000 a6=0x00000000
+    595.833000 #86       cpu1 MAC.MHF  addr=0x0004 val=0x0000 mask=0x0006 a5=0x00000002 a6=0x00000000
+    595.833000 #88       cpu1 PHY.AND  addr=0x0078 val=0xfbff (clr 0x0400)
+    595.833000 #89       cpu1 PHY.WARR  n=12
+    595.833000 #90       cpu1 PHY.WR   addr=0x008f val=0x07ff
+    595.833000 #91       cpu1 PHY.WR   addr=0x00a6 val=0x00fd
+    595.833000 #92       cpu1 PHY.WR   addr=0x00a5 val=0x07ff
+    595.833000 #93       cpu1 PHY.WR   addr=0x00a7 val=0x00fd
+    595.840000 #94       cpu1 MAC.MHF  addr=0x0003 val=0x0040 mask=0x0040 a5=0x00000000 a6=0x00000000
+    595.871000 #96       cpu1 MAC.MHF  addr=0x0003 val=0x0040 mask=0x0040 a5=0x00000000 a6=0x00000000
+    635.454000 #38434    cpu1 GPIO.OUT val=0x00000000 mask=0x00000000
+    635.454000 #38435    cpu1 SI.COREREG core=0x0000 off=0x0064 val=0x00000000 a5=0x00000000 a6=0x00000000
+    635.454000 #38438    cpu1 GPIO.OE  val=0x00000000 mask=0x00000000
+    635.454000 #38439    cpu1 SI.COREREG core=0x0000 off=0x0068 val=0x00000000 a5=0x00000000 a6=0x00000000
+    635.454000 #38442    cpu1 SI.COREREG core=0x0000 off=0x008c val=0x00000000 a5=0x00000000 a6=0x00000000

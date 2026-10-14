@@ -1,0 +1,19 @@
+######wl version######
+6.30 RC102.7
+wl0: Jul  8 2013 13:52:55 version 6.30.102.7.cpe4.12L07.0
+vendorid 0x14e4
+deviceid 0x435f
+radiorev 0x82057000
+chipnum 0x6362
+chiprev 0x1
+chippackage 0x0
+corerev 0x16
+boardid 0x513
+boardvendor 0x14e4
+boardrev P230
+driverrev 0x61e6607
+ucoderev 0x3100002
+bus 0x0
+phytype 0x4
+phyrev 0x8
+anarev 0x0

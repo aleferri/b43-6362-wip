@@ -19,7 +19,9 @@ dato, è un file.
 
 Dentro ci sono due catture decodificate col verbale accanto — `opinit-ch1-ch6-bw20`
 (init a caldo, due cicli, senza perdite) e `full-init-ch1-bw20`, descritta qui
-sotto — piu' `nvram.txt` e `srdump.txt` del device.
+sotto — piu' `nvram.txt` e `srdump.txt` del device, e `wl0_revinfo.txt`, il blocco
+versioni di `router_info.txt` di `b43-ac-wip` a `01e1329` (vedi
+`docs/ac-wip-xref.md`).
 
 ## `full-init-ch1-bw20.decoded`
 
