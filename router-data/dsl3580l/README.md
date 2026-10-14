@@ -1,90 +1,95 @@
 # D-Link DSL-3580L
 
-BCM6362 con radio 2.4 GHz integrato (N-PHY rev 8, radio 2057 rev 8) e una
-scheda PCIe BCM4352 per il 5 GHz. Qui interessa solo il radio integrato.
+BCM6362 with an integrated 2.4 GHz radio (N-PHY rev 8, radio 2057 rev 8) and a
+BCM4352 PCIe card for 5 GHz. Only the integrated radio matters here; the
+BCM4352 is `b43-ac-wip`'s board (`docs/ac-wip-xref.md`).
 
-Blob OEM di riferimento: `wl 6.30.102.7.cpe4.12L07.0` (`wlDSL-3580_EU.o`), non
-incluso nel repo perché proprietario.
+Reference OEM blob: `wl 6.30.102.7.cpe4.12L07.0` (`wlDSL-3580_EU.o`), not
+included in the repository because it is proprietary.
 
-## Cosa mettere in questa cartella
+## What goes in this directory
 
-I binari del tracer **non si committano**: il testo decodificato è la forma
-utile e il binario non aggiunge nulla, purché prima si verifichi che il testo
-non perda campi (`reverse-tools/verify_decode.py`). Nel verbale vanno la
-dimensione e lo sha256 del binario di partenza, così la conversione resta
-verificabile a posteriori.
+The tracer's binaries **are not committed**: the decoded text is the useful
+form and the binary adds nothing, provided it is first checked that the text
+loses no field (`reverse-tools/verify_decode.py`). The record of the capture
+carries the size and the sha256 of the source binary, so the conversion stays
+verifiable afterwards.
 
-Le catture vanno accompagnate dal verbale. Un `.raw` senza verbale non è un
-dato, è un file.
+Captures come with their record. A `.raw` without one is not data, it is a file.
 
-Dentro ci sono due catture decodificate col verbale accanto — `opinit-ch1-ch6-bw20`
-(init a caldo, due cicli, senza perdite) e `full-init-ch1-bw20`, descritta qui
-sotto — piu' `nvram.txt` e `srdump.txt` del device, e `wl0_revinfo.txt`, il blocco
-versioni di `router_info.txt` di `b43-ac-wip` a `01e1329` (vedi
-`docs/ac-wip-xref.md`).
+There are two decoded captures with their record next to them —
+`opinit-ch1-ch6-bw20` (hot init, two cycles, no loss) and `full-init-ch1-bw20`,
+described below — plus the device's `nvram.txt` and `srdump.txt`, and
+`wl0_revinfo.txt`, the version block of `b43-ac-wip`'s `router_info.txt` at
+`01e1329` (see `docs/ac-wip-xref.md`).
 
 ## `full-init-ch1-bw20.decoded`
 
-Init **a freddo** su canale 1, 20 MHz, radio integrato, wl 6.30.102.7. 81397 record.
+**Cold** init on channel 1, 20 MHz, integrated radio, wl 6.30.102.7. 81397
+records.
 
-Ottenuta azzerando `hw_up` con `setmem` e rifacendo `wl up`, cosi' il PHY
-reinizializza per intero: contiene il **download delle tabelle statiche**, che la
-`opinit-*` non ha perche' e' un init a caldo. Il marcatore e' `PHY.WR addr=0x0072
-val=0x2800`, l'apertura della tabella 10, a #3569.
+Taken by clearing `hw_up` with `setmem` and doing `wl up` again, so the PHY
+initialises in full: it contains the **download of the static tables**, which
+`opinit-*` does not have because it is a hot init. The marker is
+`PHY.WR addr=0x0072 val=0x2800`, the opening of table 10, at #3569.
 
-**Ha un buco**: 65285 record persi in un solo salto fra `#32769` e `#98055`, per
-overflow della fifo -- il lettore non drenava durante la raffica, e `#32769` e'
-esattamente `FIFO_RECS + 1`. I record **da #2 a #32769 sono contigui** e contengono
-l'init intero compresa la cal PAPD (tabella scalare a #18662), quindi quella parte e'
-confrontabile posizionalmente. Oltre il buco c'e' un secondo ciclo, non contiguo col
-primo.
+**It has a hole**: 65285 records lost in a single jump between `#32769` and
+`#98055`, from a FIFO overflow — the reader was not draining during the burst,
+and `#32769` is exactly `FIFO_RECS + 1`. Records **#2 to #32769 are
+contiguous** and contain the whole init including the PAPD cal (scalar table at
+#18662), so that part can be compared positionally. Beyond the hole there is a
+second cycle, not contiguous with the first.
 
-Per rifarla senza il buco: la pipe di lettura deve essere attiva **e drenare** prima
-del `setmem`, non solo lanciata.
+To take it again without the hole: the reading pipe has to be running **and
+draining** before the `setmem`, not just started.
 
-### Come e' stata ottenuta
+### How it was taken
 
-Il driver era **su** e poi giu': `hw_up` resta a 1 perche' il percorso di down del blob
-non lo azzera, quindi un `wl up` da la' rifa' solo un init parziale. Azzerandolo a mano
-il successivo up passa da `hw_up()` -> `wlc_phy_por_inform()` e il PHY reinizializza per
-intero.
+The driver was **up** and then down: `hw_up` stays at 1 because the blob's down
+path does not clear it, so a `wl up` from there only redoes a partial init.
+Clearing it by hand, the next up goes through `hw_up()` ->
+`wlc_phy_por_inform()` and the PHY reinitialises in full.
 
-L'ordine conta: la pipe di lettura deve **drenare** prima che parta la raffica, o la
-fifo (32768 record) va in overflow — che e' come si e' preso il buco di questa cattura.
+The order matters: the reading pipe has to **drain** before the burst starts,
+or the FIFO (32768 records) overflows — which is how this capture got its
+hole.
 
 ```sh
-# 1. tracer armato. In dmesg escono i base pointer delle istanze:
+# 1. tracer armed. dmesg prints the instances' base pointers:
 insmod wl_diag.ko arm=1
 #    wl_diag: wl0: priv=82ac34e0 (netdev=82ac3180, ops=wl_dslcpe_netdev_ops)
 
-# 2. dal priv di wl0 si cammina fino a hw_up. Gli indirizzi sono di QUELLA
-#    istanza e cambiano a ogni caricamento di wl: rifare i dumpmem ogni volta.
+# 2. from wl0's priv, walk to hw_up. The addresses belong to THAT
+#    instance and change at every load of wl: redo the dumpmem every time.
 dumpmem 0x82ac34e0 8      # priv -> wl_if            = 0x83af4e00
 dumpmem 0x83af4e00 8      # wl_if + 0x04 -> radio    = 0x82a49000
 dumpmem 0x82a49000 32     # radio + 0x04 -> pub      = 0x82a4bc80
-dumpmem 0x82a4bc80 48     # pub + 0x2c = hw_up, deve valere 01
+dumpmem 0x82a4bc80 48     # pub + 0x2c = hw_up, must read 01
 
-# 3. la pipe, e verificare che il file sull'host CRESCA prima di procedere
+# 3. the pipe, and check that the file on the host GROWS before going on
 cat /proc/wl_diag | nc <HOST> 5555 &
 
-# 4. azzerare hw_up, e rileggerlo
+# 4. clear hw_up, and read it back
 setmem 0x82a4bcac 0 1
-dumpmem 0x82a4bcac 4      # il primo byte deve essere 00
+dumpmem 0x82a4bcac 4      # the first byte must be 00
 
-# 5. e via
+# 5. go
 wl up
 ```
 
-Sull'host: `wl-diag/decode-wl-diag.py < grezzo > cattura.decoded`.
+On the host: `wl-diag/decode-wl-diag.py < raw > capture.decoded`.
 
-Tenere **`wl1` giu'**: i suoi hook scrivono nella stessa fifo e le due sequenze si
-mescolano, e il confronto posizionale si regge tutto sul non averle mescolate.
+Keep **`wl1` down**: its hooks write into the same FIFO, the two sequences get
+interleaved, and the positional comparison rests entirely on not having them
+interleaved.
 
-La prova che l'init e' stato a freddo non e' il byte riletto, e'
-`PHY.WR addr=0x0072 val=0x2800` nel trace — l'apertura della tabella 10, con cui
-comincia il download statico. Se non c'e', l'init e' stato di nuovo parziale.
+The proof that the init was cold is not the byte read back, it is
+`PHY.WR addr=0x0072 val=0x2800` in the trace — the opening of table 10, with
+which the static download starts. If it is not there, the init was partial
+again.
 
-La catena di puntatori e' verificata leggendo la memoria del device, non dedotta da
-brcmsmac: `wl_if+0x8` e' il netdev e combacia col log, `pub` e `wlc` si puntano a
-vicenda a offset 0, e `hw_up` a `pub+0x2c` valeva 01 con l'interfaccia su e 00 dopo il
-`setmem`. Gli offset che avevo dedotto dal disassemblato di brcmsmac erano sbagliati.
+The pointer chain was checked by reading the device's memory, not deduced from
+brcmsmac: `wl_if+0x8` is the netdev and matches the log, `pub` and `wlc` point
+at each other at offset 0, and `hw_up` at `pub+0x2c` read 01 with the interface
+up and 00 after the `setmem`. The offsets deduced from the brcmsmac disassembly
+were wrong.
