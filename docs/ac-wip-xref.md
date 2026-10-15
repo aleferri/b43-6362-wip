@@ -3,8 +3,9 @@
 `aleferri/b43-ac-wip` ports the AC-PHY of the BCM4352/4360 to b43. It runs on
 the same DSL-3580L, where `wl1` is the BCM4352 and `wl0` is the BCM6362 core
 this repository is about, under the same `wl 6.30.102.7`. Everything below was
-checked against `b43-ac-wip` at `01e1329`; where that repository moves, these
-notes do not follow by themselves.
+checked against `b43-ac-wip` at `8c234e6`; where that repository moves, these
+notes do not follow by themselves. The data were copied at `01e1329`, and
+`router-data/` has not changed there since.
 
 ## Data, copied here
 
@@ -22,13 +23,16 @@ wl1 down for the same reason the other way round (`router-data/dsl3580l/README.m
 
 ## Same kernel base
 
-`b43-ac-wip` builds its patches on `v7.2`, this repository on `848acc8ffe1b`
-(`7.2-rc6`). The 62 files of `drivers/net/wireless/broadcom/b43/` are byte
-for byte the same at the two points.
+`b43-ac-wip` builds its patches on `v7.2`, this repository on `045958acaa75`
+(`7.3-rc7`). Of the 62 files of `drivers/net/wireless/broadcom/b43/` only
+`debugfs.c` differs between the two points (7.3 replaced its page allocations
+with `kzalloc()`), and neither port touches it. Upstream also added, in
+`include/linux/ssb/ssb.h`, one declaration at the end that `b43-ac-wip`'s copy
+of that header will have to take when it moves to 7.3.
 
 The two ports change two b43 files in common, `main.c` and `b43.h`. A
 three-way `git merge-file` with the pinned files as base merges both with no
-conflict (this port: +57 and +6 lines; `b43-ac-wip`: +1698 and +195). That is
+conflict (this port: +57 and +6 lines; `b43-ac-wip`: +1751 and +198). That is
 a textual result: the merged tree has not been built.
 
 In bcma no file is changed by both: this port touches `main.c`, `scan.c`,
@@ -55,6 +59,18 @@ In bcma no file is changed by both: this port touches `main.c`, `scan.c`,
 - **Microcode.** `docs/ucode42/` in `b43-ac-wip` maps the corerev 42 ucode; the
   core here is corerev 22 (`docs/firmware-rev22.md`). The method carries over,
   the maps do not.
+
+- **Hardware keys across a controller restart.** `b43-ac-wip`'s `ea8a6ce`
+  makes `b43_chip_reset()` copy the key slots before the core goes down and
+  write them back afterwards: a core init clears the key memory and mac80211 is
+  not told. It is not gated on the PHY type, so it holds for the N-PHY too, and
+  the N-PHY restarts its controller as well (on error, and on band changes on
+  dual-band boards).
+- **HT on 2.4 GHz.** `bba92f0` gives the AC-PHY a 2.4 GHz band of its own with
+  HT capabilities derived from the board's chains, 20 MHz only, A-MPDU on: the
+  per-device band copy in `struct b43_wl` and its setup in `b43_setup_bands()`
+  are the shape `docs/ht20-mimo-plan.md` M3 needs on the N-PHY, behind an N-PHY
+  test instead of the AC one.
 
 ## Tools
 
