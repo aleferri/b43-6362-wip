@@ -474,8 +474,12 @@ def displaced_or_absent(vops, matched, pool, idx):
     altrove, ed e' spostata; se non c'e', il port non la fa affatto, e quella e'
     una voce da portare. `pool` si consuma, quindi va passata nell'ordine del
     flusso e la somma delle colonne torna col totale non appaiato.
+
+    Ritorna il numero delle spostate e gli indici delle assenti, perche' delle
+    assenti serve anche sapere quali scrivono.
     """
-    disp = absent = 0
+    disp = 0
+    absent = []
     for i in idx:
         if i in matched or not comparable(vops[i]):
             continue
@@ -484,8 +488,13 @@ def displaced_or_absent(vops, matched, pool, idx):
             pool[op] -= 1
             disp += 1
         else:
-            absent += 1
+            absent.append(i)
     return disp, absent
+
+
+def writes(op):
+    """Se l'op cambia lo stato invece di leggerlo."""
+    return '.RD' not in op and '.RAMR' not in op
 
 
 def gaps_of(vops, matched):
@@ -943,11 +952,11 @@ def main():
             conf = len(idx) - nc
             disp, absent = displaced_or_absent(vops, matched, pool, idx)
             tot_disp += disp
-            tot_abs += absent
+            tot_abs += len(absent)
             print('  %-34s %-16s %6d %5d %3.0f%% %7d %8.0f%% %9d %8d'
                   % (name, '#%d-%d' % (rlo, rhi), len(idx), m,
                      100.0 * m / len(idx), nc,
-                     100.0 * m / conf if conf else 0.0, disp, absent))
+                     100.0 * m / conf if conf else 0.0, disp, len(absent)))
         print('  %-34s %-16s %6s %9s %7s %9s %9d %8d'
               % ('TOTALE', '', '', '', '', '', tot_disp, tot_abs))
         print('\n  spostate/assenti: delle op confrontabili NON appaiate, quante'
@@ -969,13 +978,21 @@ def main():
         gaps = gaps_of(vops, matched)
         pool2 = spare_pool(tops, blocks)
         rows = []
+        abs_wr = abs_rd = 0
         for lo, hi in gaps:
-            d, a = displaced_or_absent(vops, matched, pool2, range(lo, hi + 1))
+            d, absent = displaced_or_absent(vops, matched, pool2,
+                                            range(lo, hi + 1))
+            a = len(absent)
             if not (d or a):
                 continue
+            for i in absent:
+                if writes(vops[i]):
+                    abs_wr += 1
+                else:
+                    abs_rd += 1
             wr = sum(1 for i in range(lo, hi + 1)
                      if i not in matched and comparable(vops[i])
-                     and '.RD' not in vops[i] and '.RAMR' not in vops[i])
+                     and writes(vops[i]))
             rows.append((d + a, d, a, wr, hi - lo + 1, vops[lo].ep))
         rows.sort(reverse=True)
         print('\ntratti non appaiati piu\' grossi, per op confrontabili '
@@ -990,9 +1007,9 @@ def main():
         print('  leggerlo. E\' la colonna con cui ordinare il lavoro: un tratto'
               ' di sole letture')
         print('  vale nel conto e non nel driver. Su tutta la finestra le'
-              ' assenti sono 122 che')
-        print('  scrivono e 176 che leggono, quindi il tratto piu\' grosso non'
-              ' e\' il piu\' urgente.')
+              ' assenti sono %d che' % abs_wr)
+        print('  scrivono e %d che leggono, quindi il tratto piu\' grosso non'
+              ' e\' per forza il piu\' urgente.' % abs_rd)
         print('  Le op non confrontabili sono nel tratto ma non nelle colonne:'
               ' la differenza')
         print('  fra `conf.` e `op nel tratto` e\' object memory e stato del'

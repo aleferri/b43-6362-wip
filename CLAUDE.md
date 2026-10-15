@@ -176,11 +176,9 @@ second RSSI cal is at **zero**.
 
 The tool now also prints the **biggest unpaired stretches**, with how many of
 their ops write: the largest starts at #5004, 20 comparable ops absent out of 577
-in the stretch, and all 20 write. Its footer counts 122 absent ops that write and
-176 that read over the whole window — 298, against the 131 of the per-region
-table; the two counts are not reconciled here. Either way the biggest stretch is
-not necessarily the most urgent: the `scrivono` column is the one to order the
-work by.
+in the stretch, and all 20 write. Over the whole window the 131 absent ops are
+**74 that write and 57 that read**, so the biggest stretch is not necessarily the
+most urgent: the `scrivono` column is the one to order the work by.
 
 ## How the periodic cal holds together
 
