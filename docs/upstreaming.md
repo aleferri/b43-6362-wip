@@ -50,6 +50,13 @@ Three roads, in order of increasing cost for whoever has to get them accepted:
    `boardtype` and `boardflags` included, are the same
    (`router-data/tg789vac-v2/README.md`).
 
+Whatever the road, the image cannot go through `bcma_sprom_valid()` as it is:
+the DSL-3580L's `srdump`, the TG789vac's and OpenWrt's `bcm6362-sprom.bin` all
+carry CRC `0xb9` and none of them matches it (same README). Today that does not
+show, because the fallback callback fills `struct ssb_sprom` directly and
+nothing checks; a road that hands bcma raw words has to recompute the CRC or
+skip the check for this host, and say which.
+
 To be decided before writing code, because it changes where the parsing lives.
 
 ## Shared routines have to be gated, or it is a nack

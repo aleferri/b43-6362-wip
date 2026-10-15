@@ -82,7 +82,10 @@ The core on the SoC has no SPROM and no useful OTP: the parameters come from a
 reference blob plus per-board fixups. In the fork this goes through OpenWrt's
 `brcm,bcma-sprom` driver extended to match by phandle (`bcma-bus = <&wlan>`),
 with `brcm/bcm6362-sprom.bin` + 38 fixups derived by diffing against
-`wl srdump`. Mainline has no equivalent DT mechanism: it is the main open
+`wl srdump`. Recounted here, that image and the DSL-3580L's `srdump` differ in
+37 words, all power data (`router-data/tg789vac-v2/README.md`); the fixups
+themselves are in the fork's DTS, not in this repository, and were not
+compared. Mainline has no equivalent DT mechanism: it is the main open
 point, dealt with in `upstreaming.md`. The stock `wl` on another board with this
 core builds the image from a map file, `bcm6362_map.bin`
 (`router-data/tg789vac-v2/README.md`).
