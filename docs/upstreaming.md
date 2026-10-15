@@ -12,6 +12,17 @@ technical motivation can be verified on silicon. To do before sending:
   as supported;
 - check that the teardown is right on `rmmod bcma` with the d11 still bound,
   not only on the happy path.
+- say in the cover letter how the host driver meets the bcma GPIO software node
+  added in 7.3: for a `BCMA_HOSTTYPE_SOC` bus without a firmware node of its own,
+  `bcma_gpio_init()` registers a single global `bcma-gpio` node, on the
+  assumption of one SoC bus per system. The BCM6362 WLAN bus is such a bus, and
+  on that chip the only one. A core gets a firmware node only from a child of
+  the bus node at its address (`bcma_of_fill_device()`), and the binding's
+  example has no children, so with that DT the ChipCommon GPIO chip takes the
+  global node. Not run;
+- `0003` ends its example with the full `interrupt-map`; it was truncated in the
+  first version of the patch, so whatever was reviewed before has to be looked at
+  again.
 
 ## Not proposable as is: the SPROM
 

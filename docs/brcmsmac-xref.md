@@ -2,7 +2,7 @@
 
 Generated with `reverse-tools/brcmsmac_xref.py --tree ~/src/pin --format md`
 (the table below is the tool's output, unchanged, checked again at
-`848acc8ffe1b`). brcmsmac is in tree and GPL: it is the reference source for
+`848acc8ffe1b` and at `045958acaa75`). brcmsmac is in tree and GPL: it is the reference source for
 every hole in the inventory.
 
 | funzione brcmsmac | primo match | radiorev==8 | NREV_IS(rev,8) |

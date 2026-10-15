@@ -9,7 +9,7 @@ List generated with `reverse-tools/phy_type_audit.py --tree ~/src/pin`, which
 groups the occurrences of `B43_PHYTYPE_*` by construct and flags those where G
 appears and N does not. It skips the per-PHY files, where speaking of one type
 only is correct. The block below is the tool's output, unchanged, checked again
-at `848acc8ffe1b`; the line numbers are the pinned tree's, not `b43/`'s.
+at `848acc8ffe1b` and at `045958acaa75`; the line numbers are the pinned tree's, not `b43/`'s.
 
 57 costrutti che discriminano sul tipo di PHY, fuori dai file per-PHY
 20 citano G e non N

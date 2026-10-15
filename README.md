@@ -73,8 +73,8 @@ what `b43-ac-wip` has on the same core, see `docs/ac-wip-xref.md`.
 ## Reproducing the state
 
 Everything this repository says about the kernel is checked on the tree, not on
-the documentation, which ages. Reference: `torvalds/linux` @ `848acc8ffe1b`,
-3 Aug 2026, in `patches/regen-base`.
+the documentation, which ages. Reference: `torvalds/linux` @ `045958acaa75`,
+15 Oct 2026 (7.3-rc7), in `patches/regen-base`.
 
 ```sh
 ./scripts/fetch-upstream-state.sh ~/src/pin             # the pinned tree

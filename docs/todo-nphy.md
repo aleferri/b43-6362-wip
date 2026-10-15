@@ -215,7 +215,8 @@ positions. That is what `0011` does.
 
 ## 5. The formulas: what is really missing for rev 8
 
-Mainline's `phy_n.c` has 48 `/* TODO` at `848acc8ffe1b` (this file used to say
+Mainline's `phy_n.c` has 48 `/* TODO` at `848acc8ffe1b` and at `045958acaa75`
+(this file used to say
 25; recounted with `grep -c '/\* TODO'`), but that count misleads: most of them
 are in `phy->rev >= 19` branches, i.e. PHYs that do not concern us. **SALAME**:
 the "most" is the old count's reading, not redone on the 48. For

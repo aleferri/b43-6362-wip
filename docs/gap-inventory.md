@@ -1,6 +1,6 @@
 # Inventory of the holes
 
-Generated on `torvalds/linux` @ `848acc8ffe1b` with
+Generated on `torvalds/linux` @ `848acc8ffe1b`, identical at `045958acaa75`, with
 `reverse-tools/check_gaps.py --tree ~/src/pin --format md`; the table is the
 tool's output, unchanged, checked again on that tree. The "rev citate" column
 lists the values the function discriminates on; `assente` means the target

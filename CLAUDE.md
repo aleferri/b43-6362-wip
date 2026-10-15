@@ -27,7 +27,7 @@ cd test/unit && make KDIR=~/src/pin && make KDIR=~/src/pin warncheck
 ```
 
 The files the port changes live **whole** in `b43/` (and the bcma ones in
-`bcma/`, at their kernel paths), on the tree `848acc8ffe1b` that
+`bcma/`, at their kernel paths), on the tree `045958acaa75` (7.3-rc7) that
 `patches/regen-base` declares. The harness takes those from `b43/` and the rest
 (untouched headers, `cordic.c`) from `KDIR`, which therefore stays **clean**:
 nothing is applied to it. The script without a second argument fetches exactly

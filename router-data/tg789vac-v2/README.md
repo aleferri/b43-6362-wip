@@ -22,7 +22,7 @@ file: `srom/otp not programmed, using main memory mapped srom info`, then
 named after the 6362 on a 63168 board.
 
 Against `../dsl3580l/srdump.txt` the image differs in **38 of 220 words**, all
-of them power data (names from `include/linux/ssb/ssb_regs.h` at `848acc8ffe1b`):
+of them power data (names from `include/linux/ssb/ssb_regs.h` at `848acc8ffe1b`, unchanged at `045958acaa75`):
 
 | words | field |
 |---|---|

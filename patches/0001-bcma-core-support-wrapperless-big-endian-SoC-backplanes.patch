@@ -130,7 +130,7 @@ index 8474240..13295bd 100644
  			bcma_erom_skip_component(bus, eromptr);
  			return -ENXIO;
 diff --git a/include/linux/bcma/bcma.h b/include/linux/bcma/bcma.h
-index f02cb39..60d9787 100644
+index 17fc501..f4fe7fd 100644
 --- a/include/linux/bcma/bcma.h
 +++ b/include/linux/bcma/bcma.h
 @@ -362,6 +362,13 @@ struct bcma_bus {

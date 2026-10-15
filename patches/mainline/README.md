@@ -30,7 +30,8 @@ The last two are proved **three ways**: brcmsmac, the capture and b43 say
 different things, and the first two say the same thing. The capture lines are in
 the body of the patches.
 
-`reverse-tools/check_patch_gating.py --tree` on `848acc8ffe1b` flags **seven
+`reverse-tools/check_patch_gating.py --tree` on `045958acaa75` (as on
+`848acc8ffe1b`: the b43 files are the same) flags **seven
 points in five** of these patches, not two. Six are fine, and for the same
 reason — a transcription or C precedence typo does not go behind a revision
 gate, because it is not a feature of this hardware, and it is the exception
@@ -83,7 +84,7 @@ The defect does not show when they are applied in alphabetical order, as
 comes before `treat-`.
 
 `b43-fill-the-per-rate-transmit-power-offsets-on-n-phy` **applies** on
-`848acc8ffe1b`, and without fuzz — `git apply` allows none — but with offsets
+`045958acaa75`, and without fuzz — `git apply` allows none — but with offsets
 **-643, -643, -1027 and -1054**: it was generated on top of the series, which
 makes `phy_n.c` ~1000 lines longer. It has to be regenerated on the clean
 baseline before sending anyway, because four offsets of a thousand lines on a

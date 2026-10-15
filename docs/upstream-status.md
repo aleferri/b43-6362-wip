@@ -1,7 +1,25 @@
 # Upstream status
 
-Checked on the `torvalds/linux` tree @ `848acc8ffe1b` (3 Aug 2026), not on
-changelogs or wikis.
+Checked on the `torvalds/linux` tree @ `045958acaa75` (15 Oct 2026, 7.3-rc7),
+not on changelogs or wikis.
+
+## Since the previous pin, `848acc8ffe1b` (7.2-rc6)
+
+Nothing of N-PHY rev 8 was merged, and none of the twelve in `patches/mainline/`:
+`phy_n.c`, `tables_nphy.c`, `radio_2057.c` and the rest of the files in `b43/` are
+byte for byte the same, and the twelve apply as before. Near the port, upstream
+changed two things:
+
+- `b43/debugfs.c`: page allocations replaced by `kzalloc()`. Not touched by the
+  port.
+- **bcma GPIO**: `bcma_gpio_init()` now registers a software node, `bcma-gpio`,
+  as the GPIO chip's fwnode for a bus with `BCMA_HOSTTYPE_SOC` that has no
+  firmware node of its own, under the assumption that there is only one SoC bus
+  in the system; `bcma.h` gains `bcma_gpio_swnode`. The BCM6362 host driver
+  (`patches/0002`) registers its bus as `BCMA_HOSTTYPE_SOC`, so with
+  `CONFIG_BCMA_DRIVER_GPIO` its ChipCommon GPIO chip takes that node. On a
+  BCM6362 there is no other bcma SoC bus, so the assumption holds; it is a point
+  for the cover letter of the bcma series, see `upstreaming.md`.
 
 ## Merged (10 June 2026)
 
